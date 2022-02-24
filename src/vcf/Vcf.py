@@ -210,6 +210,27 @@ class Vcf():
         execute(cmd)
         return Vcf(output_filepath, self.workspace_dir)
 
+    def annotate(self, annotations_vcf, columns):
+        input_filepath = self.filepath
+        output_filepath = self.workspace_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-annot.vcf.bgz',
+        )
+        log_filepath = self.workspace_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools annotate'
+               f'      --annotations {annotations_vcf}'
+               f'      --columns {columns}'
+               f'      -O z'
+               f'      -o {output_filepath}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+
+        execute(cmd)
+        return Vcf(output_filepath, self.workspace_dir)
+
     def to_tsv(self, fields):
         input_filepath = self.filepath
         output_filepath = self.workspace_dir / self.filepath.name.replace(
@@ -218,7 +239,7 @@ class Vcf():
         )
 
         header = '\t'.join(fields)
-        header_pattern = '\t'.join([f'%{x}' for x in fields]) + '\n'
+        header_pattern = r'\t'.join([f'%{x}' for x in fields]) + '\n'
         # f'      -f "%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/AF\t%INFO/AN\t%INFO/AC\t%INFO/NS\n"'
 
         cmd = (''
@@ -234,7 +255,8 @@ class Vcf():
         return output_filepath
 
     @staticmethod
-    def concat(vcf_list, output_filepath, tmp_dir):
+    def concat(vcf_list_file, output_filepath, tmp_dir):
+
         output_filepath = Path(output_filepath)
         tmp_dir = Path(tmp_dir)
         log_filepath = tmp_dir / f'{output_filepath.name}.log'
@@ -242,13 +264,13 @@ class Vcf():
         cmd = (''
                f'bcftools concat'
                f'      --allow-overlaps'
-               f'      --file-list {vcf_list}'
+               f'      --file-list {vcf_list_file}'
                f'      -O z'
                f'      -o {output_filepath}'
                f'      &> {log_filepath}'
                '')
 
-        execute(cmd)
+        execute(cmd, debug=True)
         return Vcf(output_filepath, tmp_dir)
 
 
