@@ -1,1 +1,1 @@
-from .Vcf import Vcf
+from .vcf import Vcf
