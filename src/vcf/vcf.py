@@ -228,7 +228,7 @@ class Vcf():
                f'      &> {log_filepath}'
                '')
 
-        execute(cmd, debug=True)
+        execute(cmd)
         return Vcf(output_filepath, self.workspace_dir)
 
     def to_tsv(self, fields):
