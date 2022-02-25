@@ -238,6 +238,11 @@ class Vcf():
             '.tsv',
         )
 
+        output_gz_filepath = output_filepath.with_suffix('.tsv.gz')
+
+        if output_gz_filepath.exists():
+            output_gz_filepath.unlink()
+
         header = '\t'.join(fields)
         header_pattern = r'\t'.join([f'%{x}' for x in fields]) + '\n'
         # f'      -f "%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/AF\t%INFO/AN\t%INFO/AC\t%INFO/NS\n"'
@@ -252,8 +257,7 @@ class Vcf():
                '')
 
         execute(cmd)
-        output_filepath = output_filepath.with_suffix('.tsv.gz')
-        return output_filepath
+        return output_gz_filepath
 
     @staticmethod
     def concat(vcf_list_file, output_filepath, tmp_dir):
