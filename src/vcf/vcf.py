@@ -220,7 +220,7 @@ class Vcf():
 
         cmd = (''
                f'bcftools annotate'
-               f'      --annotations {annotations_vcf}'
+               f'      --annotations {annotations_vcf.filepath}'
                f'      --columns {columns}'
                f'      -O z'
                f'      -o {output_filepath}'
@@ -228,7 +228,7 @@ class Vcf():
                f'      &> {log_filepath}'
                '')
 
-        execute(cmd)
+        execute(cmd, debug=True)
         return Vcf(output_filepath, self.workspace_dir)
 
     def to_tsv(self, fields):
@@ -251,7 +251,8 @@ class Vcf():
                f'gzip {output_filepath}'
                '')
 
-        execute(cmd, debug=True)
+        execute(cmd)
+        output_filepath = output_filepath.with_suffix('.tsv.gz')
         return output_filepath
 
     @staticmethod
@@ -270,7 +271,7 @@ class Vcf():
                f'      &> {log_filepath}'
                '')
 
-        execute(cmd, debug=True)
+        execute(cmd)
         return Vcf(output_filepath, tmp_dir)
 
 
