@@ -3,12 +3,13 @@ from subprocess import Popen, PIPE, STDOUT
 
 
 class Vcf():
-    def __init__(self, filepath, workspace_dir):
+    def __init__(self, filepath, workspace_dir, n_threads=1):
         self.filepath = filepath
         self.workspace_dir = Path(workspace_dir)
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
+        self.n_threads = n_threads
 
-    def bgzip(self, n_threads=1):
+    def bgzip(self):
         input_filepath = self.filepath
         output_filepath = self.workspace_dir / self.filepath.name.replace(
             '.vcf.gz',
@@ -16,7 +17,7 @@ class Vcf():
         )
         cmd = (''
                f'gzip -dc {input_filepath}'
-               f' | bgzip -@ {n_threads} '
+               f' | bgzip -@ {self.n_threads} '
                f' > {output_filepath}'
                '')
 
@@ -37,6 +38,7 @@ class Vcf():
                f'bcftools reheader'
                f'    --fai {genome_index_filepath}'
                f'    -o {output_filepath}'
+               f'    -@ {self.n_threads}'
                f'    {input_filepath}'
                f'    &> {log_filepath}'
                '')
@@ -56,6 +58,7 @@ class Vcf():
                f'      -x INFO'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -76,6 +79,7 @@ class Vcf():
                f'   --force-samples '
                f'   -O z'
                f'   -o {output_filepath}'
+               f'   -@ {self.n_threads}'
                f'   {input_filepath}'
                f'   &> {log_filepath}'
                '')
@@ -101,6 +105,7 @@ class Vcf():
                    f'      -c w'
                    f'      -O z'
                    f'      -o {output_filepath}'
+                   f'      -@ {self.n_threads}'
                    f'      {input_filepath}'
                    f'      &> {log_filepath}'
                    '')
@@ -111,6 +116,7 @@ class Vcf():
                    f'      -c w'
                    f'      -O z'
                    f'      -o {output_filepath}'
+                   f'      -@ {self.n_threads}'
                    f'      {input_filepath}'
                    f'      &> {log_filepath}'
                    '')
@@ -130,6 +136,7 @@ class Vcf():
                f'bcftools +fill-tags'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      -- -t AC,AN,AF,NS'
                f'      &> {log_filepath}'
@@ -151,6 +158,7 @@ class Vcf():
                f'      -G'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -171,8 +179,9 @@ class Vcf():
                f'bcftools sort'
                f'      -O z'
                f'      -o {output_filepath}'
-               f'      {input_filepath}'
+               f'      -@ {self.n_threads}'
                f'      --temp-dir {tmp_dir}'
+               f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
 
@@ -184,7 +193,9 @@ class Vcf():
         log_filepath = self.workspace_dir / f'{input_filepath.name}.csi.log'
 
         cmd = (''
-               f'bcftools index {input_filepath}'
+               f'bcftools index'
+               f'      -@ {self.n_threads}'
+               f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
 
@@ -203,6 +214,7 @@ class Vcf():
                f'      -r "{chrom}:{start}-{stop}"'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -224,6 +236,7 @@ class Vcf():
                f'      --columns {columns}'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -251,6 +264,7 @@ class Vcf():
                f'echo "{header}" > {output_filepath};\n'
                f'bcftools query'
                f'      -f "{header_pattern}"'
+               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      >> {output_filepath};'
                f'gzip {output_filepath}'
@@ -259,8 +273,17 @@ class Vcf():
         execute(cmd)
         return output_gz_filepath
 
+    def __str__(self):
+        return self.filepath.__str__()
+
     @staticmethod
-    def concat(vcf_list_file, output_filepath, tmp_dir):
+    def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
+
+        vcf_list_file = tmp_dir / 'vcfs.tsv'
+
+        with vcf_list_file.open('wt') as fd:
+            for vcf in vcfs:
+                print(vcf, file=fd)
 
         output_filepath = Path(output_filepath)
         tmp_dir = Path(tmp_dir)
@@ -272,6 +295,7 @@ class Vcf():
                f'      --file-list {vcf_list_file}'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      -@ {n_threads}'
                f'      &> {log_filepath}'
                '')
 
