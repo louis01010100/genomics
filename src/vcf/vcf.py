@@ -28,7 +28,6 @@ class Vcf():
                f'bcftools reheader'
                f'    --fai {genome_index_filepath}'
                f'    -o {output_filepath}'
-               f'    -@ {self.n_threads}'
                f'    {input_filepath}'
                f'    &> {log_filepath}'
                '')
@@ -48,7 +47,7 @@ class Vcf():
                f'      -x INFO'
                f'      -O z'
                f'      -o {output_filepath}'
-               f'      -@ {self.n_threads}'
+               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -69,6 +68,7 @@ class Vcf():
                f'   --force-samples '
                f'   -O z'
                f'   -o {output_filepath}'
+               f'   --threads {self.n_threads}'
                f'   {input_filepath}'
                f'   &> {log_filepath}'
                '')
@@ -94,7 +94,7 @@ class Vcf():
                    f'      -c w'
                    f'      -O z'
                    f'      -o {output_filepath}'
-                   f'      -@ {self.n_threads}'
+                   f'      --threads {self.n_threads}'
                    f'      {input_filepath}'
                    f'      &> {log_filepath}'
                    '')
@@ -105,7 +105,7 @@ class Vcf():
                    f'      -c w'
                    f'      -O z'
                    f'      -o {output_filepath}'
-                   f'      -@ {self.n_threads}'
+                   f'      --threads {self.n_threads}'
                    f'      {input_filepath}'
                    f'      &> {log_filepath}'
                    '')
@@ -125,7 +125,7 @@ class Vcf():
                f'bcftools +fill-tags'
                f'      -O z'
                f'      -o {output_filepath}'
-               f'      -@ {self.n_threads}'
+               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      -- -t AC,AN,AF,NS'
                f'      &> {log_filepath}'
@@ -147,6 +147,7 @@ class Vcf():
                f'      -G'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -168,6 +169,7 @@ class Vcf():
                f'      -O z'
                f'      -o {output_filepath}'
                f'      --temp-dir {tmp_dir}'
+               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -200,6 +202,7 @@ class Vcf():
                f'      -r "{chrom}:{start}-{stop}"'
                f'      -O z'
                f'      -o {output_filepath}'
+               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -221,7 +224,7 @@ class Vcf():
                f'      --columns {columns}'
                f'      -O z'
                f'      -o {output_filepath}'
-               f'      -@ {self.n_threads}'
+               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -298,24 +301,31 @@ def bgzip(input_filepath, tmp_dir, n_threads=1):
     if input_filepath.name.endswith('.vcf'):
         output_filepath = tmp_dir / input_filepath.name.replace(
             '.vcf', '.vcf.bgz')
+        log_filepath = tmp_dir / f'{output_filepath.name}.log'
         cmd = (''
                f' bgzip -c -@ {n_threads} {input_filepath}'
                f' > {output_filepath}'
+               f' 2> {log_filepath}'
                '')
         execute(cmd)
 
     elif input_filepath.name.endswith('.vcf.gz'):
         output_filepath = tmp_dir / input_filepath.name.replace(
             '.vcf.gz', '.vcf.bgz')
+        log_filepath = tmp_dir / f'{output_filepath.name}.log'
         cmd = (''
                f'gzip -dc {input_filepath}'
                f' | bgzip -@ {n_threads} '
                f' > {output_filepath}'
+               f' 2> {log_filepath}'
                '')
         execute(cmd)
     elif input_filepath.name.endswith('.vcf.bgz'):
+        print(input_filepath)
         output_filepath = tmp_dir / input_filepath.name
-        shutil.copy2(input_filepath, output_filepath)
+
+        if not output_filepath.exists():
+            shutil.copy2(input_filepath, output_filepath)
     else:
         raise Exception(input_filepath)
     return output_filepath
