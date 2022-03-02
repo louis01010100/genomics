@@ -1,5 +1,6 @@
 from pathlib import Path
 from subprocess import Popen, PIPE, STDOUT
+import shutil
 import gzip
 
 
@@ -10,7 +11,7 @@ class Vcf():
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
         self.filepath = bgzip(filepath, tmp_dir, n_threads)
-        index(self.filepath, tmp_dir, n_threads)
+        index(self.filepath, tmp_dir)
         self.n_threads = n_threads
         self.tmp_dir = tmp_dir
 
@@ -32,7 +33,7 @@ class Vcf():
                f'    &> {log_filepath}'
                '')
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def drop_info(self):
         input_filepath = self.filepath
@@ -52,7 +53,7 @@ class Vcf():
                f'      &> {log_filepath}'
                '')
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def subset_samples(self, sample_file):
         input_filepath = self.filepath
@@ -68,13 +69,12 @@ class Vcf():
                f'   --force-samples '
                f'   -O z'
                f'   -o {output_filepath}'
-               f'   -@ {self.n_threads}'
                f'   {input_filepath}'
                f'   &> {log_filepath}'
                '')
 
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def normalize(self, genome_filepath, atomize=False):
 
@@ -111,7 +111,7 @@ class Vcf():
                    '')
 
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def fill_af(self):
         input_filepath = self.filepath
@@ -132,7 +132,7 @@ class Vcf():
                '')
 
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def drop_gt(self):
         input_filepath = self.filepath
@@ -147,13 +147,12 @@ class Vcf():
                f'      -G'
                f'      -O z'
                f'      -o {output_filepath}'
-               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
 
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def sort(self):
         input_filepath = self.filepath
@@ -174,7 +173,7 @@ class Vcf():
                '')
 
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def subset_variants(self, start, stop, chrom=None):
         def get_chrom(self):
@@ -186,6 +185,8 @@ class Vcf():
 
         if not chrom:
             chrom = get_chrom(self)
+
+        print(chrom)
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -199,13 +200,12 @@ class Vcf():
                f'      -r "{chrom}:{start}-{stop}"'
                f'      -O z'
                f'      -o {output_filepath}'
-               f'      -@ {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
 
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def annotate(self, annotations_vcf, columns):
         input_filepath = self.filepath
@@ -227,14 +227,17 @@ class Vcf():
                '')
 
         execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def query(self, query_str):
+    def to_tsv(self, query_str):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
             '.tsv',
         )
+
+        column_header = query_str.strip('[]\n').replace(' ', '\t').replace(
+            '%', '')
 
         output_gz_filepath = output_filepath.with_suffix('.tsv.gz')
 
@@ -242,11 +245,11 @@ class Vcf():
             output_gz_filepath.unlink()
 
         cmd = (''
+               f'echo "{column_header}" > {output_filepath};'
                f'bcftools query'
-               f'      -H'
                f'      -f "{query_str}"'
                f'      {input_filepath}'
-               f'      > {output_filepath};'
+               f'      >> {output_filepath};'
                f'gzip {output_filepath}'
                '')
 
@@ -296,7 +299,7 @@ def bgzip(input_filepath, tmp_dir, n_threads=1):
         output_filepath = tmp_dir / input_filepath.name.replace(
             '.vcf', '.vcf.bgz')
         cmd = (''
-               f' bgzip -dc -@ {n_threads} {input_filepath}'
+               f' bgzip -c -@ {n_threads} {input_filepath}'
                f' > {output_filepath}'
                '')
         execute(cmd)
@@ -311,7 +314,8 @@ def bgzip(input_filepath, tmp_dir, n_threads=1):
                '')
         execute(cmd)
     elif input_filepath.name.endswith('.vcf.bgz'):
-        output_filepath = input_filepath
+        output_filepath = tmp_dir / input_filepath.name
+        shutil.copy2(input_filepath, output_filepath)
     else:
         raise Exception(input_filepath)
     return output_filepath
