@@ -1,4 +1,5 @@
 from pathlib import Path
+import pandas as pd
 from subprocess import Popen, PIPE, STDOUT
 import shutil
 import gzip
@@ -14,6 +15,15 @@ class Vcf():
         index(self.filepath, tmp_dir)
         self.n_threads = n_threads
         self.tmp_dir = tmp_dir
+
+        # self._chroms = _get_chroms(self.filepath)
+        # self._samples = get_samples(self.filepath)
+        # self._males, self._females = get_genders(gender_filepath,
+        #                                          self._samples)
+
+    @property
+    def samples(self):
+        return self._samples
 
     def fix_header(self, genome_index_filepath):
 
@@ -113,7 +123,8 @@ class Vcf():
         execute(cmd)
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def fill_af(self):
+    def fill_tags(self, tags=['AC', 'AN', 'AF', 'NS']):
+
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -121,13 +132,15 @@ class Vcf():
         )
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
 
+        tags_str = ','.join(tags)
+
         cmd = (''
                f'bcftools +fill-tags'
                f'      -O z'
                f'      -o {output_filepath}'
                f'      --threads {self.n_threads}'
                f'      {input_filepath}'
-               f'      -- -t AC,AN,AF,NS'
+               f'      -- -t {tags_str}'
                f'      &> {log_filepath}'
                '')
 
@@ -169,7 +182,6 @@ class Vcf():
                f'      -O z'
                f'      -o {output_filepath}'
                f'      --temp-dir {tmp_dir}'
-               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -177,18 +189,7 @@ class Vcf():
         execute(cmd)
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset_variants(self, start, stop, chrom=None):
-        def get_chrom(self):
-            with gzip.open(self.filepath, 'rt') as fd:
-                for line in fd:
-                    if line.startswith('#'):
-                        continue
-                    return line.split('\t', maxsplit=1)[0]
-
-        if not chrom:
-            chrom = get_chrom(self)
-
-        print(chrom)
+    def subset_variants(self, chrom, start, stop):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -263,12 +264,61 @@ class Vcf():
         return self.filepath.__str__()
 
     def __len__(self):
-        input_filepath = self.filepath
+        input_filepath = f'{self.filepath}.csi'
 
         cmd = f'bcftools index -n {input_filepath}'
 
         stdout, stderr = execute(cmd, pipe=True)
         return int(stdout.strip())
+
+
+# def _get_genders(gender_filepath, samples):
+#     if gender_filepath:
+#         genders = pd.read_csv(
+#             gender_filepath,
+#             header=0,
+#             sep='\t',
+#             dtype='str',
+#         )
+#
+#         males = set(genders[lambda x: x['gender'] == 'MALE']) & samples
+#         females = set(genders[lambda x: x['gender'] == 'FEMALE']) & samples
+#     else:
+#         males = None
+#         females = None
+#
+#     return males, females
+#
+#
+# def _get_samples(filepath):
+#     cmd = f'bcftools query -l {filepath}'
+#     stdout, stderr = execute(cmd, pipe=True)
+#
+#     return set(
+#         pd.read_csv(
+#             stdout,
+#             names=['sample_id'],
+#             sep='\t',
+#             dtype='str',
+#         )['sample_id'])
+
+# def _get_chroms(filepath):
+#     input_filepath = f'{filepath}.csi'
+#
+#     cmd = f'bcftools index --stats {input_filepath}'
+#
+#     stdout, stderr = execute(cmd, pipe=True)
+#     df = pd.read_csv(
+#         stdout,
+#         names=['chrom', 'length', 'n_records'],
+#         sep='\t',
+#         dtype={
+#             'chrom': 'str',
+#             'lenght': 'int64',
+#             'n_records': 'int64',
+#         },
+#     )
+#     return list(df['chrom'])
 
 
 def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
@@ -346,17 +396,18 @@ def index(input_filepath, tmp_dir):
 def execute(cmd, pipe=False, debug=False):
     if debug:
         print(cmd)
-
-    with Popen(cmd, shell=True, text=True, stdout=PIPE,
-               stderr=STDOUT) as proc:
-        if pipe:
+    if pipe:
+        with Popen(cmd, shell=True, text=True, stdout=PIPE,
+                   stderr=PIPE) as proc:
             stdout_data, stderr_data = proc.communicate()
-        else:
+
+            return stdout_data, stderr_data
+    else:
+
+        with Popen(cmd, shell=True, text=True, stdout=PIPE,
+                   stderr=STDOUT) as proc:
             for line in proc.stdout:
                 print(line, end='')
 
-        if proc.returncode:
-            raise Exception(cmd)
-
-        if pipe:
-            return stdout_data, stderr_data
+            if proc.returncode:
+                raise Exception(cmd)
