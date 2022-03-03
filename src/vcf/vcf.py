@@ -162,7 +162,7 @@ class Vcf():
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
-            '-af.vcf.bgz',
+            '-tag.vcf.bgz',
         )
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
 
