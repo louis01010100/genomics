@@ -10,20 +10,54 @@ class Vcf():
 
         tmp_dir = Path(tmp_dir)
         tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        self.filepath = bgzip(filepath, tmp_dir, n_threads)
-        index(self.filepath, tmp_dir)
+        self.filepath = filepath
         self.n_threads = n_threads
         self.tmp_dir = tmp_dir
 
-        # self._chroms = _get_chroms(self.filepath)
-        # self._samples = get_samples(self.filepath)
-        # self._males, self._females = get_genders(gender_filepath,
-        #                                          self._samples)
+    def bgzip(self):
 
-    @property
-    def samples(self):
-        return self._samples
+        if self.filepath.name.endswith('.vcf'):
+            output_filepath = self.tmp_dir / self.filepath.name.replace(
+                '.vcf', '.vcf.bgz')
+            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+            cmd = (''
+                   f' bgzip -c -@ {self.n_threads} {self.filepath}'
+                   f' > {output_filepath}'
+                   f' 2> {log_filepath}'
+                   '')
+            execute(cmd)
+
+        elif self.filepath.name.endswith('.vcf.gz'):
+            output_filepath = self.tmp_dir / self.filepath.name.replace(
+                '.vcf.gz', '.vcf.bgz')
+            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+            cmd = (''
+                   f'gzip -dc {self.filepath}'
+                   f' | bgzip -@ {self.n_threads} '
+                   f' > {output_filepath}'
+                   f' 2> {log_filepath}'
+                   '')
+            execute(cmd)
+        elif self.filepath.name.endswith('.vcf.bgz'):
+            output_filepath = self.tmp_dir / self.filepath.name
+
+            if not output_filepath.exists():
+                shutil.copy2(self.filepath, output_filepath)
+        else:
+            raise Exception(self.filepath)
+
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def index(self):
+        log_filepath = self.tmp_dir / f'{self.filepath.name}.csi.log'
+
+        cmd = (''
+               f'bcftools index'
+               f'      {self.filepath}'
+               f'      &> {log_filepath}'
+               '')
+
+        execute(cmd)
 
     def fix_header(self, genome_index_filepath):
 
@@ -272,55 +306,6 @@ class Vcf():
         return int(stdout.strip())
 
 
-# def _get_genders(gender_filepath, samples):
-#     if gender_filepath:
-#         genders = pd.read_csv(
-#             gender_filepath,
-#             header=0,
-#             sep='\t',
-#             dtype='str',
-#         )
-#
-#         males = set(genders[lambda x: x['gender'] == 'MALE']) & samples
-#         females = set(genders[lambda x: x['gender'] == 'FEMALE']) & samples
-#     else:
-#         males = None
-#         females = None
-#
-#     return males, females
-#
-#
-# def _get_samples(filepath):
-#     cmd = f'bcftools query -l {filepath}'
-#     stdout, stderr = execute(cmd, pipe=True)
-#
-#     return set(
-#         pd.read_csv(
-#             stdout,
-#             names=['sample_id'],
-#             sep='\t',
-#             dtype='str',
-#         )['sample_id'])
-
-# def _get_chroms(filepath):
-#     input_filepath = f'{filepath}.csi'
-#
-#     cmd = f'bcftools index --stats {input_filepath}'
-#
-#     stdout, stderr = execute(cmd, pipe=True)
-#     df = pd.read_csv(
-#         stdout,
-#         names=['chrom', 'length', 'n_records'],
-#         sep='\t',
-#         dtype={
-#             'chrom': 'str',
-#             'lenght': 'int64',
-#             'n_records': 'int64',
-#         },
-#     )
-#     return list(df['chrom'])
-
-
 def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
 
     vcf_list_file = tmp_dir / 'vcfs.tsv'
@@ -339,7 +324,7 @@ def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
            f'      --file-list {vcf_list_file}'
            f'      -O z'
            f'      -o {output_filepath}'
-           f'      -@ {n_threads}'
+           f'      --threads {n_threads}'
            f'      &> {log_filepath}'
            '')
 
@@ -347,50 +332,49 @@ def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
     return Vcf(output_filepath, tmp_dir)
 
 
-def bgzip(input_filepath, tmp_dir, n_threads=1):
-    if input_filepath.name.endswith('.vcf'):
-        output_filepath = tmp_dir / input_filepath.name.replace(
-            '.vcf', '.vcf.bgz')
-        log_filepath = tmp_dir / f'{output_filepath.name}.log'
-        cmd = (''
-               f' bgzip -c -@ {n_threads} {input_filepath}'
-               f' > {output_filepath}'
-               f' 2> {log_filepath}'
-               '')
-        execute(cmd)
-
-    elif input_filepath.name.endswith('.vcf.gz'):
-        output_filepath = tmp_dir / input_filepath.name.replace(
-            '.vcf.gz', '.vcf.bgz')
-        log_filepath = tmp_dir / f'{output_filepath.name}.log'
-        cmd = (''
-               f'gzip -dc {input_filepath}'
-               f' | bgzip -@ {n_threads} '
-               f' > {output_filepath}'
-               f' 2> {log_filepath}'
-               '')
-        execute(cmd)
-    elif input_filepath.name.endswith('.vcf.bgz'):
-        print(input_filepath)
-        output_filepath = tmp_dir / input_filepath.name
-
-        if not output_filepath.exists():
-            shutil.copy2(input_filepath, output_filepath)
-    else:
-        raise Exception(input_filepath)
-    return output_filepath
-
-
-def index(input_filepath, tmp_dir):
-    log_filepath = tmp_dir / f'{input_filepath.name}.csi.log'
-
-    cmd = (''
-           f'bcftools index'
-           f'      {input_filepath}'
-           f'      &> {log_filepath}'
-           '')
-
-    execute(cmd)
+# def bgzip(input_filepath, tmp_dir, n_threads=1):
+#     if input_filepath.name.endswith('.vcf'):
+#         output_filepath = tmp_dir / input_filepath.name.replace(
+#             '.vcf', '.vcf.bgz')
+#         log_filepath = tmp_dir / f'{output_filepath.name}.log'
+#         cmd = (''
+#                f' bgzip -c -@ {n_threads} {input_filepath}'
+#                f' > {output_filepath}'
+#                f' 2> {log_filepath}'
+#                '')
+#         execute(cmd)
+#
+#     elif input_filepath.name.endswith('.vcf.gz'):
+#         output_filepath = tmp_dir / input_filepath.name.replace(
+#             '.vcf.gz', '.vcf.bgz')
+#         log_filepath = tmp_dir / f'{output_filepath.name}.log'
+#         cmd = (''
+#                f'gzip -dc {input_filepath}'
+#                f' | bgzip -@ {n_threads} '
+#                f' > {output_filepath}'
+#                f' 2> {log_filepath}'
+#                '')
+#         execute(cmd)
+#     elif input_filepath.name.endswith('.vcf.bgz'):
+#         output_filepath = tmp_dir / input_filepath.name
+#
+#         if not output_filepath.exists():
+#             shutil.copy2(input_filepath, output_filepath)
+#     else:
+#         raise Exception(input_filepath)
+#     return output_filepath
+#
+#
+# def index(input_filepath, tmp_dir):
+#     log_filepath = tmp_dir / f'{input_filepath.name}.csi.log'
+#
+#     cmd = (''
+#            f'bcftools index'
+#            f'      {input_filepath}'
+#            f'      &> {log_filepath}'
+#            '')
+#
+#     execute(cmd)
 
 
 def execute(cmd, pipe=False, debug=False):
