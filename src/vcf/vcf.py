@@ -14,6 +14,19 @@ class Vcf():
         self.n_threads = n_threads
         self.tmp_dir = tmp_dir
 
+    def to_df(self):
+        with gzip.open(self.filepath, 'rt') as fd:
+            for line in fd:
+                if line.startswith('##'):
+                    continue
+                if line.startswith('#'):
+                    names = line.strip()[1:].split('\t')
+                    break
+                assert False
+
+            df = pd.read_csv(fd, names=names, sep='\t', dtype='str')
+        return df
+
     def bgzip(self):
 
         if self.filepath.name.endswith('.vcf'):
@@ -330,51 +343,6 @@ def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
 
     execute(cmd)
     return Vcf(output_filepath, tmp_dir)
-
-
-# def bgzip(input_filepath, tmp_dir, n_threads=1):
-#     if input_filepath.name.endswith('.vcf'):
-#         output_filepath = tmp_dir / input_filepath.name.replace(
-#             '.vcf', '.vcf.bgz')
-#         log_filepath = tmp_dir / f'{output_filepath.name}.log'
-#         cmd = (''
-#                f' bgzip -c -@ {n_threads} {input_filepath}'
-#                f' > {output_filepath}'
-#                f' 2> {log_filepath}'
-#                '')
-#         execute(cmd)
-#
-#     elif input_filepath.name.endswith('.vcf.gz'):
-#         output_filepath = tmp_dir / input_filepath.name.replace(
-#             '.vcf.gz', '.vcf.bgz')
-#         log_filepath = tmp_dir / f'{output_filepath.name}.log'
-#         cmd = (''
-#                f'gzip -dc {input_filepath}'
-#                f' | bgzip -@ {n_threads} '
-#                f' > {output_filepath}'
-#                f' 2> {log_filepath}'
-#                '')
-#         execute(cmd)
-#     elif input_filepath.name.endswith('.vcf.bgz'):
-#         output_filepath = tmp_dir / input_filepath.name
-#
-#         if not output_filepath.exists():
-#             shutil.copy2(input_filepath, output_filepath)
-#     else:
-#         raise Exception(input_filepath)
-#     return output_filepath
-#
-#
-# def index(input_filepath, tmp_dir):
-#     log_filepath = tmp_dir / f'{input_filepath.name}.csi.log'
-#
-#     cmd = (''
-#            f'bcftools index'
-#            f'      {input_filepath}'
-#            f'      &> {log_filepath}'
-#            '')
-#
-#     execute(cmd)
 
 
 def execute(cmd, pipe=False, debug=False):
