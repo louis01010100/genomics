@@ -2,7 +2,6 @@
 import pandas as pd
 from vcf import Vcf
 from pathlib import Path
-import shutil
 
 
 def test_bgzip(tmp_path):
