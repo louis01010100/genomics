@@ -154,7 +154,9 @@ class Vcf():
 
                 print(line, file=ofd)
 
-        self.bgzip()
+        vcf = Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+        return vcf.bgzip()
 
     def normalize(self, genome_filepath, atomize=False):
 
