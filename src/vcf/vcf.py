@@ -139,8 +139,8 @@ class Vcf():
             '.vcf.bgz',
             '-uppercase.vcf',
         )
-        with gzip(input_filepath,
-                  'rt') as ifd, output_filepath.open('wt') as ofd:
+        with gzip.open(input_filepath,
+                       'rt') as ifd, output_filepath.open('wt') as ofd:
             for line in ifd:
                 line = line.strip()
                 if line.startswith('#'):
