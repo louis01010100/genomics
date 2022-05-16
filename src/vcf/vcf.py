@@ -133,6 +133,29 @@ class Vcf():
         execute(cmd)
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
+    def uppercase(self):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-uppercase.vcf',
+        )
+        with gzip(input_filepath,
+                  'rt') as ifd, output_filepath.open('wt') as ofd:
+            for line in ifd:
+                line = line.strip()
+                if line.startswith('#'):
+                    print(line, file=ofd)
+                    continue
+                tokens = line.split('\t')
+                tokens[3] = tokens[3].upper()
+                tokens[4] = tokens[4].upper()
+
+                line = '\t'.join(tokens)
+
+                print(line, file=ofd)
+
+        self.bgzip()
+
     def normalize(self, genome_filepath, atomize=False):
 
         input_filepath = self.filepath
