@@ -4,6 +4,24 @@ from vcf import Vcf
 from pathlib import Path
 
 
+def test_meta(tmp_path):
+    vcf_file = Path(__file__).parents[0] / 'fixture/sample.vcf'
+    vcf = Vcf(vcf_file, tmp_path)
+    expected = (
+        '##fileformat=VCFv4.1\n'
+        '##FILTER=<ID=PASS,Description="All filters passed">\n'
+        '##contig=<ID=chr21>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="Phased Genotype">')
+    assert expected == vcf.meta
+
+
+def test_header(tmp_path):
+    vcf_file = Path(__file__).parents[0] / 'fixture/header.vcf'
+    vcf = Vcf(vcf_file, tmp_path)
+    expected = '#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	HG00403	HG00404	HG00405'
+    assert expected == vcf.header
+
+
 def test_bgzip(tmp_path):
     vcf_file = Path(__file__).parents[0] / 'fixture/sample.vcf'
     vcf = Vcf(vcf_file, tmp_path)

@@ -10,9 +10,21 @@ class Vcf():
 
         tmp_dir = Path(tmp_dir)
         tmp_dir.mkdir(parents=True, exist_ok=True)
-        self.filepath = filepath
+        self.filepath = Path(filepath)
         self.n_threads = n_threads
-        self.tmp_dir = tmp_dir
+        self.tmp_dir = Path(tmp_dir)
+
+    @property
+    def meta(self):
+        if not getattr(self, '_meta', None):
+            self._meta = _load_meta(self.filepath)
+        return self._meta
+
+    @property
+    def header(self):
+        if not getattr(self, '_header', None):
+            self._header = _load_header(self.filepath)
+        return self._header
 
     def to_df(self):
         with gzip.open(self.filepath, 'rt') as fd:
@@ -111,6 +123,67 @@ class Vcf():
         execute(cmd)
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
+    def subset(self, expression, op_name):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            f'-{op_name}.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools view'
+               f'   --include "{expression}"'
+               f'   -O z'
+               f'   -o {output_filepath}'
+               f'   --threads {self.n_threads}'
+               f'   {input_filepath}'
+               f'   &> {log_filepath}'
+               '')
+
+        execute(cmd)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def subset_variants(self, chrom, start=None, stop=None):
+
+        input_filepath = self.filepath
+        if start and stop:
+
+            output_filepath = self.tmp_dir / self.filepath.name.replace(
+                '.vcf.bgz',
+                f'-{chrom}_{start}_{stop}.vcf.bgz',
+            )
+            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+            cmd = (''
+                   f'bcftools view'
+                   f'      -r "{chrom}:{start}-{stop}"'
+                   f'      -O z'
+                   f'      -o {output_filepath}'
+                   f'      --threads {self.n_threads}'
+                   f'      {input_filepath}'
+                   f'      &> {log_filepath}'
+                   '')
+        else:
+            output_filepath = self.tmp_dir / self.filepath.name.replace(
+                '.vcf.bgz',
+                f'-{chrom}.vcf.bgz',
+            )
+            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+            cmd = (''
+                   f'bcftools view'
+                   f'      -r "{chrom}"'
+                   f'      -O z'
+                   f'      -o {output_filepath}'
+                   f'      --threads {self.n_threads}'
+                   f'      {input_filepath}'
+                   f'      &> {log_filepath}'
+                   '')
+
+        execute(cmd)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
     def subset_samples(self, sample_file):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -158,7 +231,10 @@ class Vcf():
 
         return vcf.bgzip()
 
-    def normalize(self, genome_filepath, atomize=False):
+    def normalize(self,
+                  genome_filepath,
+                  atomize=False,
+                  split_multiallelics=False):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -167,32 +243,25 @@ class Vcf():
         )
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
 
-        if atomize:
+        cmd = (''
+               f'bcftools norm'
+               f'      -f {genome_filepath}'
+               f'      -c s'
+               f'      -O z'
+               f'      -o {output_filepath}'
+               f'      --threads {self.n_threads}'
+               '')
 
-            cmd = (''
-                   f'bcftools norm'
-                   f'      -a'
-                   f'      -f {genome_filepath}'
-                   f'      -c w'
-                   f'      -O z'
-                   f'      -o {output_filepath}'
-                   f'      --threads {self.n_threads}'
-                   f'      {input_filepath}'
-                   f'      &> {log_filepath}'
-                   '')
-        else:
-            cmd = (''
-                   f'bcftools norm'
-                   f'      -f {genome_filepath}'
-                   f'      -c w'
-                   f'      -O z'
-                   f'      -o {output_filepath}'
-                   f'      --threads {self.n_threads}'
-                   f'      {input_filepath}'
-                   f'      &> {log_filepath}'
-                   '')
+        if atomize:
+            cmd += '      -a'
+        if split_multiallelics:
+            cmd += '      -m -'
+
+        cmd += f'      {input_filepath}'
+        cmd += f'      &> {log_filepath}'
 
         execute(cmd)
+
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def fill_tags(self, tags=['AC', 'AN', 'AF', 'NS']):
@@ -254,28 +323,6 @@ class Vcf():
                f'      -O z'
                f'      -o {output_filepath}'
                f'      --temp-dir {tmp_dir}'
-               f'      {input_filepath}'
-               f'      &> {log_filepath}'
-               '')
-
-        execute(cmd)
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
-
-    def subset_variants(self, chrom, start, stop):
-
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
-            '.vcf.bgz',
-            f'-{chrom}_{start}_{stop}.vcf.bgz',
-        )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
-
-        cmd = (''
-               f'bcftools view'
-               f'      -r "{chrom}:{start}-{stop}"'
-               f'      -O z'
-               f'      -o {output_filepath}'
-               f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
@@ -368,6 +415,55 @@ def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
 
     execute(cmd)
     return Vcf(output_filepath, tmp_dir)
+
+
+def _load_header(vcf):
+    def fetch_header(fd):
+        header = None
+        for line in fd:
+            line = line.strip()
+            if line.startswith('##'):
+                continue
+            elif line.startswith('#'):
+                header = line
+                break
+            else:
+                break
+        return header
+
+    if _is_gzipped(vcf):
+        with gzip.open(vcf, 'rt') as fd:
+            return fetch_header(fd)
+    else:
+        with open(vcf, 'rt') as fd:
+            return fetch_header(fd)
+
+
+def _is_gzipped(filepath):
+    with open(filepath, 'rb') as fd:
+        magic_number = fd.read(2)
+        if magic_number == b'\x1f\x8b':
+            return True
+        return False
+
+
+def _load_meta(vcf):
+    def fetch_meta(fd):
+        meta = []
+        for line in fd:
+            line = line.strip()
+            if line.startswith('##'):
+                meta.append(line)
+                continue
+            break
+        return '\n'.join(meta)
+
+    if _is_gzipped(vcf):
+        with gzip.open(vcf, 'rt') as fd:
+            return fetch_meta(fd)
+    else:
+        with open(vcf, 'rt') as fd:
+            return fetch_meta(fd)
 
 
 def execute(cmd, pipe=False, debug=False):
