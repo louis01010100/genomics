@@ -231,10 +231,12 @@ class Vcf():
 
         return vcf.bgzip()
 
-    def normalize(self,
-                  genome_filepath,
-                  atomize=False,
-                  split_multiallelics=False):
+    def normalize(
+        self,
+        genome_filepath,
+        atomize=False,
+        split_multiallelics=False,
+    ):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
