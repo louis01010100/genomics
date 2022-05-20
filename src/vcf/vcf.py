@@ -39,6 +39,17 @@ class Vcf():
             df = pd.read_csv(fd, names=names, sep='\t', dtype='str')
         return df
 
+    def rename(self, stem):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            f'-{stem}.vcf.bgz',
+        )
+
+        shutil.move(input_filepath, output_filepath)
+
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
     def bgzip(self):
 
         if self.filepath.name.endswith('.vcf'):
@@ -134,6 +145,27 @@ class Vcf():
         cmd = (''
                f'bcftools view'
                f'   --include "{expression}"'
+               f'   -O z'
+               f'   -o {output_filepath}'
+               f'   --threads {self.n_threads}'
+               f'   {input_filepath}'
+               f'   &> {log_filepath}'
+               '')
+
+        execute(cmd)
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def subset_biallelics(self):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-bi.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools view'
+               f'   -M 2'
                f'   -O z'
                f'   -o {output_filepath}'
                f'   --threads {self.n_threads}'
@@ -385,7 +417,9 @@ class Vcf():
         return self.filepath.__str__()
 
     def __len__(self):
-        input_filepath = f'{self.filepath}.csi'
+        input_filepath = Path(f'{self.filepath}.csi')
+        if not input_filepath.exists():
+            self.index()
 
         cmd = f'bcftools index -n {input_filepath}'
 

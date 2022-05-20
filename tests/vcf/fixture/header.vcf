@@ -1,0 +1,6 @@
+##fileformat=VCFv4.1
+##FILTER=<ID=PASS,Description="All filters passed">
+##contig=<ID=chr21>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Phased Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	HG00403	HG00404	HG00405
+chr21	5030578	.	C	T	.	PASS	.	GT	0|0	0|0	0|0
