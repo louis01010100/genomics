@@ -6,6 +6,7 @@ import gzip
 
 
 class Vcf():
+
     def __init__(self, filepath, tmp_dir, n_threads=1):
 
         tmp_dir = Path(tmp_dir)
@@ -364,26 +365,90 @@ class Vcf():
         execute(cmd)
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
+    @staticmethod
+    def _fix_duplicates(input_filepath, output_filepath):
+
+        with gzip.open(input_filepath,
+                       'rt') as ifd, output_filepath.open('wt') as ofd:
+
+            ref_record = {
+                'chrom': None,
+                'pos': None,
+                'id': None,
+                'ref': None,
+                'alt': None,
+                'value': None,
+            }
+
+            for line in ifd:
+                if line.startswith('#'):
+                    ofd.write(line)
+                    continue
+
+                items = line.strip().split('\t', 5)
+                chrom = items[0]
+                pos = items[1]
+                id_ = items[2]
+                ref = items[3]
+                alt = items[4]
+                value = items[5]
+
+                if ref_record['chrom'] == chrom and \
+                        ref_record['pos'] == pos and \
+                        ref_record['ref'] == ref and \
+                        ref_record['alt'] == alt:
+                    items[5] = ref_record['value']
+                    ofd.write('\t'.join(items))
+                    ofd.write('\n')
+
+                else:
+                    ref_record = {
+                        'chrom': chrom,
+                        'pos': pos,
+                        'id': id_,
+                        'ref': ref,
+                        'alt': alt,
+                        'value': value,
+                    }
+                    ofd.write(line)
+
     def annotate(self, annotations_vcf, columns):
         input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        tmp1_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
-            '-annot.vcf.bgz',
+            '-annot_raw.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{tmp1_filepath.name}.log'
 
         cmd = (''
                f'bcftools annotate'
                f'      --annotations {annotations_vcf.filepath}'
                f'      --columns {columns}'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {tmp1_filepath}'
                f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
 
         execute(cmd)
+
+        tmp2_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz', '-annot.vcf')
+
+        Vcf._fix_duplicates(tmp1_filepath, tmp2_filepath)
+        output_filepath = self.tmp_dir / tmp2_filepath.name.replace(
+            '.vcf', '.vcf.bgz')
+
+        log_filepath = self.tmp_dir / f'{tmp2_filepath.name}.log'
+        cmd = (''
+               f' bgzip -c -@ {self.n_threads} {tmp2_filepath}'
+               f' > {output_filepath}'
+               f' 2> {log_filepath}'
+               '')
+
+        execute(cmd)
+
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def to_tsv(self, query_str):
@@ -454,6 +519,7 @@ def concat(vcfs, output_filepath, tmp_dir, n_threads=1):
 
 
 def _load_header(vcf):
+
     def fetch_header(fd):
         header = None
         for line in fd:
@@ -484,6 +550,7 @@ def _is_gzipped(filepath):
 
 
 def _load_meta(vcf):
+
     def fetch_meta(fd):
         meta = []
         for line in fd:
