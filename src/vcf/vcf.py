@@ -374,10 +374,8 @@ class Vcf():
             ref_record = {
                 'chrom': None,
                 'pos': None,
-                'id': None,
                 'ref': None,
-                'alt': None,
-                'value': None,
+                'value': {},
             }
 
             for line in ifd:
@@ -388,27 +386,28 @@ class Vcf():
                 items = line.strip().split('\t', 5)
                 chrom = items[0]
                 pos = items[1]
-                id_ = items[2]
                 ref = items[3]
                 alt = items[4]
                 value = items[5]
 
                 if ref_record['chrom'] == chrom and \
                         ref_record['pos'] == pos and \
-                        ref_record['ref'] == ref and \
-                        ref_record['alt'] == alt:
-                    items[5] = ref_record['value']
+                        ref_record['ref'] == ref:
+                    if alt in ref_record['value']:
+                        items[5] = ref_record['value'][alt]
+                    else:
+                        ref_record['value'][alt] = value
+
                     ofd.write('\t'.join(items))
                     ofd.write('\n')
-
                 else:
                     ref_record = {
                         'chrom': chrom,
                         'pos': pos,
-                        'id': id_,
                         'ref': ref,
-                        'alt': alt,
-                        'value': value,
+                        'value': {
+                            alt: value
+                        }
                     }
                     ofd.write(line)
 
