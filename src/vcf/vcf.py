@@ -28,16 +28,19 @@ class Vcf():
         return self._header
 
     def to_df(self):
+
         with gzip.open(self.filepath, 'rt') as fd:
             for line in fd:
+
                 if line.startswith('##'):
                     continue
                 if line.startswith('#'):
-                    names = line.strip()[1:].split('\t')
+                    cnames = line.strip()[1:].split('\t')
+
                     break
                 assert False
 
-            df = pd.read_csv(fd, names=names, sep='\t', dtype='str')
+            df = pd.read_csv(fd, names=cnames, sep='\t', dtype='str')
         return df
 
     def rename(self, stem):
@@ -375,7 +378,7 @@ class Vcf():
                 'chrom': None,
                 'pos': None,
                 'ref': None,
-                'value': {},
+                'alt_map': {},
             }
 
             for line in ifd:
@@ -386,30 +389,27 @@ class Vcf():
                 items = line.strip().split('\t', 5)
                 chrom = items[0]
                 pos = items[1]
+                # id_ = items[2]
                 ref = items[3]
                 alt = items[4]
-                value = items[5]
 
                 if ref_record['chrom'] == chrom and \
                         ref_record['pos'] == pos and \
                         ref_record['ref'] == ref:
-                    if alt in ref_record['value']:
-                        items[5] = ref_record['value'][alt]
+                    if alt in ref_record['alt_map']:
+                        line = ref_record['alt_map'][alt]
                     else:
-                        ref_record['value'][alt] = value
-
-                    ofd.write('\t'.join(items))
-                    ofd.write('\n')
+                        ref_record['alt_map'][alt] = line
                 else:
                     ref_record = {
                         'chrom': chrom,
                         'pos': pos,
                         'ref': ref,
-                        'value': {
-                            alt: value
+                        'alt_map': {
+                            alt: line
                         }
                     }
-                    ofd.write(line)
+                ofd.write(line)
 
     def annotate(self, annotations_vcf, columns):
         input_filepath = self.filepath
@@ -419,10 +419,12 @@ class Vcf():
         )
         log_filepath = self.tmp_dir / f'{tmp1_filepath.name}.log'
 
+        columns_str = ','.join(columns)
+
         cmd = (''
                f'bcftools annotate'
                f'      --annotations {annotations_vcf.filepath}'
-               f'      --columns {columns}'
+               f'      --columns {columns_str}'
                f'      -O z'
                f'      -o {tmp1_filepath}'
                f'      --threads {self.n_threads}'
