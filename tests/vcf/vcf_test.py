@@ -303,11 +303,46 @@ def test_annotate__dup_target(tmp_path):
     annotation.index()
 
     result = target.annotate(annotation, columns=['ID', 'INFO'])
-    print(tmp_path)
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
     assert 'AX-100' == result.to_df().iloc[1, :]['ID']
+    assert 'AF=0.5' == result.to_df().iloc[1, :]['INFO']
+
+    target_data = [
+        "##fileformat=VCFv4.1",
+        "##contig=<ID=chr21>",
+        "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
+        "chr21	1000000	AX-100	G	C	.	.	.",
+        "chr21	1000000	AX-200	G	C	.	.	.",
+    ]
+    annotation_data = [
+        "##fileformat=VCFv4.1",
+        "##contig=<ID=chr21>",
+        "##INFO=<ID=AF,Number=A,Type=Float>",
+        "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
+        "chr21	1000000	.	G	C	.	.	AF=0.5",
+    ]
+
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir(exist_ok=True)
+
+    target_file = data_dir / 'target.vcf'
+    annotation_file = data_dir / 'annot.vcf'
+
+    _to_vcf(target_data, target_file)
+    _to_vcf(annotation_data, annotation_file)
+
+    target = Vcf(target_file, tmp_path).bgzip()
+    target.index()
+    annotation = Vcf(annotation_file, tmp_path).bgzip()
+    annotation.index()
+
+    result = target.annotate(annotation, columns=['INFO'])
+
+    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
+    assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
+    assert 'AX-200' == result.to_df().iloc[1, :]['ID']
     assert 'AF=0.5' == result.to_df().iloc[1, :]['INFO']
 
 
@@ -374,10 +409,8 @@ def test_annotate__dup_annot_ma_children(tmp_path):
     _to_vcf(target_data, target_file)
     _to_vcf(annotation_data, annotation_file)
 
-    target = Vcf(target_file, tmp_path).bgzip()
-    target.index()
-    annotation = Vcf(annotation_file, tmp_path).bgzip()
-    annotation.index()
+    target = Vcf(target_file, tmp_path).bgzip().index()
+    annotation = Vcf(annotation_file, tmp_path).bgzip().index()
 
     result = target.annotate(annotation, columns=['ID'])
 

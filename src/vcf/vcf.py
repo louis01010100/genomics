@@ -4,6 +4,17 @@ from subprocess import Popen, PIPE, STDOUT
 import shutil
 import gzip
 
+COLUMN_IDX_MAP = {
+    'CHROM': 0,
+    'POS': 1,
+    'ID': 2,
+    'REF': 3,
+    'ALT': 4,
+    'QUAL': 5,
+    'FILTER': 6,
+    'INFO': 7,
+}
+
 
 class Vcf():
 
@@ -98,6 +109,7 @@ class Vcf():
                '')
 
         execute(cmd)
+        return self
 
     def fix_header(self, genome_index_filepath):
 
@@ -369,7 +381,7 @@ class Vcf():
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     @staticmethod
-    def _fix_duplicates(input_filepath, output_filepath):
+    def _fix_duplicates(input_filepath, output_filepath, columns):
 
         with gzip.open(input_filepath,
                        'rt') as ifd, output_filepath.open('wt') as ofd:
@@ -386,7 +398,9 @@ class Vcf():
                     ofd.write(line)
                     continue
 
-                items = line.strip().split('\t', 5)
+                line = line.strip()
+
+                items = line.split('\t', 5)
                 chrom = items[0]
                 pos = items[1]
                 # id_ = items[2]
@@ -397,7 +411,8 @@ class Vcf():
                         ref_record['pos'] == pos and \
                         ref_record['ref'] == ref:
                     if alt in ref_record['alt_map']:
-                        line = ref_record['alt_map'][alt]
+                        ref_line = ref_record['alt_map'][alt]
+                        line = _new_vcf_record(line, ref_line, columns)
                     else:
                         ref_record['alt_map'][alt] = line
                 else:
@@ -410,6 +425,7 @@ class Vcf():
                         }
                     }
                 ofd.write(line)
+                ofd.write('\n')
 
     def annotate(self, annotations_vcf, columns):
         input_filepath = self.filepath
@@ -437,7 +453,7 @@ class Vcf():
         tmp2_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz', '-annot.vcf')
 
-        Vcf._fix_duplicates(tmp1_filepath, tmp2_filepath)
+        Vcf._fix_duplicates(tmp1_filepath, tmp2_filepath, columns)
         output_filepath = self.tmp_dir / tmp2_filepath.name.replace(
             '.vcf', '.vcf.bgz')
 
@@ -568,6 +584,17 @@ def _load_meta(vcf):
     else:
         with open(vcf, 'rt') as fd:
             return fetch_meta(fd)
+
+
+def _new_vcf_record(current_line, ref_line, columns):
+    current = current_line.split('\t')
+    ref = ref_line.split('\t')
+
+    for idx in [COLUMN_IDX_MAP[x] for x in columns]:
+        current[idx] = ref[idx]
+
+    result_line = '\t'.join(current)
+    return result_line
 
 
 def execute(cmd, pipe=False, debug=False):
