@@ -453,7 +453,11 @@ class Vcf():
         tmp2_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz', '-annot.vcf')
 
-        Vcf._fix_duplicates(tmp1_filepath, tmp2_filepath, columns)
+        Vcf._fix_duplicates(
+            tmp1_filepath,
+            tmp2_filepath,
+            [x.split('/')[0] for x in columns],
+        )
         output_filepath = self.tmp_dir / tmp2_filepath.name.replace(
             '.vcf', '.vcf.bgz')
 

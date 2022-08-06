@@ -68,6 +68,44 @@ def test_to_tsv(tmp_path):
     assert record1['GT'] == '0|0'
 
 
+def test_annotate_tag(tmp_path):
+    target_data = [
+        "##fileformat=VCFv4.1",
+        "##contig=<ID=chr21>",
+        "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
+        "chr21	1000000	.	G	C	.	.	.",
+        "chr21	1000000	.	G	C	.	.	.",
+    ]
+    annotation_data = [
+        "##fileformat=VCFv4.1",
+        "##contig=<ID=chr21>",
+        "##INFO=<ID=AF,Number=A,Type=Float>",
+        "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
+        "chr21	1000000	AX-100	G	C	.	.	AF=0.5",
+    ]
+
+    data_dir = tmp_path / 'data'
+    data_dir.mkdir()
+
+    target_file = data_dir / 'target.vcf'
+    annotation_file = data_dir / 'annot.vcf'
+
+    _to_vcf(target_data, target_file)
+    _to_vcf(annotation_data, annotation_file)
+
+    target = Vcf(target_file, tmp_path).bgzip()
+    target.index()
+    annotation = Vcf(annotation_file, tmp_path).bgzip()
+    annotation.index()
+
+    result = target.annotate(annotation, columns=['ID', 'INFO/AF'])
+
+    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
+    assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
+    assert 'AX-100' == result.to_df().iloc[1, :]['ID']
+    assert 'AF=0.5' == result.to_df().iloc[1, :]['INFO']
+
+
 def test_annotate__match_ba(tmp_path):
     target_data = [
         "##fileformat=VCFv4.1",
