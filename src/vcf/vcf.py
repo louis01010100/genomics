@@ -427,7 +427,7 @@ class Vcf():
                 ofd.write(line)
                 ofd.write('\n')
 
-    def annotate(self, annotations_vcf, columns):
+    def annotate(self, annotations_vcf, *columns):
         input_filepath = self.filepath
         tmp1_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',

@@ -98,7 +98,7 @@ def test_annotate_tag(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID', 'INFO/AF'])
+    result = target.annotate(annotation, 'ID', 'INFO/AF')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
@@ -134,7 +134,7 @@ def test_annotate__match_ba(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
 
@@ -167,7 +167,7 @@ def test_annotate__match_ma(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
 
@@ -202,7 +202,7 @@ def test_annotate__match_ma_children(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AX-101' == result.to_df().iloc[1, :]['ID']
@@ -236,7 +236,7 @@ def test_annotate__subset(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
 
@@ -269,7 +269,7 @@ def test_annotate__superset(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
 
@@ -304,7 +304,7 @@ def test_annotate__span(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AX-200' == result.to_df().iloc[1, :]['ID']
@@ -340,7 +340,7 @@ def test_annotate__dup_target(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID', 'INFO'])
+    result = target.annotate(annotation, 'ID', 'INFO')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
@@ -376,7 +376,7 @@ def test_annotate__dup_target(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['INFO'])
+    result = target.annotate(annotation, 'INFO')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
@@ -414,7 +414,7 @@ def test_annotate__dup_annot(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
 
@@ -450,7 +450,7 @@ def test_annotate__dup_annot_ma_children(tmp_path):
     target = Vcf(target_file, tmp_path).bgzip().index()
     annotation = Vcf(annotation_file, tmp_path).bgzip().index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AX-200' == result.to_df().iloc[1, :]['ID']
@@ -489,7 +489,7 @@ def test_annotate__dup_target_ma_children(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, columns=['ID'])
+    result = target.annotate(annotation, 'ID')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'C' == result.to_df().iloc[0, :]['ALT']
