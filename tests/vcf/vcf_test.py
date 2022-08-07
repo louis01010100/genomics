@@ -419,7 +419,7 @@ def test_annotate__dup_annot(tmp_path):
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
 
 
-def test_annotate__dup_annot_ma_children(tmp_path):
+def test_annotate__dup_annot_ma(tmp_path):
     target_data = [
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
@@ -456,11 +456,13 @@ def test_annotate__dup_annot_ma_children(tmp_path):
     assert 'AX-200' == result.to_df().iloc[1, :]['ID']
 
 
-def test_annotate__dup_target_ma_children(tmp_path):
+def test_annotate__dup_target_ma(tmp_path):
     target_data = [
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
+        "chr21	1000100	.	T	C,G	.	.	.",
+        "chr21	1000100	.	T	C,G	.	.	.",
         "chr21	1000100	.	T	C	.	.	.",
         "chr21	1000100	.	T	C	.	.	.",
         "chr21	1000100	.	T	G	.	.	.",
@@ -471,8 +473,9 @@ def test_annotate__dup_target_ma_children(tmp_path):
         "##contig=<ID=chr21>",
         "##INFO=<ID=AF,Number=A,Type=Float>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
-        "chr21	1000100	AX-100	T	C	.	.	.",
-        "chr21	1000100	AX-101	T	G	.	.	.",
+        "chr21	1000100	AX-100	T	C,G	.	.	AF=0.1,0.2",
+        "chr21	1000100	AX-101	T	C	.	.	AF=0.1",
+        "chr21	1000100	AX-102	T	G	.	.	AF=0.2",
     ]
 
     data_dir = tmp_path / 'data'
@@ -489,16 +492,35 @@ def test_annotate__dup_target_ma_children(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, 'ID')
+    result = target.annotate(annotation, 'ID', 'INFO')
 
-    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
-    assert 'C' == result.to_df().iloc[0, :]['ALT']
-    assert 'AX-101' == result.to_df().iloc[1, :]['ID']
-    assert 'G' == result.to_df().iloc[1, :]['ALT']
-    assert 'AX-100' == result.to_df().iloc[2, :]['ID']
-    assert 'C' == result.to_df().iloc[2, :]['ALT']
-    assert 'AX-101' == result.to_df().iloc[3, :]['ID']
-    assert 'G' == result.to_df().iloc[3, :]['ALT']
+    print(tmp_path)
+
+    result = result.to_df()
+
+    assert 'AX-100' == result.iloc[0, :]['ID']
+    assert 'C,G' == result.iloc[0, :]['ALT']
+    assert 'AF=0.1,0.2' == result.iloc[0, :]['INFO']
+
+    assert 'AX-101' == result.iloc[1, :]['ID']
+    assert 'C' == result.iloc[1, :]['ALT']
+    assert 'AF=0.1' == result.iloc[1, :]['INFO']
+
+    assert 'AX-102' == result.iloc[2, :]['ID']
+    assert 'G' == result.iloc[2, :]['ALT']
+    assert 'AF=0.2' == result.iloc[2, :]['INFO']
+
+    assert 'AX-100' == result.iloc[3, :]['ID']
+    assert 'C,G' == result.iloc[3, :]['ALT']
+    assert 'AF=0.1,0.2' == result.iloc[3, :]['INFO']
+
+    assert 'AX-101' == result.iloc[4, :]['ID']
+    assert 'C' == result.iloc[4, :]['ALT']
+    assert 'AF=0.1' == result.iloc[4, :]['INFO']
+
+    assert 'AX-102' == result.iloc[5, :]['ID']
+    assert 'G' == result.iloc[5, :]['ALT']
+    assert 'AF=0.2' == result.iloc[5, :]['INFO']
 
 
 def _to_vcf(data, filepath):
