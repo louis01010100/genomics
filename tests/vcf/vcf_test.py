@@ -73,15 +73,14 @@ def test_annotate_tag(tmp_path):
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
-        "chr21	1000000	.	G	C	.	.	.",
-        "chr21	1000000	.	G	C	.	.	.",
+        "chr21	1000000	AX-100	G	C	.	.	.",
     ]
     annotation_data = [
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
         "##INFO=<ID=AF,Number=A,Type=Float>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
-        "chr21	1000000	AX-100	G	C	.	.	AF=0.5",
+        "chr21	1000000	.	G	C	.	.	AF=0.5",
     ]
 
     data_dir = tmp_path / 'data'
@@ -98,12 +97,10 @@ def test_annotate_tag(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, 'ID', 'INFO/AF')
+    result = target.annotate(annotation, 'INFO/AF')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
-    assert 'AX-100' == result.to_df().iloc[1, :]['ID']
-    assert 'AF=0.5' == result.to_df().iloc[1, :]['INFO']
 
 
 def test_annotate__match_ba(tmp_path):
@@ -315,15 +312,15 @@ def test_annotate__dup_target(tmp_path):
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
-        "chr21	1000000	.	G	C	.	.	.",
-        "chr21	1000000	.	G	C	.	.	.",
+        "chr21	1000000	AX-100	G	C	.	.	.",
+        "chr21	1000000	AX-100	G	C	.	.	.",
     ]
     annotation_data = [
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
         "##INFO=<ID=AF,Number=A,Type=Float>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
-        "chr21	1000000	AX-100	G	C	.	.	AF=0.5",
+        "chr21	1000000	.	G	C	.	.	AF=0.5",
     ]
 
     data_dir = tmp_path / 'data'
@@ -340,7 +337,7 @@ def test_annotate__dup_target(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, 'ID', 'INFO')
+    result = target.annotate(annotation, 'INFO/AF')
 
     assert 'AX-100' == result.to_df().iloc[0, :]['ID']
     assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
@@ -461,21 +458,15 @@ def test_annotate__dup_target_ma(tmp_path):
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
-        "chr21	1000100	.	T	C,G	.	.	.",
-        "chr21	1000100	.	T	C,G	.	.	.",
-        "chr21	1000100	.	T	C	.	.	.",
-        "chr21	1000100	.	T	C	.	.	.",
-        "chr21	1000100	.	T	G	.	.	.",
-        "chr21	1000100	.	T	G	.	.	.",
+        "chr21	1000100	AX-100	T	C,G	.	.	.",
+        "chr21	1000100	AX-101	T	C	.	.	.",
     ]
     annotation_data = [
         "##fileformat=VCFv4.1",
         "##contig=<ID=chr21>",
         "##INFO=<ID=AF,Number=A,Type=Float>",
         "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
-        "chr21	1000100	AX-100	T	C,G	.	.	AF=0.1,0.2",
-        "chr21	1000100	AX-101	T	C	.	.	AF=0.1",
-        "chr21	1000100	AX-102	T	G	.	.	AF=0.2",
+        "chr21	1000100	.	T	C,G	.	.	AF=0.1,0.2",
     ]
 
     data_dir = tmp_path / 'data'
@@ -492,9 +483,7 @@ def test_annotate__dup_target_ma(tmp_path):
     annotation = Vcf(annotation_file, tmp_path).bgzip()
     annotation.index()
 
-    result = target.annotate(annotation, 'ID', 'INFO')
-
-    print(tmp_path)
+    result = target.annotate(annotation, 'ID', 'INFO/AF')
 
     result = result.to_df()
 
@@ -506,19 +495,65 @@ def test_annotate__dup_target_ma(tmp_path):
     assert 'C' == result.iloc[1, :]['ALT']
     assert 'AF=0.1' == result.iloc[1, :]['INFO']
 
-    assert 'AX-102' == result.iloc[2, :]['ID']
+    target_data = [
+        "##fileformat=VCFv4.1",
+        "##contig=<ID=chr21>",
+        "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
+        "chr21	1000100	AX-100	T	C,G	.	.	.",
+        "chr21	1000100	AX-101	T	C,G	.	.	.",
+        "chr21	1000100	AX-200	T	C	.	.	.",
+        "chr21	1000100	AX-201	T	C	.	.	.",
+        "chr21	1000100	AX-300	T	G	.	.	.",
+        "chr21	1000100	AX-301	T	G	.	.	.",
+    ]
+    annotation_data = [
+        "##fileformat=VCFv4.1",
+        "##contig=<ID=chr21>",
+        "##INFO=<ID=AF,Number=A,Type=Float>",
+        "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO",
+        "chr21	1000100	.	T	C,G	.	.	AF=0.1,0.2",
+        "chr21	1000100	.	T	C	.	.	AF=0.1",
+        "chr21	1000100	.	T	G	.	.	AF=0.2",
+    ]
+
+    target_file = data_dir / 'target.vcf'
+    annotation_file = data_dir / 'annot.vcf'
+
+    _to_vcf(target_data, target_file)
+    _to_vcf(annotation_data, annotation_file)
+
+    target = Vcf(target_file, tmp_path).bgzip()
+    target.index()
+    annotation = Vcf(annotation_file, tmp_path).bgzip()
+    annotation.index()
+
+    result = target.annotate(annotation, 'INFO/AF')
+
+    print(tmp_path)
+
+    result = result.to_df()
+
+    assert 'AX-100' == result.iloc[0, :]['ID']
+    assert 'C,G' == result.iloc[0, :]['ALT']
+    assert 'AF=0.1,0.2' == result.iloc[0, :]['INFO']
+
+    assert 'AX-200' == result.iloc[1, :]['ID']
+    assert 'C' == result.iloc[1, :]['ALT']
+    assert 'AF=0.1' == result.iloc[1, :]['INFO']
+
+    assert 'AX-300' == result.iloc[2, :]['ID']
     assert 'G' == result.iloc[2, :]['ALT']
     assert 'AF=0.2' == result.iloc[2, :]['INFO']
 
-    assert 'AX-100' == result.iloc[3, :]['ID']
+    assert 'AX-101' == result.iloc[3, :]['ID']
     assert 'C,G' == result.iloc[3, :]['ALT']
     assert 'AF=0.1,0.2' == result.iloc[3, :]['INFO']
 
-    assert 'AX-101' == result.iloc[4, :]['ID']
+    assert 'AX-201' == result.iloc[4, :]['ID']
     assert 'C' == result.iloc[4, :]['ALT']
     assert 'AF=0.1' == result.iloc[4, :]['INFO']
 
-    assert 'AX-102' == result.iloc[5, :]['ID']
+    assert 'AX-301' == result.iloc[5, :]['ID']
     assert 'G' == result.iloc[5, :]['ALT']
     assert 'AF=0.2' == result.iloc[5, :]['INFO']
 

@@ -415,14 +415,19 @@ class Vcf():
                         line = _new_vcf_record(line, ref_line, columns)
                     else:
                         ref_record['alt_map'][alt] = line
+                        for a in alt.split(','):
+                            ref_record['alt_map'][a] = line
+
                 else:
+                    alt_map = {alt: line}
+                    for a in alt.split(','):
+                        alt_map[a] = line
+
                     ref_record = {
                         'chrom': chrom,
                         'pos': pos,
                         'ref': ref,
-                        'alt_map': {
-                            alt: line
-                        }
+                        'alt_map': alt_map,
                     }
                 ofd.write(line)
                 ofd.write('\n')
@@ -456,7 +461,7 @@ class Vcf():
         Vcf._fix_duplicates(
             tmp1_filepath,
             tmp2_filepath,
-            [x.split('/')[0] for x in columns],
+            columns,
         )
         output_filepath = self.tmp_dir / tmp2_filepath.name.replace(
             '.vcf', '.vcf.bgz')
@@ -591,14 +596,95 @@ def _load_meta(vcf):
 
 
 def _new_vcf_record(current_line, ref_line, columns):
-    current = current_line.split('\t')
-    ref = ref_line.split('\t')
+    current_record = current_line.split('\t')
+    ref_record = ref_line.split('\t')
 
-    for idx in [COLUMN_IDX_MAP[x] for x in columns]:
-        current[idx] = ref[idx]
+    for column in columns:
+        if column == 'ID':
+            continue
+        if column in COLUMN_IDX_MAP:
+            idx = COLUMN_IDX_MAP[column]
+            current_record[idx] = ref_record[idx]
 
-    result_line = '\t'.join(current)
-    return result_line
+    tags = [x[5:] for x in columns if x.startswith('INFO/')]
+
+    if len(tags) == 0:
+        return '\t'.join(current_record)
+
+    current_record_alt = current_record[COLUMN_IDX_MAP['ALT']]
+    ref_record_alt = ref_record[COLUMN_IDX_MAP['ALT']]
+
+    info_idx = COLUMN_IDX_MAP['INFO']
+
+    if current_record_alt == ref_record_alt:
+        current_record[info_idx] = ref_record[info_idx]
+        return '\t'.join(current_record)
+
+    current_info = current_record[COLUMN_IDX_MAP['INFO']]
+    ref_info = ref_record[COLUMN_IDX_MAP['INFO']]
+
+    current_record[info_idx] = _new_info(
+        current_record_alt,
+        current_info,
+        ref_record_alt,
+        ref_info,
+        tags,
+    )
+
+    return '\t'.join(current_record)
+
+
+def _new_info(
+    current_alt,
+    current_info,
+    reference_alt,
+    reference_info,
+    tags,
+):
+    ralleles = reference_alt.split(',')
+    calleles = current_alt.split(',')
+
+    rtags = {}
+
+    for tag_item in reference_info.split(';'):
+        tag_name, tag_value_str = tag_item.split('=')
+        tag_values = tag_value_str.split(',')
+        if len(tag_values) > 1:
+            rtags[tag_name] = {}
+            for a, v in zip(ralleles, tag_values):
+                rtags[tag_name][a] = v
+        else:
+            rtags[tag_name] = tag_values
+
+    result = {}
+    if current_info != '.':
+        for tag_item in current_info.split(';'):
+            tag_name, tag_value = tag_item.split('=')
+            result[tag_name] = tag_value
+
+    for tag_item in tags:
+        if type(rtags[tag_name]) == str:
+
+            result[tag_name] = rtags[tag_name]
+
+        elif type(rtags[tag_name]) == dict:
+            bag = []
+
+            allele2value = rtags[tag_name]
+
+            for allele in calleles:
+                if allele in allele2value:
+                    bag.append(allele2value[allele])
+                else:
+                    bag.append('.')
+            result[tag_name] = ','.join(bag)
+    sorted_keys = sorted(result.keys())
+
+    bag = []
+
+    for k in sorted_keys:
+        bag.append(f'{k}={result[k]}')
+    return ';'.join(bag)
 
 
 def execute(cmd, pipe=False, debug=False):
