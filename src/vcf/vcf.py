@@ -600,8 +600,6 @@ def _new_vcf_record(current_line, ref_line, columns):
     ref_record = ref_line.split('\t')
 
     for column in columns:
-        if column == 'ID':
-            continue
         if column in COLUMN_IDX_MAP:
             idx = COLUMN_IDX_MAP[column]
             current_record[idx] = ref_record[idx]
