@@ -54,7 +54,18 @@ class Vcf():
             df = pd.read_csv(fd, names=cnames, sep='\t', dtype='str')
         return df
 
-    def rename(self, stem):
+    def delete(self):
+        filepath = self.filepath
+        log_filepath = self.tmp_dir / f'{filepath}.log'
+        index_filepath = self.tmp_dir / f'{filepath}.csi'
+        index_log_filepath = self.tmp_dir / f'{filepath}.csi.log'
+
+        filepath.unlink(missing_ok=True)
+        log_filepath.unlink(missing_ok=True)
+        index_filepath.unlink(missing_ok=True)
+        index_log_filepath.unlink(missing_ok=True)
+
+    def rename(self, stem, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -63,9 +74,12 @@ class Vcf():
 
         shutil.move(input_filepath, output_filepath)
 
+        if delete_src:
+            self.delete()
+
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def bgzip(self):
+    def bgzip(self, delete_src=False):
 
         if self.filepath.name.endswith('.vcf'):
             output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -97,6 +111,9 @@ class Vcf():
         else:
             raise Exception(self.filepath)
 
+        if delete_src:
+            self.delete()
+
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def index(self):
@@ -111,7 +128,7 @@ class Vcf():
         execute(cmd)
         return self
 
-    def fix_header(self, genome_index_filepath):
+    def fix_header(self, genome_index_filepath, delete_src=False):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -128,9 +145,42 @@ class Vcf():
                f'    &> {log_filepath}'
                '')
         execute(cmd)
+
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def drop_info(self):
+    def copy_to(self, output_file):
+        output_file = Path(output_file)
+
+        shutil.copy2(self.filepath, output_file)
+        shutil.copy2(self.filepath.with_suffix('.bgz.csi'),
+                     output_file.with_suffix('.bgz.csi'))
+
+    def drop_id(self, delete_src=False):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-id.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools annotate'
+               f'      -x ID'
+               f'      -O z'
+               f'      -o {output_filepath}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
+
+        if delete_src:
+            self.delete()
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def drop_info(self, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -148,9 +198,34 @@ class Vcf():
                f'      &> {log_filepath}'
                '')
         execute(cmd)
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset(self, expression, op_name):
+    def trim_alts(self, delete_src):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-trim_alt.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools view'
+               f'   -O z'
+               f'   -o {output_filepath}'
+               f'   --threads {self.n_threads}'
+               f'   -a '
+               f'   {input_filepath}'
+               f'   &> {log_filepath}'
+               '')
+
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def subset(self, expression, op_name, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -169,9 +244,13 @@ class Vcf():
                '')
 
         execute(cmd)
+
+        if delete_src:
+            self.delete()
+
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset_biallelics(self):
+    def subset_biallelics(self, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -190,9 +269,11 @@ class Vcf():
                '')
 
         execute(cmd)
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset_variants(self, chrom, start=None, stop=None):
+    def subset_variants(self, chrom, start=None, stop=None, delete_src=False):
 
         input_filepath = self.filepath
         if start and stop:
@@ -230,9 +311,11 @@ class Vcf():
                    '')
 
         execute(cmd)
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset_samples(self, sample_file):
+    def subset_samples(self, sample_file, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -252,9 +335,11 @@ class Vcf():
                '')
 
         execute(cmd)
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def uppercase(self):
+    def uppercase(self, delete_src):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -275,16 +360,18 @@ class Vcf():
 
                 print(line, file=ofd)
 
+        if delete_src:
+            self.delete()
+
         vcf = Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-        return vcf.bgzip()
+        return vcf.bgzip(delete_src)
 
-    def normalize(
-        self,
-        genome_filepath,
-        atomize=False,
-        split_multiallelics=False,
-    ):
+    def normalize(self,
+                  genome_filepath,
+                  atomize=False,
+                  split_multiallelics=False,
+                  delete_src=False):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -312,9 +399,12 @@ class Vcf():
 
         execute(cmd)
 
+        if delete_src:
+            self.delete()
+
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def fill_tags(self, tags=['AC', 'AN', 'AF', 'NS']):
+    def fill_tags(self, tags=['AC', 'AN', 'AF', 'NS'], delete_src=False):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -336,9 +426,11 @@ class Vcf():
                '')
 
         execute(cmd)
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def drop_gt(self):
+    def drop_gt(self, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -357,9 +449,11 @@ class Vcf():
                '')
 
         execute(cmd)
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def sort(self):
+    def sort(self, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -378,6 +472,8 @@ class Vcf():
                '')
 
         execute(cmd)
+        if delete_src:
+            self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     @staticmethod
@@ -432,7 +528,7 @@ class Vcf():
                 ofd.write(line)
                 ofd.write('\n')
 
-    def annotate(self, annotations_vcf, *columns):
+    def annotate(self, annotations_vcf, *columns, delete_src=False):
         input_filepath = self.filepath
         tmp1_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -463,6 +559,7 @@ class Vcf():
             tmp2_filepath,
             columns,
         )
+
         output_filepath = self.tmp_dir / tmp2_filepath.name.replace(
             '.vcf', '.vcf.bgz')
 
@@ -474,6 +571,11 @@ class Vcf():
                '')
 
         execute(cmd)
+
+        if delete_src:
+            self.delete()
+            tmp1_filepath.unlink()
+            tmp2_filepath.unlink()
 
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
