@@ -194,7 +194,7 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def filter(self, fields, delete_src=False):
+    def filter(self, criteria, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -204,7 +204,7 @@ class Vcf():
 
         cmd = (''
                f'bcftools view'
-               f'      -f .,PASS'
+               f'      -f {criteria}'
                f'      -O z'
                f'      -o {output_filepath}'
                f'      {input_filepath}'
