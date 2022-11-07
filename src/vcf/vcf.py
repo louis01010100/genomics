@@ -157,6 +157,20 @@ class Vcf():
         shutil.copy2(self.filepath.with_suffix('.bgz.csi'),
                      output_file.with_suffix('.bgz.csi'))
 
+    @property
+    def samples(self):
+
+        cmd = (''
+               f'bcftools query -l {self.filepath}'
+               '')
+        try:
+            stdout, stderr = execute(cmd, pipe=True)
+        except Exception as e:
+            print(stderr)
+            raise e
+
+        return stdout.strip().split('\n')
+
     def drop_id(self, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -176,6 +190,50 @@ class Vcf():
                '')
         execute(cmd)
 
+        if delete_src:
+            self.delete()
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def filter(self, fields, delete_src=False):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-filter.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools view'
+               f'      -f .,PASS'
+               f'      -O z'
+               f'      -o {output_filepath}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def drop_format(self, fields, delete_src=False):
+        expression = ','.join([f'FORMAT/{x}' for x in fields])
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-fromat.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools annotate'
+               f'      -x {expression}'
+               f'      -O z'
+               f'      -o {output_filepath}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
         if delete_src:
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
