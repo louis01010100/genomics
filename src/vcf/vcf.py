@@ -395,6 +395,31 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
+    def exclude_chroms(self, chroms, delete_src=False):
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-ex_chroms.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        ex_chroms = ','.join(chroms)
+
+        cmd = (''
+               f'bcftools view'
+               f'   -t "^{ex_chroms}"'
+               f'   -O z'
+               f'   -o {output_filepath}'
+               f'   --threads {self.n_threads}'
+               f'   {input_filepath}'
+               f'   &> {log_filepath}'
+               '')
+
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
     def subset_samples(self, sample_file, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
