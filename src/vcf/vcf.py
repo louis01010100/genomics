@@ -395,11 +395,11 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def exclude_chroms(self, chroms, delete_src=False):
+    def exclude_chrom(self, chroms, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
-            '-ex_chroms.vcf.bgz',
+            '-ex_chrom.vcf.bgz',
         )
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
 
