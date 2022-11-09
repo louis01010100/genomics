@@ -46,7 +46,7 @@ class Vcf():
                 if line.startswith('##'):
                     continue
                 if line.startswith('#'):
-                    cnames = line.strip()[1:].split('\t')
+                    cnames = [x.lower() for x in line.strip()[1:].split('\t')]
 
                     break
                 assert False
