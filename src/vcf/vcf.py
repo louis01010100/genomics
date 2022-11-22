@@ -324,7 +324,7 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def trim_alts(self, delete_src):
+    def trim_alts(self, delete_src = False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
