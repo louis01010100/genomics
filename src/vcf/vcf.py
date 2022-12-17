@@ -919,7 +919,7 @@ def concat(vcf_files, output_filepath, tmp_dir, n_threads=1):
            '')
 
     execute(cmd)
-    result = Vcf(tmp_filepath, tmp_dir).sort().index()
+    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
 
     result.move_to(output_filepath)
 
