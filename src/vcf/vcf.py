@@ -919,9 +919,9 @@ def concat(vcf_files, output_filepath, tmp_dir, n_threads=1):
            '')
 
     execute(cmd)
-    result_file = Vcf(tmp_filepath, tmp_dir).sort().index().filepath
+    result = Vcf(tmp_filepath, tmp_dir).sort().index()
 
-    result_file.move_to(output_filepath)
+    result.move_to(output_filepath)
 
 
 def _load_header(vcf):
