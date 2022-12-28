@@ -39,22 +39,6 @@ class Vcf():
             self._header = _load_header(self.filepath)
         return self._header
 
-    def to_df(self):
-
-        with bgzf.open(self.filepath, 'rt') as fd:
-            for line in fd:
-
-                if line.startswith('##'):
-                    continue
-                if line.startswith('#'):
-                    cnames = [x.lower() for x in line.strip()[1:].split('\t')]
-
-                    break
-                assert False
-
-            df = pd.read_csv(fd, names=cnames, sep='\t', dtype='str')
-        return df
-
     def delete(self):
         filepath = self.filepath
         log_filepath = self.tmp_dir / f'{filepath}.log'
@@ -420,42 +404,60 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset_variants(self, chrom, start=None, stop=None, delete_src=False):
+    def subset_variants(self, coordinates_df, delete_src=False):
+
+        self.index()
 
         input_filepath = self.filepath
-        if start and stop:
 
-            output_filepath = self.tmp_dir / self.filepath.name.replace(
-                '.vcf.bgz',
-                f'-{chrom}_{start}_{stop}.vcf.bgz',
-            )
-            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        coordinates_file = self.tmp_dir / 'coordinates.tsv'
 
-            cmd = (''
-                   f'bcftools view'
-                   f'      -r "{chrom}:{start}-{stop}"'
-                   f'      -O z'
-                   f'      -o {output_filepath}'
-                   f'      --threads {self.n_threads}'
-                   f'      {input_filepath}'
-                   f'      &> {log_filepath}'
-                   '')
-        else:
-            output_filepath = self.tmp_dir / self.filepath.name.replace(
-                '.vcf.bgz',
-                f'-{chrom}.vcf.bgz',
-            )
-            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        coordinates_df.to_csv(
+            coordinates_file,
+            header=False,
+            index=False,
+            sep='\t',
+        )
 
-            cmd = (''
-                   f'bcftools view'
-                   f'      -r "{chrom}"'
-                   f'      -O z'
-                   f'      -o {output_filepath}'
-                   f'      --threads {self.n_threads}'
-                   f'      {input_filepath}'
-                   f'      &> {log_filepath}'
-                   '')
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-variants.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools view'
+               f'      --regions-file {coordinates_file}'
+               f'      -O z'
+               f'      -o {output_filepath}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def subset_chrom(self, chrom, delete_src=False):
+
+        self.index()
+        input_filepath = self.filepath
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            f'-{chrom}.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+
+        cmd = (''
+               f'bcftools view'
+               f'      -r "{chrom}"'
+               f'      -O z'
+               f'      -o {output_filepath}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
 
         execute(cmd)
         if delete_src:
@@ -549,41 +551,34 @@ class Vcf():
 
         return bag
 
-    def subset_sample(self, sample, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
-            '.vcf.bgz',
-            f'-{sample}.vcf.bgz',
-        )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
-
-        cmd = (''
-               f'bcftools view'
-               f'   --samples {sample}'
-               f'   -O z'
-               f'   -o {output_filepath}'
-               f'   --threads {self.n_threads}'
-               f'   {input_filepath}'
-               f'   &> {log_filepath}'
-               '')
-
-        execute(cmd)
-        if delete_src:
-            self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
-
-    def subset_samples(self, sample_file, delete_src=False):
+    def subset_samples(self, samples, delete_src=False):
+        self.index()
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
             '-samples.vcf.bgz',
         )
+
+        bag = []
+
+        for sample in samples:
+            bag.append({'sample_name': sample})
+
+        samples_file = self.tmp_dir / 'samples.tsv'
+
+        pd.DataFrame.from_records(bag).to_csv(
+            samples_file,
+            header=False,
+            index=False,
+            sep='\t',
+        )
+
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
 
         cmd = (''
                f'bcftools view'
-               f'   --samples-file {sample_file}'
-               f'   --force-samples '
+               f'   --samples-file {samples_file}'
+               f'   --force-samples'
                f'   -O z'
                f'   -o {output_filepath}'
                f'   --threads {self.n_threads}'
@@ -835,7 +830,10 @@ class Vcf():
 
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def to_tsv(self, format_, to_df=False):
+    def to_tsv(
+        self,
+        format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%SAMPLE\t%GT\n]',
+    ):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -864,14 +862,8 @@ class Vcf():
 
         execute(cmd)
 
-        if to_df:
-            df = pd.read_csv(output_gz_filepath,
-                             header=0,
-                             sep='\t',
-                             dtype='str')
-        else:
-            df = None
-        return output_gz_filepath, df
+        df = pd.read_csv(output_gz_filepath, header=0, sep='\t', dtype='str')
+        return df, output_filepath
 
     def __str__(self):
         return self.filepath.__str__()
@@ -885,6 +877,45 @@ class Vcf():
 
         stdout, stderr = execute(cmd, pipe=True)
         return int(stdout.strip())
+
+
+def merge(vcf_files, output_filepath, tmp_dir, flag='none', n_threads=1):
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    vcfs_file = tmp_dir / 'vcfs.tsv'
+
+    with vcfs_file.open('wt') as fd:
+        for vcf_file in vcf_files:
+            Vcf(vcf_file, tmp_dir).index()
+            print(vcf_file, file=fd)
+
+    output_filepath = Path(output_filepath)
+
+    tmp_filename = output_filepath.name.replace(
+        '.vcf.bgz',
+        '-merge.vcf.bgz',
+    )
+
+    tmp_dir = Path(tmp_dir)
+    log_filepath = tmp_dir / f'{tmp_filename}.log'
+    tmp_filepath = tmp_dir / f'{tmp_filename}'
+
+    cmd = (''
+           f'bcftools merge'
+           f'      --merge {flag}'
+           f'      --file-list {vcfs_file}'
+           f'      -O z'
+           f'      -o {tmp_filepath}'
+           f'      --threads {n_threads}'
+           f'      &> {log_filepath}'
+           '')
+
+    execute(cmd)
+    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
+
+    result.move_to(output_filepath)
+
+    return Vcf(output_filepath, tmp_dir)
 
 
 def concat(vcf_files, output_filepath, tmp_dir, n_threads=1):
@@ -922,6 +953,8 @@ def concat(vcf_files, output_filepath, tmp_dir, n_threads=1):
     result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
 
     result.move_to(output_filepath)
+
+    return Vcf(output_filepath, tmp_dir)
 
 
 def _load_header(vcf):
