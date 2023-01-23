@@ -1,4 +1,5 @@
 from pathlib import Path
+from io import StringIO
 import pandas as pd
 import random
 import string
@@ -290,6 +291,27 @@ class Vcf():
         if delete_src:
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    @property
+    def index_file(self):
+        self.index()
+        return self.filepath.with_suffix('.bgz.csi')
+
+
+    def list_contig_names(self):
+        self.index()
+        cmd = (''
+               f'bcftools index'
+               f'       --stats {self.index_file}'
+               '')
+
+        stdout, stderr = execute(cmd, pipe = True)
+        data = StringIO(stdout)
+
+        df = pd.read_csv(data, names = ['contig_name', 'contig_size', 'n_records'], sep = '\t')
+        return sorted(list(set(df['contig_name'])))
+
+    
 
     def rename_chroms(self, chrom_map_file, delete_src=False):
         input_filepath = self.filepath
@@ -858,6 +880,12 @@ class Vcf():
 
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
+    def to_df(self,
+               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%SAMPLE\t%GT\t%TGT\n]'):
+        output_file = self.to_tsv(format_)
+
+        return pd.read_csv(output_file, header = 0, sep = '\t')
+
     def to_tsv(self,
                format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%SAMPLE\t%GT\t%TGT\n]'):
 
@@ -872,7 +900,7 @@ class Vcf():
 
         cnames = '\t'.join([x.lower() for x in cnames_str.split('\t')])
 
-        format_ = repr(format_)[1:-1]
+        format_ = repr(format_)[1:-1] # turn \ into \\
 
         output_gz_filepath = output_filepath.with_suffix('.tsv.gz')
 
@@ -890,8 +918,7 @@ class Vcf():
 
         execute(cmd)
 
-        df = pd.read_csv(output_gz_filepath, header=0, sep='\t', dtype='str')
-        return df, output_filepath
+        return output_gz_filepath
 
     def __str__(self):
         return self.filepath.__str__()
@@ -1030,7 +1057,6 @@ def _load_meta(vcf):
         meta = []
         for line in fd:
             line = line.strip()
-            print(line)
             if line.startswith('##'):
                 meta.append(line)
                 continue

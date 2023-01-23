@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import pytest
 import pandas as pd
 from vcf import Vcf
 from pathlib import Path
@@ -13,6 +14,15 @@ def test_meta(tmp_path):
         '##contig=<ID=chr21>\n'
         '##FORMAT=<ID=GT,Number=1,Type=String,Description="Phased Genotype">')
     assert expected == vcf.meta
+
+
+def test_list_contig_names(tmp_path):
+    vcf_file = Path(__file__).parents[0] / 'fixture/sample.vcf'
+    vcf = Vcf(vcf_file, tmp_path).bgzip()
+
+    contig_names = vcf.list_contig_names()
+
+    assert ['chr21'] == contig_names
 
 
 def test_header(tmp_path):
@@ -41,14 +51,6 @@ def test_index(tmp_path):
     index_file.unlink()
 
 
-def test_to_df(tmp_path):
-    vcf_file = Path(__file__).parents[0] / 'fixture/sample.vcf.bgz'
-
-    vcf = Vcf(vcf_file, tmp_path)
-    df = vcf.to_df()
-    assert 991 == len(df)
-
-
 def test_to_tsv(tmp_path):
     vcf_file = Path(__file__).parents[0] / 'fixture/sample.vcf.bgz'
     vcf = Vcf(vcf_file, tmp_path)
@@ -59,13 +61,13 @@ def test_to_tsv(tmp_path):
 
     record1 = data.iloc[0, :]
 
-    assert record1['CHROM'] == 'chr21'
-    assert record1['POS'] == '5030578'
-    assert record1['ID'] == '.'
-    assert record1['REF'] == 'C'
-    assert record1['ALT'] == 'T'
-    assert record1['SAMPLE'] == 'HG00403'
-    assert record1['GT'] == '0|0'
+    assert record1['chrom'] == 'chr21'
+    assert record1['pos'] == '5030578'
+    assert record1['id'] == '.'
+    assert record1['ref'] == 'C'
+    assert record1['alt'] == 'T'
+    assert record1['sample'] == 'HG00403'
+    assert record1['gt'] == '0|0'
 
 
 def test_annotate_tag(tmp_path):
@@ -99,8 +101,11 @@ def test_annotate_tag(tmp_path):
 
     result = target.annotate(annotation, 'INFO/AF')
 
-    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
-    assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
+
+    record = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n').iloc[0, :]
+
+    assert 'AX-100' == record['id']
+    assert 'AF=0.5' == record['info']
 
 
 def test_annotate__match_ba(tmp_path):
@@ -133,7 +138,8 @@ def test_annotate__match_ba(tmp_path):
 
     result = target.annotate(annotation, 'ID')
 
-    assert 'rs100' == result.to_df().iloc[0, :]['ID']
+    record = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n').iloc[0, :]
+    assert 'rs100' == record['id']
 
 
 def test_annotate__match_ma(tmp_path):
@@ -166,7 +172,8 @@ def test_annotate__match_ma(tmp_path):
 
     result = target.annotate(annotation, 'ID')
 
-    assert 'rs100' == result.to_df().iloc[0, :]['ID']
+    record = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n').iloc[0, :]
+    assert 'rs100' == record['id']
 
 
 def test_annotate__ma_children(tmp_path):
@@ -201,9 +208,11 @@ def test_annotate__ma_children(tmp_path):
 
     result = target.annotate(annotation, 'ID')
 
-    assert 'rs100' == result.to_df().iloc[0, :]['ID']
-    assert 'rs100' == result.to_df().iloc[1, :]['ID']
-    assert 'rs100' == result.to_df().iloc[2, :]['ID']
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
+
+    assert 'rs100' == df.iloc[0, :]['id']
+    assert 'rs100' == df.iloc[1, :]['id']
+    assert 'rs100' == df.iloc[2, :]['id']
 
 
 def test_annotate__subset(tmp_path):
@@ -236,7 +245,8 @@ def test_annotate__subset(tmp_path):
 
     result = target.annotate(annotation, 'ID')
 
-    assert 'rs100' == result.to_df().iloc[0, :]['ID']
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
+    assert 'rs100' == df.iloc[0, :]['id']
 
 
 def test_annotate__superset(tmp_path):
@@ -269,8 +279,8 @@ def test_annotate__superset(tmp_path):
 
     result = target.annotate(annotation, 'ID')
 
-    assert 'rs100' == result.to_df().iloc[0, :]['ID']
-
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
+    assert 'rs100' == df.iloc[0, :]['id']
 
 def test_annotate__span(tmp_path):
     target_data = [
@@ -303,9 +313,10 @@ def test_annotate__span(tmp_path):
     annotation.index()
 
     result = target.annotate(annotation, 'ID')
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
 
-    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
-    assert 'AX-200' == result.to_df().iloc[1, :]['ID']
+    assert 'AX-100' == df.iloc[0, :]['id']
+    assert 'AX-200' == df.iloc[1, :]['id']
 
 
 def test_annotate__dup_target(tmp_path):
@@ -339,11 +350,12 @@ def test_annotate__dup_target(tmp_path):
     annotation.index()
 
     result = target.annotate(annotation, 'INFO/AF')
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
 
-    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
-    assert 'AF=0.5' == result.to_df().iloc[0, :]['INFO']
-    assert 'AX-100' == result.to_df().iloc[1, :]['ID']
-    assert 'AF=0.5' == result.to_df().iloc[1, :]['INFO']
+    assert 'AX-100' == df.iloc[0, :]['id']
+    assert 'AF=0.5' == df.iloc[0, :]['info']
+    assert 'AX-100' == df.iloc[1, :]['id']
+    assert 'AF=0.5' == df.iloc[1, :]['info']
 
 
 def test_annotate__dup_annot(tmp_path):
@@ -378,7 +390,8 @@ def test_annotate__dup_annot(tmp_path):
 
     result = target.annotate(annotation, 'ID')
 
-    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
+    assert 'AX-100' == df.iloc[0, :]['id']
 
 
 def test_annotate__dup_annot_ma(tmp_path):
@@ -414,8 +427,9 @@ def test_annotate__dup_annot_ma(tmp_path):
 
     result = target.annotate(annotation, 'ID')
 
-    assert 'AX-100' == result.to_df().iloc[0, :]['ID']
-    assert 'AX-200' == result.to_df().iloc[1, :]['ID']
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
+    assert 'AX-100' == df.iloc[0, :]['id']
+    assert 'AX-200' == df.iloc[1, :]['id']
 
 
 def test_annotate__dup_target_ma(tmp_path):
@@ -457,33 +471,31 @@ def test_annotate__dup_target_ma(tmp_path):
 
     result = target.annotate(annotation, 'INFO/AF')
 
-    print(tmp_path)
+    df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
 
-    result = result.to_df()
+    assert 'AX-100' == df.iloc[0, :]['id']
+    assert 'C,G' == df.iloc[0, :]['alt']
+    assert 'AF=0.1,0.2' == df.iloc[0, :]['info']
 
-    assert 'AX-100' == result.iloc[0, :]['ID']
-    assert 'C,G' == result.iloc[0, :]['ALT']
-    assert 'AF=0.1,0.2' == result.iloc[0, :]['INFO']
+    assert 'AX-200' == df.iloc[1, :]['id']
+    assert 'C' == df.iloc[1, :]['alt']
+    assert 'AF=0.1' == df.iloc[1, :]['info']
 
-    assert 'AX-200' == result.iloc[1, :]['ID']
-    assert 'C' == result.iloc[1, :]['ALT']
-    assert 'AF=0.1' == result.iloc[1, :]['INFO']
+    assert 'AX-300' == df.iloc[2, :]['id']
+    assert 'G' == df.iloc[2, :]['alt']
+    assert 'AF=0.2' == df.iloc[2, :]['info']
 
-    assert 'AX-300' == result.iloc[2, :]['ID']
-    assert 'G' == result.iloc[2, :]['ALT']
-    assert 'AF=0.2' == result.iloc[2, :]['INFO']
+    assert 'AX-101' == df.iloc[3, :]['id']
+    assert 'C,G' == df.iloc[3, :]['alt']
+    assert 'AF=0.1,0.2' == df.iloc[3, :]['info']
 
-    assert 'AX-101' == result.iloc[3, :]['ID']
-    assert 'C,G' == result.iloc[3, :]['ALT']
-    assert 'AF=0.1,0.2' == result.iloc[3, :]['INFO']
+    assert 'AX-201' == df.iloc[4, :]['id']
+    assert 'C' == df.iloc[4, :]['alt']
+    assert 'AF=0.1' == df.iloc[4, :]['info']
 
-    assert 'AX-201' == result.iloc[4, :]['ID']
-    assert 'C' == result.iloc[4, :]['ALT']
-    assert 'AF=0.1' == result.iloc[4, :]['INFO']
-
-    assert 'AX-301' == result.iloc[5, :]['ID']
-    assert 'G' == result.iloc[5, :]['ALT']
-    assert 'AF=0.2' == result.iloc[5, :]['INFO']
+    assert 'AX-301' == df.iloc[5, :]['id']
+    assert 'G' == df.iloc[5, :]['alt']
+    assert 'AF=0.2' == df.iloc[5, :]['info']
 
 
 def _to_vcf(data, filepath):
