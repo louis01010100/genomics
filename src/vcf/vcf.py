@@ -1,5 +1,7 @@
 from pathlib import Path
 import pandas as pd
+import random
+import string
 from subprocess import Popen, PIPE, STDOUT
 import shutil
 import gzip
@@ -77,9 +79,9 @@ class Vcf():
                    '')
             execute(cmd)
 
-        elif self.filepath.name.endswith('.vcf.gz'):
+        elif self.filepath.name.endswith('.gz'):
             output_filepath = self.tmp_dir / self.filepath.name.replace(
-                '.vcf.gz', '.vcf.bgz')
+                '.vcf', '').replace('.gz', '.vcf.bgz')
             log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
             cmd = (''
                    f'gzip -dc {self.filepath}'
@@ -88,11 +90,11 @@ class Vcf():
                    f' 2> {log_filepath}'
                    '')
             execute(cmd)
-        elif self.filepath.name.endswith('.vcf.bgz'):
-            output_filepath = self.tmp_dir / self.filepath.name
+        elif self.filepath.name.endswith('.bgz'):
+            output_filepath = self.tmp_dir / self.filepath.name.replace(
+                '.vcf', '').replace('.bgz', '.vcf.bgz')
+            shutil.copy2(self.filepath, output_filepath)
 
-            if not output_filepath.exists():
-                shutil.copy2(self.filepath, output_filepath)
         else:
             raise Exception(self.filepath)
 
@@ -149,12 +151,12 @@ class Vcf():
         output_file = Path(output_file)
 
         shutil.move(self.filepath, output_file)
-        shutil.move(self.filepath.with_suffix('.bgz.csi'),
-                    output_file.with_suffix('.bgz.csi'))
-        self.delete()
+        index_file = self.filepath.with_suffix('.bgz.csi')
+        if index_file.exists():
+            shutil.move(index_file, output_file.with_suffix('.bgz.csi'))
 
     @property
-    def samples(self):
+    def samples(self) -> list[str]:
 
         cmd = (''
                f'bcftools query -l {self.filepath}'
@@ -404,7 +406,32 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset_variants(self, coordinates_df, delete_src=False):
+    def subset_variants_by_id(self, ids: set, delete_src: bool = False):
+
+        input_filepath = self.filepath
+
+        output_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-variants.vcf.bgz',
+        )
+
+        with bgzf.open(input_filepath,
+                       'rt') as ifd, bgzf.open(output_filepath, 'wt') as ofd:
+            for line in ifd:
+                if line.startswith('#'):
+                    ofd.write(line)
+                    continue
+
+                id_ = line.split('\t', 4)[2]
+
+                if id_ in ids:
+                    ofd.write(line)
+
+        if delete_src:
+            self.delete()
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    def subset_variants(self, coordinates_df: pd.DataFrame, delete_src=False):
 
         self.index()
 
@@ -780,6 +807,7 @@ class Vcf():
                 ofd.write('\n')
 
     def annotate(self, annotations_vcf, *columns, delete_src=False):
+        self.index()
         input_filepath = self.filepath
         tmp1_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -830,11 +858,11 @@ class Vcf():
 
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def to_tsv(
-        self,
-        format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%SAMPLE\t%GT\n]',
-    ):
+    def to_tsv(self,
+               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%SAMPLE\t%GT\t%TGT\n]'):
+
         input_filepath = self.filepath
+
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
             '.tsv',
@@ -879,10 +907,16 @@ class Vcf():
         return int(stdout.strip())
 
 
-def merge(vcf_files, output_filepath, tmp_dir, flag='none', n_threads=1):
+def merge(vcf_files: list,
+          output_filepath: Path,
+          tmp_dir: Path,
+          flag: str = 'none',
+          n_threads: int = 1) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    vcfs_file = tmp_dir / 'vcfs.tsv'
+
+
+    vcfs_file = tmp_dir / ''.join(random.choices(string.ascii_letters, k = 10))
 
     with vcfs_file.open('wt') as fd:
         for vcf_file in vcf_files:
@@ -914,6 +948,8 @@ def merge(vcf_files, output_filepath, tmp_dir, flag='none', n_threads=1):
     result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
 
     result.move_to(output_filepath)
+
+    vcfs_file.unlink()
 
     return Vcf(output_filepath, tmp_dir)
 
@@ -994,6 +1030,7 @@ def _load_meta(vcf):
         meta = []
         for line in fd:
             line = line.strip()
+            print(line)
             if line.startswith('##'):
                 meta.append(line)
                 continue
