@@ -600,7 +600,7 @@ class Vcf():
 
         return bag
 
-    def subset_samples(self, samples, delete_src=False):
+    def subset_samples(self, samples:set, delete_src=False):
         self.index()
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
