@@ -4,7 +4,7 @@ class GenomicRegion():
         self._start = start
         self._stop = stop
 
-    def overlap(self, other):
+    def is_overlapping(self, other):
         if self.chrom != other.chrom:
             return False
         return self.start <= other.stop and self.stop >= other.start

@@ -394,7 +394,7 @@ class Vcf():
                     region = current_region
                     continue
 
-                if region.overlaps(current_region):
+                if region.is_overlapping(current_region):
                     records.append(record)
                     region = region.merge(current_region)
                     continue
