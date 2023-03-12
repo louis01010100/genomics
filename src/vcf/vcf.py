@@ -7,6 +7,7 @@ from subprocess import Popen, PIPE, STDOUT
 import shutil
 import gzip
 from Bio import bgzf
+from .genomic_region import GenomicRegion
 
 COLUMN_IDX_MAP = {
     'CHROM': 0,
@@ -357,6 +358,77 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
+    def sync_ref_allele(self, genome_file, delete_src=False):
+        input_filepath = self.filepath
+
+        meta = []
+        header = []
+        records = []
+
+        tmp_filepath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-merge_alleles.vcf',
+        )
+
+        with gzip.open(self.filepath, 'rt') as fh, tmp_filepath.open('wt') as fho:
+            chrom = None
+            region = None
+
+            for line in fh:
+                line = line.strip()
+                if line.startswith('#'):
+                    fho.write(line)
+                    fho.write('\n')
+                    continue
+                items = line.split('\t', 6)
+                record = {
+                        'chrom': items[0],
+                        'pos': int(items[1]),
+                        'id': items[2],
+                        'ref': items[3],
+                        'alt': items[4],
+                        'remains': items[5],
+                        }
+                current_region = GenomicRegion(record['chrom'], record['pos'], record['pos'] + len(record['ref']) - 1)
+                if not region:
+                    region = current_region
+                    continue
+
+                if region.overlaps(current_region):
+                    records.append(record)
+                    region = region.merge(current_region)
+                    continue
+
+                new_ref = _fetch_seq(genomic_file, region)
+
+                new_records = _sync_ref_allele(records, region, new_ref)
+
+                for new_record in new_records:
+                    fho.write(new_record)
+
+                region = None
+                records.clear()
+
+        
+        output_filepath = self.tmp_dir / tmp_filepath.name.replace(
+            '.vcf', '.vcf.bgz')
+
+        log_filepath = self.tmp_dir / f'{tmp_filepath.name}.log'
+        cmd = (''
+               f' bgzip -c -@ {self.n_threads} {tmp_filepath}'
+               f' > {output_filepath}'
+               f' 2> {log_filepath}'
+               '')
+
+        execute(cmd)
+
+        if delete_src:
+            self.delete()
+            tmp_filepath.unlink()
+
+        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+
+    
     def trim_alts(self, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -538,7 +610,7 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def exclude_chroms(self, chroms, delete_src=False):
+    def exclude_chroms(self, chroms: list, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -668,7 +740,7 @@ class Vcf():
         return vcf
 
     def normalize(self,
-                  genome_filepath,
+            genome_file: Path,
                   atomize=False,
                   split_multiallelics=False,
                   delete_src=False):
@@ -682,7 +754,7 @@ class Vcf():
 
         cmd = (''
                f'bcftools norm'
-               f'      -f {genome_filepath}'
+               f'      -f {genome_file}'
                f'      -c s'
                f'      -O z'
                f'      -o {output_filepath}'
@@ -933,6 +1005,29 @@ class Vcf():
         stdout, stderr = execute(cmd, pipe=True)
         return int(stdout.strip())
 
+def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
+
+    # samtools faidx hs38DH.fa 'chr12:1000000-1000010'
+
+    chrom = region.chrom
+    start = region.start
+    stop = region.stop
+
+    cmd = (''
+           f'samtools faidx'
+           f'     {genome_file}'
+           f'     "{chrom}:{start}-{stop}"'
+           '')
+
+    stdout, stderr = execute(cmd, pipe = True)
+
+    for line in stdout.split('\n'):
+        if line.startswith('>'):
+            continue
+        return line.strip()
+
+
+    
 
 def merge(vcf_files: list,
           output_filepath: Path,
@@ -948,7 +1043,7 @@ def merge(vcf_files: list,
     with vcfs_file.open('wt') as fd:
         for vcf_file in vcf_files:
             Vcf(vcf_file, tmp_dir).index()
-            print(vcf_file, file=fd)
+            fd.write(str(vcf_file) + '\n')
 
     output_filepath = Path(output_filepath)
 
@@ -1071,6 +1166,28 @@ def _load_meta(vcf):
             return fetch_meta(fd)
 
 
+def _sync_ref_allele(records, region, new_ref):
+
+    bag = []
+
+    for record in records:
+        chrom = record['chrom']
+        pos = record['pos']
+        id_ = record['id']
+        ref = record['ref']
+        alt = record['alt']
+        remains = record['remains']
+
+        allele_prefix, allele_suffix = _get_prefix_suffix(new_ref, region.start, region.stop, ref, pos)
+
+        new_ref = allele_prefix + ref + allele_suffix
+
+        new_alt = ','.join([ allele_prefix + x + allele_suffix for x in alt.split(',')])
+
+        bag.append( f'{chrom}\t{region.start}\t{id_}\t{new_ref}\t{new_alt}\t{remains}\n')
+
+    return bag
+
 def _new_vcf_record(current_line, ref_line, columns):
     current_record = current_line.split('\t')
     ref_record = ref_line.split('\t')
@@ -1106,6 +1223,13 @@ def _new_vcf_record(current_line, ref_line, columns):
     )
 
     return '\t'.join(current_record)
+
+def _get_prefix_suffix(new_ref, start, stop, ref, pos):
+
+    allele_prefix = new_ref[0: pos - start]
+    allele_suffix = new_ref[pos + len(ref) - start:]
+
+    return allele_prefix, allele_suffix
 
 
 def _new_info(
@@ -1176,6 +1300,8 @@ def execute(cmd, pipe=False, debug=False):
                    stderr=STDOUT) as proc:
             for line in proc.stdout:
                 print(line, end='')
+
+            proc.wait()
 
             if proc.returncode:
                 raise Exception(cmd)
