@@ -120,7 +120,7 @@ class Vcf():
         execute(cmd)
         return self
 
-    def fix_header(self, genome_index_filepath, delete_src=False):
+    def fix_header(self, genome_index_filepath: Path, delete_src:bool =False):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -318,7 +318,7 @@ class Vcf():
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
-            '-chrom.vcf.bgz',
+            '-rename_chroms.vcf.bgz',
         )
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
 
@@ -585,7 +585,7 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def include_chroms(self, chroms, delete_src=False):
+    def include_chroms(self, chroms: set, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -953,13 +953,13 @@ class Vcf():
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     def to_df(self,
-               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%SAMPLE\t%GT\t%TGT\n]'):
+               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'):
         output_file = self.to_tsv(format_)
 
-        return pd.read_csv(output_file, header = 0, sep = '\t')
+        return pd.read_csv(output_file, header = 0, sep = '\t', dtype = 'str')
 
     def to_tsv(self,
-               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%SAMPLE\t%GT\t%TGT\n]'):
+               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'):
 
         input_filepath = self.filepath
 
@@ -1076,7 +1076,7 @@ def merge(vcf_files: list,
     return Vcf(output_filepath, tmp_dir)
 
 
-def concat(vcf_files, output_filepath, tmp_dir, n_threads=1):
+def concat(vcf_files: list, output_filepath: Path, tmp_dir: Path, n_threads: int =1)-> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     vcfs_file = tmp_dir / 'vcfs.tsv'
