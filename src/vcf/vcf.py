@@ -249,7 +249,7 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def filter(self, pass_:bool = True, delete_src=False) -> Vcf:
+    def filter(self, pass_:bool = True, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
