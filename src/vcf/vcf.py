@@ -1130,7 +1130,7 @@ def execute(cmd, pipe=False, debug=False):
             if proc.returncode:
                 raise Exception(cmd)
 
-def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> None:
+def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
     output_dir.mkdir(parents = True, exist_ok = True)
 
     vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
@@ -1177,8 +1177,10 @@ def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> None:
     _update_vcf_file(vcf_file_x, modification, 'x', vcf_file_x_modified)
     _update_vcf_file(vcf_file_y, modification, 'y', vcf_file_y_modified)
 
-    Vcf(vcf_file_x_modified, output_dir).bgzip().index()
-    Vcf(vcf_file_y_modified, output_dir).bgzip().index()
+    vcf_file_x = Vcf(vcf_file_x_modified, output_dir).bgzip().index().filepath
+    vcf_file_y = Vcf(vcf_file_y_modified, output_dir).bgzip().index().filepath
+
+    return vcf_file_x, vcf_file_y
 
 def _update_vcf_file(input_vcf_file, modification, label, output_vcf_file):
 

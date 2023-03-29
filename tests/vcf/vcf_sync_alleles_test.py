@@ -50,10 +50,10 @@ def test_sync_alleles_reverse(tmp_path: Path):
     assert {'A'} == set(vcf_file_1_df['ref'])
     assert {'AGGAGTC'} == set(vcf_file_2_df['ref'])
 
-    sync_alleles(vcf_file_2.filepath, vcf_file_1.filepath, tmp_path / 'after')
+    vcf_file_1_result, vcf_file_2_result = sync_alleles(vcf_file_2.filepath, vcf_file_1.filepath, tmp_path / 'after')
 
-    vcf1_observed = Vcf(tmp_dir_after / 'one-sync.vcf.bgz', tmp_dir_after).to_df()
-    vcf2_observed = Vcf(tmp_dir_after / 'two-sync.vcf.bgz', tmp_dir_after).to_df()
+    vcf1_observed = Vcf(vcf_file_1_result, tmp_dir_after).to_df()
+    vcf2_observed = Vcf(vcf_file_2_result, tmp_dir_after).to_df()
 
     assert {'AGGAGTC'} == set(vcf1_observed['ref'])
     assert {'AGGAGTC'} == set(vcf2_observed['ref'])
