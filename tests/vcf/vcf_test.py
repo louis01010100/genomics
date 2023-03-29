@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-import pytest
-import pandas as pd
-from vcf.vcf import Vcf
-from vcf.vcf import _sync_ref_allele
-from vcf.vcf import _get_prefix_suffix
-from vcf.genomic_region import GenomicRegion
 from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from vcf.genomic_region import GenomicRegion
+from vcf.vcf import Vcf, _get_prefix_suffix, sync_alleles
 
 
 def test_meta(tmp_path):
@@ -513,18 +513,4 @@ def test__get_prefix_suffix():
     assert ('', '3456789') == _get_prefix_suffix('0123456789', 100, 109, '012', 100)
     assert ('0123456', '') == _get_prefix_suffix('0123456789', 100, 109, '789', 107)
 
-
-def test__sync_ref_allele():
-
-    records = [
-            {'chrom': 'chr1', 'pos': 100, 'id': 'AX-100', 'ref': 'A', 'alt': 'ACC', 'remains': '.\t.\t.'},
-            {'chrom': 'chr1', 'pos': 100, 'id': 'AX-200', 'ref': 'ACC', 'alt': 'A', 'remains': '.\t.\t.'},
-            ]
-    region = GenomicRegion('chr1', 100, 102)
-    new_ref = 'ACC'
-    
-    new_records = _sync_ref_allele(records, region, new_ref)
-
-    assert 'chr1\t100\tAX-100\tACC\tACCCC\t.\t.\t.\n' == new_records[0]
-    assert 'chr1\t100\tAX-200\tACC\tA\t.\t.\t.\n' == new_records[1]
 

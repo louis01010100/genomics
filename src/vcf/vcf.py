@@ -1,12 +1,14 @@
-from pathlib import Path
-from io import StringIO
-import pandas as pd
-import random
-import string
-from subprocess import Popen, PIPE, STDOUT
-import shutil
 import gzip
+import random
+import shutil
+import string
+from io import StringIO
+from pathlib import Path
+from subprocess import PIPE, STDOUT, Popen
+
+import pandas as pd
 from Bio import bgzf
+
 from .genomic_region import GenomicRegion
 
 COLUMN_IDX_MAP = {
@@ -92,6 +94,7 @@ class Vcf():
                    f' 2> {log_filepath}'
                    '')
             execute(cmd)
+
         elif self.filepath.name.endswith('.bgz'):
             output_filepath = self.tmp_dir / self.filepath.name.replace(
                 '.vcf', '').replace('.bgz', '.vcf.bgz')
@@ -357,76 +360,6 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
-
-    def sync_ref_allele(self, genome_file, delete_src=False):
-        input_filepath = self.filepath
-
-        meta = []
-        header = []
-        records = []
-
-        tmp_filepath = self.tmp_dir / self.filepath.name.replace(
-            '.vcf.bgz',
-            '-merge_alleles.vcf',
-        )
-
-        with gzip.open(self.filepath, 'rt') as fh, tmp_filepath.open('wt') as fho:
-            chrom = None
-            region = None
-
-            for line in fh:
-                line = line.strip()
-                if line.startswith('#'):
-                    fho.write(line)
-                    fho.write('\n')
-                    continue
-                items = line.split('\t', 6)
-                record = {
-                        'chrom': items[0],
-                        'pos': int(items[1]),
-                        'id': items[2],
-                        'ref': items[3],
-                        'alt': items[4],
-                        'remains': items[5],
-                        }
-                current_region = GenomicRegion(record['chrom'], record['pos'], record['pos'] + len(record['ref']) - 1)
-                if not region:
-                    region = current_region
-                    continue
-
-                if region.is_overlapping(current_region):
-                    records.append(record)
-                    region = region.merge(current_region)
-                    continue
-
-                new_ref = _fetch_seq(genomic_file, region)
-
-                new_records = _sync_ref_allele(records, region, new_ref)
-
-                for new_record in new_records:
-                    fho.write(new_record)
-
-                region = None
-                records.clear()
-
-        
-        output_filepath = self.tmp_dir / tmp_filepath.name.replace(
-            '.vcf', '.vcf.bgz')
-
-        log_filepath = self.tmp_dir / f'{tmp_filepath.name}.log'
-        cmd = (''
-               f' bgzip -c -@ {self.n_threads} {tmp_filepath}'
-               f' > {output_filepath}'
-               f' 2> {log_filepath}'
-               '')
-
-        execute(cmd)
-
-        if delete_src:
-            self.delete()
-            tmp_filepath.unlink()
-
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
     
@@ -1027,95 +960,7 @@ def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
             continue
         return line.strip()
 
-
     
-
-def merge(vcf_files: list,
-          output_filepath: Path,
-          tmp_dir: Path,
-          flag: str = 'none',
-          n_threads: int = 1) -> Vcf:
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-
-
-    vcfs_file = tmp_dir / ''.join(random.choices(string.ascii_letters, k = 10))
-
-    with vcfs_file.open('wt') as fd:
-        for vcf_file in vcf_files:
-            Vcf(vcf_file, tmp_dir).index()
-            fd.write(str(vcf_file) + '\n')
-
-    output_filepath = Path(output_filepath)
-
-    tmp_filename = output_filepath.name.replace(
-        '.vcf.bgz',
-        '-merge.vcf.bgz',
-    )
-
-    tmp_dir = Path(tmp_dir)
-    log_filepath = tmp_dir / f'{tmp_filename}.log'
-    tmp_filepath = tmp_dir / f'{tmp_filename}'
-
-    cmd = (''
-           f'bcftools merge'
-           f'      --merge {flag}'
-           f'      --file-list {vcfs_file}'
-           f'      -O z'
-           f'      -o {tmp_filepath}'
-           f'      --threads {n_threads}'
-           f'      &> {log_filepath}'
-           '')
-
-    execute(cmd)
-    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
-
-    result.move_to(output_filepath)
-
-    vcfs_file.unlink()
-
-    return Vcf(output_filepath, tmp_dir)
-
-
-def concat(vcf_files: list, output_filepath: Path, tmp_dir: Path, n_threads: int =1)-> Vcf:
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    vcfs_file = tmp_dir / 'vcfs.tsv'
-
-    with vcfs_file.open('wt') as fd:
-        for vcf_file in vcf_files:
-            Vcf(vcf_file, tmp_dir).index()
-            print(vcf_file, file=fd)
-
-    output_filepath = Path(output_filepath)
-
-    tmp_filename = output_filepath.name.replace(
-        '.vcf.bgz',
-        '-concat.vcf.bgz',
-    )
-
-    tmp_dir = Path(tmp_dir)
-    log_filepath = tmp_dir / f'{tmp_filename}.log'
-    tmp_filepath = tmp_dir / f'{tmp_filename}'
-
-    cmd = (''
-           f'bcftools concat'
-           f'      --allow-overlaps'
-           f'      --file-list {vcfs_file}'
-           f'      -O z'
-           f'      -o {tmp_filepath}'
-           f'      --threads {n_threads}'
-           f'      &> {log_filepath}'
-           '')
-
-    execute(cmd)
-    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
-
-    result.move_to(output_filepath)
-
-    return Vcf(output_filepath, tmp_dir)
-
-
 def _load_header(vcf):
 
     def fetch_header(fd):
@@ -1166,28 +1011,6 @@ def _load_meta(vcf):
         with open(vcf, 'rt') as fd:
             return fetch_meta(fd)
 
-
-def _sync_ref_allele(records, region, new_ref):
-
-    bag = []
-
-    for record in records:
-        chrom = record['chrom']
-        pos = record['pos']
-        id_ = record['id']
-        ref = record['ref']
-        alt = record['alt']
-        remains = record['remains']
-
-        allele_prefix, allele_suffix = _get_prefix_suffix(new_ref, region.start, region.stop, ref, pos)
-
-        new_ref = allele_prefix + ref + allele_suffix
-
-        new_alt = ','.join([ allele_prefix + x + allele_suffix for x in alt.split(',')])
-
-        bag.append( f'{chrom}\t{region.start}\t{id_}\t{new_ref}\t{new_alt}\t{remains}\n')
-
-    return bag
 
 def _new_vcf_record(current_line, ref_line, columns):
     current_record = current_line.split('\t')
@@ -1306,3 +1129,174 @@ def execute(cmd, pipe=False, debug=False):
 
             if proc.returncode:
                 raise Exception(cmd)
+
+def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> None:
+    output_dir.mkdir(parents = True, exist_ok = True)
+
+    vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
+    vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().filepath
+
+    vcf_x = _vcf2dict(vcf_file_x) 
+    vcf_y = _vcf2dict(vcf_file_y)
+
+    modification = {}
+
+    for coordinate, record_x in vcf_x.items():
+        if coordinate not in vcf_y:
+            continue
+
+        record_y = vcf_y[coordinate]
+
+        ref_x = record_x['ref']
+        alt_x = record_x['alt']
+        ref_y = record_y['ref']
+        alt_y = record_y['alt']
+
+        if ref_x == ref_y:
+            continue
+
+        if ref_x.startswith(ref_y):
+            suffix = ref_x[len(ref_y):]
+            ref_y = ref_y + suffix
+            alt_y = ','.join([x + suffix for x in alt_y.split(',')])
+
+        elif ref_y.startswith(ref_x):
+            suffix = ref_y[len(ref_x):]
+            ref_x = ref_x + suffix
+            alt_x = ','.join([x + suffix for x in alt_x.split(',')])
+        else:
+            raise Exception(f'{ref_x}, {ref_y}')
+
+        modification[coordinate] = {'ref_x': ref_x, 'alt_x': alt_x, 'ref_y': ref_y, 'alt_y': alt_y}
+
+
+    vcf_file_x_modified = output_dir / vcf_file_x.name.replace('.vcf.bgz', '-sync.vcf')
+
+    vcf_file_y_modified = output_dir / vcf_file_y.name.replace('.vcf.bgz', '-sync.vcf')
+
+    _update_vcf_file(vcf_file_x, modification, 'x', vcf_file_x_modified)
+    _update_vcf_file(vcf_file_y, modification, 'y', vcf_file_y_modified)
+
+    Vcf(vcf_file_x_modified, output_dir).bgzip().index()
+    Vcf(vcf_file_y_modified, output_dir).bgzip().index()
+
+def _update_vcf_file(input_vcf_file, modification, label, output_vcf_file):
+
+    with gzip.open(input_vcf_file, 'rt') as ifh, output_vcf_file.open('wt') as ofh:
+        for line in ifh:
+            if line.startswith('#'):
+                ofh.write(line)
+                continue
+
+            chrom, pos, id_, ref, alt, rest = line.strip().split('\t', 5)
+            if (chrom, pos) not in modification:
+                ofh.write(line)
+                continue
+
+            new_alleles = modification[(chrom, pos)]
+            new_ref = new_alleles[f'ref_{label}']
+            new_alt = new_alleles[f'alt_{label}']
+
+            ofh.write('\t'.join([chrom, pos, id_, new_ref, new_alt, rest]))
+            ofh.write('\n')
+
+# (chrom, pos) -> {'ref': A, 'alt': AC'}
+def _vcf2dict(vcf_file):
+    bag = dict()
+
+    with gzip.open(vcf_file, 'rt') as fh:
+        for line in fh:
+            if line.startswith('#'):
+                continue
+            chrom, pos, id_, ref, alt, rest = line.strip().split('\t', 5)
+            bag[(chrom, pos)] = {'ref': ref, 'alt': alt}
+
+
+    return bag
+
+
+
+
+def merge(vcf_files: list,
+          output_filepath: Path,
+          tmp_dir: Path,
+          flag: str = 'none',
+          n_threads: int = 1) -> Vcf:
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+
+    vcfs_file = tmp_dir / ''.join(random.choices(string.ascii_letters, k = 10))
+
+    with vcfs_file.open('wt') as fd:
+        for vcf_file in vcf_files:
+            Vcf(vcf_file, tmp_dir).index()
+            fd.write(str(vcf_file) + '\n')
+
+    output_filepath = Path(output_filepath)
+
+    tmp_filename = output_filepath.name.replace(
+        '.vcf.bgz',
+        '-merge.vcf.bgz',
+    )
+
+    tmp_dir = Path(tmp_dir)
+    log_filepath = tmp_dir / f'{tmp_filename}.log'
+    tmp_filepath = tmp_dir / f'{tmp_filename}'
+
+    cmd = (''
+           f'bcftools merge'
+           f'      --merge {flag}'
+           f'      --file-list {vcfs_file}'
+           f'      -O z'
+           f'      -o {tmp_filepath}'
+           f'      --threads {n_threads}'
+           f'      &> {log_filepath}'
+           '')
+
+    execute(cmd)
+    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
+
+    result.move_to(output_filepath)
+
+    vcfs_file.unlink()
+
+    return Vcf(output_filepath, tmp_dir)
+
+
+def concat(vcf_files: list, output_filepath: Path, tmp_dir: Path, n_threads: int =1)-> Vcf:
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    vcfs_file = tmp_dir / 'vcfs.tsv'
+
+    with vcfs_file.open('wt') as fd:
+        for vcf_file in vcf_files:
+            Vcf(vcf_file, tmp_dir).index()
+            print(vcf_file, file=fd)
+
+    output_filepath = Path(output_filepath)
+
+    tmp_filename = output_filepath.name.replace(
+        '.vcf.bgz',
+        '-concat.vcf.bgz',
+    )
+
+    tmp_dir = Path(tmp_dir)
+    log_filepath = tmp_dir / f'{tmp_filename}.log'
+    tmp_filepath = tmp_dir / f'{tmp_filename}'
+
+    cmd = (''
+           f'bcftools concat'
+           f'      --allow-overlaps'
+           f'      --file-list {vcfs_file}'
+           f'      -O z'
+           f'      -o {tmp_filepath}'
+           f'      --threads {n_threads}'
+           f'      &> {log_filepath}'
+           '')
+
+    execute(cmd)
+    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
+
+    result.move_to(output_filepath)
+
+    return Vcf(output_filepath, tmp_dir)
