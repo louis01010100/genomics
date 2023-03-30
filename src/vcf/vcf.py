@@ -10,6 +10,7 @@ import pandas as pd
 from Bio import bgzf
 
 from .genomic_region import GenomicRegion
+from .vcf_util import is_gzipped, vcf2dict
 
 COLUMN_IDX_MAP = {
     'CHROM': 0,
@@ -886,14 +887,25 @@ class Vcf():
 
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def to_df(self,
-               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'):
+
+
+    def to_df(self, format_: str = None, site_only:bool = False) -> pd.DataFrame:
+        if not format_:
+            if site_only:
+                format_='%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
+            else: 
+                format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
+
         output_file = self.to_tsv(format_)
 
         return pd.read_csv(output_file, header = 0, sep = '\t', dtype = 'str')
 
-    def to_tsv(self,
-               format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'):
+    def to_tsv(self, format_: str = None, site_only:bool = False) -> Path:
+        if not format_:
+            if site_only :
+                format_='%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
+            else: 
+                format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
 
         input_filepath = self.filepath
 
@@ -976,7 +988,7 @@ def _load_header(vcf):
                 break
         return header
 
-    if _is_gzipped(vcf):
+    if is_gzipped(vcf):
         with gzip.open(vcf, 'rt') as fd:
             return fetch_header(fd)
     else:
@@ -984,12 +996,6 @@ def _load_header(vcf):
             return fetch_header(fd)
 
 
-def _is_gzipped(filepath):
-    with open(filepath, 'rb') as fd:
-        magic_number = fd.read(2)
-        if magic_number == b'\x1f\x8b':
-            return True
-        return False
 
 
 def _load_meta(vcf):
@@ -1004,7 +1010,7 @@ def _load_meta(vcf):
             break
         return '\n'.join(meta)
 
-    if _is_gzipped(vcf):
+    if is_gzipped(vcf):
         with gzip.open(vcf, 'rt') as fd:
             return fetch_meta(fd)
     else:
@@ -1130,59 +1136,28 @@ def execute(cmd, pipe=False, debug=False):
             if proc.returncode:
                 raise Exception(cmd)
 
+
 def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
     output_dir.mkdir(parents = True, exist_ok = True)
 
     vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
     vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().filepath
 
-    vcf_x = _vcf2dict(vcf_file_x) 
-    vcf_y = _vcf2dict(vcf_file_y)
-
-    modification = {}
-
-    for coordinate, record_x in vcf_x.items():
-        if coordinate not in vcf_y:
-            continue
-
-        record_y = vcf_y[coordinate]
-
-        ref_x = record_x['ref']
-        alt_x = record_x['alt']
-        ref_y = record_y['ref']
-        alt_y = record_y['alt']
-
-        if ref_x == ref_y:
-            continue
-
-        if ref_x.startswith(ref_y):
-            suffix = ref_x[len(ref_y):]
-            ref_y = ref_y + suffix
-            alt_y = ','.join([x + suffix for x in alt_y.split(',')])
-
-        elif ref_y.startswith(ref_x):
-            suffix = ref_y[len(ref_x):]
-            ref_x = ref_x + suffix
-            alt_x = ','.join([x + suffix for x in alt_x.split(',')])
-        else:
-            raise Exception(f'{ref_x}, {ref_y}')
-
-        modification[coordinate] = {'ref_x': ref_x, 'alt_x': alt_x, 'ref_y': ref_y, 'alt_y': alt_y}
-
+    modification = vcf2dict(vcf_file_x, vcf_file_y) 
 
     vcf_file_x_modified = output_dir / vcf_file_x.name.replace('.vcf.bgz', '-sync.vcf')
 
     vcf_file_y_modified = output_dir / vcf_file_y.name.replace('.vcf.bgz', '-sync.vcf')
 
-    _update_vcf_file(vcf_file_x, modification, 'x', vcf_file_x_modified)
-    _update_vcf_file(vcf_file_y, modification, 'y', vcf_file_y_modified)
+    _update_vcf_file(vcf_file_x, modification, vcf_file_x_modified)
+    _update_vcf_file(vcf_file_y, modification, vcf_file_y_modified)
 
     vcf_file_x = Vcf(vcf_file_x_modified, output_dir).bgzip().index().filepath
     vcf_file_y = Vcf(vcf_file_y_modified, output_dir).bgzip().index().filepath
 
     return vcf_file_x, vcf_file_y
 
-def _update_vcf_file(input_vcf_file, modification, label, output_vcf_file):
+def _update_vcf_file(input_vcf_file, modification, output_vcf_file):
 
     with gzip.open(input_vcf_file, 'rt') as ifh, output_vcf_file.open('wt') as ofh:
         for line in ifh:
@@ -1195,27 +1170,12 @@ def _update_vcf_file(input_vcf_file, modification, label, output_vcf_file):
                 ofh.write(line)
                 continue
 
-            new_alleles = modification[(chrom, pos)]
-            new_ref = new_alleles[f'ref_{label}']
-            new_alt = new_alleles[f'alt_{label}']
+            updated_allele_pair = modification[(chrom, pos)].get_updated_allele_pair(ref, alt)
+            new_ref = updated_allele_pair['ref']
+            new_alt = updated_allele_pair['alt']
 
             ofh.write('\t'.join([chrom, pos, id_, new_ref, new_alt, rest]))
             ofh.write('\n')
-
-# (chrom, pos) -> {'ref': A, 'alt': AC'}
-def _vcf2dict(vcf_file):
-    bag = dict()
-
-    with gzip.open(vcf_file, 'rt') as fh:
-        for line in fh:
-            if line.startswith('#'):
-                continue
-            chrom, pos, id_, ref, alt, rest = line.strip().split('\t', 5)
-            bag[(chrom, pos)] = {'ref': ref, 'alt': alt}
-
-
-    return bag
-
 
 
 
