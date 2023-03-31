@@ -889,7 +889,7 @@ class Vcf():
 
 
 
-    def to_df(self, format_: str = None, site_only:bool = False) -> pd.DataFrame:
+    def to_df(self, format_: str = None, site_only:bool = False, delete_src = False) -> pd.DataFrame:
         if not format_:
             if site_only:
                 format_='%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
@@ -897,6 +897,10 @@ class Vcf():
                 format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
 
         output_file = self.to_tsv(format_)
+
+        if delete_src:
+            self.delete()
+
 
         return pd.read_csv(output_file, header = 0, sep = '\t', dtype = 'str')
 
