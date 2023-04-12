@@ -495,32 +495,32 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def subset_chrom(self, chrom, delete_src=False):
+    # def subset_chrom(self, chrom: str, delete_src: bool =False):
+    #
+    #     self.index()
+    #     input_filepath = self.filepath
+    #     output_filepath = self.tmp_dir / self.filepath.name.replace(
+    #         '.vcf.bgz',
+    #         f'-{chrom}.vcf.bgz',
+    #     )
+    #     log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+    #
+    #     cmd = (''
+    #            f'bcftools view'
+    #            f'      -r "{chrom}"'
+    #            f'      -O z'
+    #            f'      -o {output_filepath}'
+    #            f'      --threads {self.n_threads}'
+    #            f'      {input_filepath}'
+    #            f'      &> {log_filepath}'
+    #            '')
+    #
+    #     execute(cmd)
+    #     if delete_src:
+    #         self.delete()
+    #     return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-        self.index()
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
-            '.vcf.bgz',
-            f'-{chrom}.vcf.bgz',
-        )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
-
-        cmd = (''
-               f'bcftools view'
-               f'      -r "{chrom}"'
-               f'      -O z'
-               f'      -o {output_filepath}'
-               f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
-               f'      &> {log_filepath}'
-               '')
-
-        execute(cmd)
-        if delete_src:
-            self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
-
-    def include_chroms(self, chroms: set, delete_src=False):
+    def include_chroms(self, chroms: set, delete_src: bool=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
