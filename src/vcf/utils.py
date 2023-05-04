@@ -104,10 +104,17 @@ def _vcf2dict(fh: TextIO) -> dict:
     return bag
 
 
-def bgzip(filepath: Path, n_threads=1):
-    cmd = f'bgzip  --threads {n_threads}   {filepath}'
-
+def index(filepath: Path, n_threads=1):
+    cmd = f'bcftools index --threads {n_threads}'
     execute(cmd)
+
+
+def bgzip(filepath: Path, index=True, n_threads=1):
+    cmd = f'bgzip  --threads {n_threads}   {filepath}'
+    execute(cmd)
+
+    if index:
+        index(filepath.with_suffix('.vcf.bgz'), n_threads=n_threads)
 
 
 def execute(cmd):
