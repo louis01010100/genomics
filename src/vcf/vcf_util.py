@@ -1,21 +1,23 @@
 import gzip
 from pathlib import Path
+from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
 
 
 class _AllelePairs():
+
     def __init__(self):
         self.allele_pairs = dict()
 
     def update(self, other) -> None:
         self.allele_pairs.update(other.allele_pairs)
 
-
     def add_allele_pair(self, ref, alt) -> None:
         key = (ref, alt)
         self.allele_pairs[key] = {'ref': ref, 'alt': alt}
 
-        longest_ref = max([x['ref'] for x in self.allele_pairs.values()], key = len)
+        longest_ref = max([x['ref'] for x in self.allele_pairs.values()],
+                          key=len)
 
         delta = dict()
 
@@ -69,7 +71,7 @@ def vcf2dict(*vcf_files) -> dict:
     for vcf_file in vcf_files:
         if is_gzipped(vcf_file):
             with gzip.open(vcf_file, 'rt') as fh:
-                output =  _vcf2dict(fh)
+                output = _vcf2dict(fh)
         else:
             with vcf_file.open('rt') as fh:
                 output = _vcf2dict(fh)
@@ -81,7 +83,6 @@ def vcf2dict(*vcf_files) -> dict:
             if coordinate not in result:
                 continue
             result[coordinate].update(allele_pairs)
-
 
     return result
 
@@ -101,3 +102,21 @@ def _vcf2dict(fh: TextIO) -> dict:
         bag[coordinate].add_allele_pair(ref, alt)
 
     return bag
+
+
+def bgzip(filepath: Path, n_threads=1):
+    cmd = f'bgzip  --threads {n_threads}   {filepath}'
+
+    execute(cmd)
+
+
+def execute(cmd):
+    with Popen(cmd, shell=True, text=True, stdout=PIPE,
+               stderr=STDOUT) as proc:
+        for line in proc.stdout:
+            print(line)
+
+        proc.wait()
+
+        if proc.return_code:
+            raise Exception(cmd)
