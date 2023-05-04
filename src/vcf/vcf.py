@@ -10,7 +10,7 @@ import pandas as pd
 from Bio import bgzf
 
 from .genomic_region import GenomicRegion
-from .vcf_util import is_gzipped, vcf2dict
+from .utils import is_gzipped, vcf2dict
 
 COLUMN_IDX_MAP = {
     'CHROM': 0,
@@ -124,7 +124,9 @@ class Vcf():
         execute(cmd)
         return self
 
-    def fix_header(self, genome_index_filepath: Path, delete_src:bool =False):
+    def fix_header(self,
+                   genome_index_filepath: Path,
+                   delete_src: bool = False):
 
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -253,14 +255,13 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def filter(self, criteria:str = 'PASS', delete_src: bool =False):
+    def filter(self, criteria: str = 'PASS', delete_src: bool = False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
             '-filter.vcf.bgz',
         )
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
-
 
         cmd = (''
                f'bcftools view'
@@ -303,7 +304,6 @@ class Vcf():
         self.index()
         return self.filepath.with_suffix('.bgz.csi')
 
-
     def list_contig_names(self):
         self.index()
         cmd = (''
@@ -311,13 +311,13 @@ class Vcf():
                f'       --stats {self.index_file}'
                '')
 
-        stdout, stderr = execute(cmd, pipe = True)
+        stdout, stderr = execute(cmd, pipe=True)
         data = StringIO(stdout)
 
-        df = pd.read_csv(data, names = ['contig_name', 'contig_size', 'n_records'], sep = '\t')
+        df = pd.read_csv(data,
+                         names=['contig_name', 'contig_size', 'n_records'],
+                         sep='\t')
         return sorted(list(set(df['contig_name'])))
-
-    
 
     def rename_chroms(self, chrom_map_file, delete_src=False):
         input_filepath = self.filepath
@@ -363,7 +363,6 @@ class Vcf():
             self.delete()
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    
     def trim_alts(self, delete_src=False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -520,7 +519,7 @@ class Vcf():
     #         self.delete()
     #     return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-    def include_chroms(self, chroms: set, delete_src: bool=False):
+    def include_chroms(self, chroms: set, delete_src: bool = False):
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -607,7 +606,7 @@ class Vcf():
 
         return bag
 
-    def subset_samples(self, samples:set, delete_src=False):
+    def subset_samples(self, samples: set, delete_src=False):
         self.index()
         input_filepath = self.filepath
         output_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -675,7 +674,7 @@ class Vcf():
         return vcf
 
     def normalize(self,
-            genome_file: Path,
+                  genome_file: Path,
                   atomize=False,
                   split_multiallelics=False,
                   delete_src=False):
@@ -887,29 +886,29 @@ class Vcf():
 
         return Vcf(output_filepath, self.tmp_dir, self.n_threads)
 
-
-
-    def to_df(self, format_: str = None, site_only:bool = False, delete_src = False) -> pd.DataFrame:
+    def to_df(self,
+              format_: str = None,
+              site_only: bool = False,
+              delete_src=False) -> pd.DataFrame:
         if not format_:
             if site_only:
-                format_='%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
-            else: 
-                format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
+                format_ = '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
+            else:
+                format_ = '[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
 
         output_file = self.to_tsv(format_)
 
         if delete_src:
             self.delete()
 
+        return pd.read_csv(output_file, header=0, sep='\t', dtype='str')
 
-        return pd.read_csv(output_file, header = 0, sep = '\t', dtype = 'str')
-
-    def to_tsv(self, format_: str = None, site_only:bool = False) -> Path:
+    def to_tsv(self, format_: str = None, site_only: bool = False) -> Path:
         if not format_:
-            if site_only :
-                format_='%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
-            else: 
-                format_='[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
+            if site_only:
+                format_ = '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
+            else:
+                format_ = '[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
 
         input_filepath = self.filepath
 
@@ -922,7 +921,7 @@ class Vcf():
 
         cnames = '\t'.join([x.lower() for x in cnames_str.split('\t')])
 
-        format_ = repr(format_)[1:-1] # turn \ into \\
+        format_ = repr(format_)[1:-1]    # turn \ into \\
 
         output_gz_filepath = output_filepath.with_suffix('.tsv.gz')
 
@@ -955,6 +954,7 @@ class Vcf():
         stdout, stderr = execute(cmd, pipe=True)
         return int(stdout.strip())
 
+
 def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
 
     # samtools faidx hs38DH.fa 'chr12:1000000-1000010'
@@ -969,14 +969,14 @@ def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
            f'     "{chrom}:{start}-{stop}"'
            '')
 
-    stdout, stderr = execute(cmd, pipe = True)
+    stdout, stderr = execute(cmd, pipe=True)
 
     for line in stdout.split('\n'):
         if line.startswith('>'):
             continue
         return line.strip()
 
-    
+
 def _load_header(vcf):
 
     def fetch_header(fd):
@@ -998,8 +998,6 @@ def _load_header(vcf):
     else:
         with open(vcf, 'rt') as fd:
             return fetch_header(fd)
-
-
 
 
 def _load_meta(vcf):
@@ -1058,9 +1056,10 @@ def _new_vcf_record(current_line, ref_line, columns):
 
     return '\t'.join(current_record)
 
+
 def _get_prefix_suffix(new_ref, start, stop, ref, pos):
 
-    allele_prefix = new_ref[0: pos - start]
+    allele_prefix = new_ref[0:pos - start]
     allele_suffix = new_ref[pos + len(ref) - start:]
 
     return allele_prefix, allele_suffix
@@ -1142,16 +1141,18 @@ def execute(cmd, pipe=False, debug=False):
 
 
 def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
-    output_dir.mkdir(parents = True, exist_ok = True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
     vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().filepath
 
-    modification = vcf2dict(vcf_file_x, vcf_file_y) 
+    modification = vcf2dict(vcf_file_x, vcf_file_y)
 
-    vcf_file_x_modified = output_dir / vcf_file_x.name.replace('.vcf.bgz', '-sync.vcf')
+    vcf_file_x_modified = output_dir / vcf_file_x.name.replace(
+        '.vcf.bgz', '-sync.vcf')
 
-    vcf_file_y_modified = output_dir / vcf_file_y.name.replace('.vcf.bgz', '-sync.vcf')
+    vcf_file_y_modified = output_dir / vcf_file_y.name.replace(
+        '.vcf.bgz', '-sync.vcf')
 
     _update_vcf_file(vcf_file_x, modification, vcf_file_x_modified)
     _update_vcf_file(vcf_file_y, modification, vcf_file_y_modified)
@@ -1161,9 +1162,11 @@ def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
 
     return vcf_file_x, vcf_file_y
 
+
 def _update_vcf_file(input_vcf_file, modification, output_vcf_file):
 
-    with gzip.open(input_vcf_file, 'rt') as ifh, output_vcf_file.open('wt') as ofh:
+    with gzip.open(input_vcf_file,
+                   'rt') as ifh, output_vcf_file.open('wt') as ofh:
         for line in ifh:
             if line.startswith('#'):
                 ofh.write(line)
@@ -1174,13 +1177,14 @@ def _update_vcf_file(input_vcf_file, modification, output_vcf_file):
                 ofh.write(line)
                 continue
 
-            updated_allele_pair = modification[(chrom, pos)].get_updated_allele_pair(ref, alt)
+            updated_allele_pair = modification[(chrom,
+                                                pos)].get_updated_allele_pair(
+                                                    ref, alt)
             new_ref = updated_allele_pair['ref']
             new_alt = updated_allele_pair['alt']
 
             ofh.write('\t'.join([chrom, pos, id_, new_ref, new_alt, rest]))
             ofh.write('\n')
-
 
 
 def merge(vcf_files: list,
@@ -1190,8 +1194,7 @@ def merge(vcf_files: list,
           n_threads: int = 1) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-
-    vcfs_file = tmp_dir / ''.join(random.choices(string.ascii_letters, k = 10))
+    vcfs_file = tmp_dir / ''.join(random.choices(string.ascii_letters, k=10))
 
     with vcfs_file.open('wt') as fd:
         for vcf_file in vcf_files:
@@ -1229,7 +1232,10 @@ def merge(vcf_files: list,
     return Vcf(output_filepath, tmp_dir)
 
 
-def concat(vcf_files: list, output_filepath: Path, tmp_dir: Path, n_threads: int =1)-> Vcf:
+def concat(vcf_files: list,
+           output_filepath: Path,
+           tmp_dir: Path,
+           n_threads: int = 1) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     vcfs_file = tmp_dir / 'vcfs.tsv'
