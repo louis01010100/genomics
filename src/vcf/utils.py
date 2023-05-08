@@ -104,8 +104,17 @@ def _vcf2dict(fh: TextIO) -> dict:
     return bag
 
 
-def index(filepath: Path, n_threads=1):
-    cmd = f'bcftools index --threads {n_threads}'
+def index(filepath: Path):
+    cmd = f'bcftools index {filepath}'
+    execute(cmd)
+
+
+def subset(
+    input_vcf_file: Path,
+    output_vcf_file: Path,
+    regions_file: Path,
+):
+    cmd = f'bcftools view --regions-file {regions_file} {input_vcf_file} -O z -o {output_vcf_file}'
     execute(cmd)
 
 
@@ -114,7 +123,7 @@ def bgzip(filepath: Path, index=True, n_threads=1):
     execute(cmd)
 
     if index:
-        index(filepath.with_suffix('.vcf.bgz'), n_threads=n_threads)
+        index(filepath.with_suffix('.vcf.bgz'))
 
 
 def execute(cmd):
@@ -125,5 +134,5 @@ def execute(cmd):
 
         proc.wait()
 
-        if proc.return_code:
+        if proc.returncode:
             raise Exception(cmd)

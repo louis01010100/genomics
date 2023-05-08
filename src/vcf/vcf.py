@@ -521,9 +521,10 @@ class Vcf():
 
     def include_chroms(self, chroms: set, delete_src: bool = False):
         input_filepath = self.filepath
+        label = '_'.join(chroms)
         output_filepath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
-            '-chroms.vcf.bgz',
+            f'-{label}.vcf.bgz',
         )
         log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
 
@@ -834,7 +835,7 @@ class Vcf():
                 ofd.write(line)
                 ofd.write('\n')
 
-    def annotate(self, annotations_vcf, *columns, delete_src=False):
+    def annotate(self, annotations_vcf, columns: set, delete_src=False):
         self.index()
         input_filepath = self.filepath
         tmp1_filepath = self.tmp_dir / self.filepath.name.replace(
@@ -892,7 +893,7 @@ class Vcf():
               delete_src=False) -> pd.DataFrame:
         if not format_:
             if site_only:
-                format_ = '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\n'
+                format_ = '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO\n'
             else:
                 format_ = '[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
 
