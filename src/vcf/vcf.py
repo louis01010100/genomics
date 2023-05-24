@@ -465,7 +465,8 @@ class Vcf():
 
         input_filepath = self.filepath
 
-        coordinates_file = self.tmp_dir / 'coordinates.tsv'
+        coordinates_file = self.tmp_dir / ''.join(
+            random.choices(string.ascii_letters, k=10))
 
         coordinates_df.to_csv(
             coordinates_file,
