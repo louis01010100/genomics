@@ -26,98 +26,98 @@ COLUMN_IDX_MAP = {
 
 class Vcf():
 
-    def __init__(self, filepath, tmp_dir, n_threads=1):
+    def __init__(self, vcf_file, tmp_dir, n_threads=1):
 
         tmp_dir = Path(tmp_dir)
         tmp_dir.mkdir(parents=True, exist_ok=True)
-        self.filepath = Path(filepath)
+        self.vcf_file = Path(vcf_file)
         self.n_threads = n_threads
         self.tmp_dir = Path(tmp_dir)
 
     @property
     def meta(self):
         if not getattr(self, '_meta', None):
-            self._meta = _load_meta(self.filepath)
+            self._meta = _load_meta(self.vcf_file)
         return self._meta
 
     @property
     def header(self):
         if not getattr(self, '_header', None):
-            self._header = _load_header(self.filepath)
+            self._header = _load_header(self.vcf_file)
         return self._header
 
     def delete(self):
-        filepath = self.filepath
-        log_filepath = self.tmp_dir / f'{filepath}.log'
-        index_filepath = self.tmp_dir / f'{filepath}.csi'
-        index_log_filepath = self.tmp_dir / f'{filepath}.csi.log'
+        vcf_file = self.vcf_file
+        log_filepath = self.tmp_dir / f'{vcf_file}.log'
+        index_filepath = self.tmp_dir / f'{vcf_file}.csi'
+        index_log_filepath = self.tmp_dir / f'{vcf_file}.csi.log'
 
-        filepath.unlink(missing_ok=True)
+        vcf_file.unlink(missing_ok=True)
         log_filepath.unlink(missing_ok=True)
         index_filepath.unlink(missing_ok=True)
         index_log_filepath.unlink(missing_ok=True)
 
     def rename(self, stem, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             f'-{stem}.vcf.bgz',
         )
 
-        shutil.move(input_filepath, output_filepath)
+        shutil.move(input_file, output_file)
 
         if delete_src:
             self.delete()
 
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def bgzip(self, delete_src=False):
 
-        if self.filepath.name.endswith('.vcf'):
-            output_filepath = self.tmp_dir / self.filepath.name.replace(
+        if self.vcf_file.name.endswith('.vcf'):
+            output_file = self.tmp_dir / self.vcf_file.name.replace(
                 '.vcf', '.vcf.bgz')
-            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+            log_filepath = self.tmp_dir / f'{output_file.name}.log'
             cmd = (''
-                   f' bgzip -c -@ {self.n_threads} {self.filepath}'
-                   f' > {output_filepath}'
+                   f' bgzip -c -@ {self.n_threads} {self.vcf_file}'
+                   f' > {output_file}'
                    f' 2> {log_filepath}'
                    '')
             execute(cmd)
 
-        elif self.filepath.name.endswith('.gz'):
-            output_filepath = self.tmp_dir / self.filepath.name.replace(
+        elif self.vcf_file.name.endswith('.gz'):
+            output_file = self.tmp_dir / self.vcf_file.name.replace(
                 '.vcf', '').replace('.gz', '.vcf.bgz')
-            log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+            log_filepath = self.tmp_dir / f'{output_file.name}.log'
             cmd = (''
-                   f'gzip -dc {self.filepath}'
+                   f'gzip -dc {self.vcf_file}'
                    f' | bgzip -@ {self.n_threads} '
-                   f' > {output_filepath}'
+                   f' > {output_file}'
                    f' 2> {log_filepath}'
                    '')
             execute(cmd)
 
-        elif self.filepath.name.endswith('.bgz'):
-            output_filepath = self.tmp_dir / self.filepath.name.replace(
+        elif self.vcf_file.name.endswith('.bgz'):
+            output_file = self.tmp_dir / self.vcf_file.name.replace(
                 '.vcf', '').replace('.bgz', '.vcf.bgz')
-            shutil.copy2(self.filepath, output_filepath)
+            shutil.copy2(self.vcf_file, output_file)
 
         else:
-            raise Exception(self.filepath)
+            raise Exception(self.vcf_file)
 
         if delete_src:
             self.delete()
 
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def index(self):
-        log_filepath = self.tmp_dir / f'{self.filepath.name}.csi.log'
+        log_filepath = self.tmp_dir / f'{self.vcf_file.name}.csi.log'
 
-        if (self.filepath.parent / f'{self.filepath.name}.csi').exists():
+        if (self.vcf_file.parent / f'{self.vcf_file.name}.csi').exists():
             return self
 
         cmd = (''
                f'bcftools index'
-               f'      {self.filepath}'
+               f'      {self.vcf_file}'
                f'      &> {log_filepath}'
                '')
 
@@ -128,38 +128,38 @@ class Vcf():
                    genome_index_filepath: Path,
                    delete_src: bool = False):
 
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-header.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools reheader'
                f'    --fai {genome_index_filepath}'
-               f'    -o {output_filepath}'
-               f'    {input_filepath}'
+               f'    -o {output_file}'
+               f'    {input_file}'
                f'    &> {log_filepath}'
                '')
         execute(cmd)
 
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def copy_to(self, output_file):
         output_file = Path(output_file)
 
-        shutil.copy2(self.filepath, output_file)
-        shutil.copy2(self.filepath.with_suffix('.bgz.csi'),
+        shutil.copy2(self.vcf_file, output_file)
+        shutil.copy2(self.vcf_file.with_suffix('.bgz.csi'),
                      output_file.with_suffix('.bgz.csi'))
 
     def move_to(self, output_file):
         output_file = Path(output_file)
 
-        shutil.move(self.filepath, output_file)
-        index_file = self.filepath.with_suffix('.bgz.csi')
+        shutil.move(self.vcf_file, output_file)
+        index_file = self.vcf_file.with_suffix('.bgz.csi')
         if index_file.exists():
             shutil.move(index_file, output_file.with_suffix('.bgz.csi'))
 
@@ -167,7 +167,7 @@ class Vcf():
     def samples(self) -> list[str]:
 
         cmd = (''
-               f'bcftools query -l {self.filepath}'
+               f'bcftools query -l {self.vcf_file}'
                '')
         try:
             stdout, stderr = execute(cmd, pipe=True)
@@ -185,124 +185,124 @@ class Vcf():
                f'bcftools view'
                f'      -H'
                f'      -r "{chrom}:{start}-{stop}"'
-               f'      {self.filepath}'
+               f'      {self.vcf_file}'
                '')
         stdout, stderr = execute(cmd, pipe=True)
         return stdout.strip().split('\n')
 
     def drop_id(self, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-id.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools annotate'
                f'      -x ID'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
 
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def include(self, criteria, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-ic.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'      -i {criteria}'
                f'      -O z'
-               f'      -o {output_filepath}'
-               f'      {input_filepath}'
+               f'      -o {output_file}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def exclude(self, criteria, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-ex.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'      -e {criteria}'
                f'      -O z'
-               f'      -o {output_filepath}'
-               f'      {input_filepath}'
+               f'      -o {output_file}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def filter(self, criteria: str = 'PASS', delete_src: bool = False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-filter.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'      -f "{criteria}"'
                f'      -O z'
-               f'      -o {output_filepath}'
-               f'      {input_filepath}'
+               f'      -o {output_file}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def drop_format(self, fields, delete_src=False):
         expression = ','.join([f'FORMAT/{x}' for x in fields])
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-format.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools annotate'
                f'      -x {expression}'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     @property
     def index_file(self):
         self.index()
-        return self.filepath.with_suffix('.bgz.csi')
+        return self.vcf_file.with_suffix('.bgz.csi')
 
     def list_contig_names(self):
         self.index()
@@ -320,87 +320,87 @@ class Vcf():
         return sorted(list(set(df['contig_name'])))
 
     def rename_chroms(self, chrom_map_file, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-rename_chroms.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools annotate'
                f'      --rename-chrs {chrom_map_file}'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def drop_info(self, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-info.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools annotate'
                f'      -x INFO'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def trim_alts(self, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-trim_alt.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'   -O z'
-               f'   -o {output_filepath}'
+               f'   -o {output_file}'
                f'   --threads {self.n_threads}'
                f'   -a '
-               f'   {input_filepath}'
+               f'   {input_file}'
                f'   &> {log_filepath}'
                '')
 
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def subset(self, expression, op_name, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             f'-{op_name}.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'   --include "{expression}"'
                f'   -O z'
-               f'   -o {output_filepath}'
+               f'   -o {output_file}'
                f'   --threads {self.n_threads}'
-               f'   {input_filepath}'
+               f'   {input_file}'
                f'   &> {log_filepath}'
                '')
 
@@ -409,42 +409,42 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def subset_biallelics(self, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-bi.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'   -M 2'
                f'   -O z'
-               f'   -o {output_filepath}'
+               f'   -o {output_file}'
                f'   --threads {self.n_threads}'
-               f'   {input_filepath}'
+               f'   {input_file}'
                f'   &> {log_filepath}'
                '')
 
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def subset_variants_by_id(self, ids: set, delete_src: bool = False):
 
-        input_filepath = self.filepath
+        input_file = self.vcf_file
 
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-variants.vcf.bgz',
         )
 
-        with bgzf.open(input_filepath,
-                       'rt') as ifd, bgzf.open(output_filepath, 'wt') as ofd:
+        with bgzf.open(input_file, 'rt') as ifd, bgzf.open(output_file,
+                                                           'wt') as ofd:
             for line in ifd:
                 if line.startswith('#'):
                     ofd.write(line)
@@ -457,13 +457,13 @@ class Vcf():
 
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def subset_variants(self, coordinates_df: pd.DataFrame, delete_src=False):
 
         self.index()
 
-        input_filepath = self.filepath
+        input_file = self.vcf_file
 
         coordinates_file = self.tmp_dir / ''.join(
             random.choices(string.ascii_letters, k=10))
@@ -475,59 +475,59 @@ class Vcf():
             sep='\t',
         )
 
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-variants.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'      --regions-file {coordinates_file}'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     # def subset_chrom(self, chrom: str, delete_src: bool =False):
     #
     #     self.index()
-    #     input_filepath = self.filepath
-    #     output_filepath = self.tmp_dir / self.filepath.name.replace(
+    #     input_file = self.vcf_file
+    #     output_file = self.tmp_dir / self.vcf_file.name.replace(
     #         '.vcf.bgz',
     #         f'-{chrom}.vcf.bgz',
     #     )
-    #     log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+    #     log_filepath = self.tmp_dir / f'{output_file.name}.log'
     #
     #     cmd = (''
     #            f'bcftools view'
     #            f'      -r "{chrom}"'
     #            f'      -O z'
-    #            f'      -o {output_filepath}'
+    #            f'      -o {output_file}'
     #            f'      --threads {self.n_threads}'
-    #            f'      {input_filepath}'
+    #            f'      {input_file}'
     #            f'      &> {log_filepath}'
     #            '')
     #
     #     execute(cmd)
     #     if delete_src:
     #         self.delete()
-    #     return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+    #     return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def include_chroms(self, chroms: set, delete_src: bool = False):
-        input_filepath = self.filepath
+        input_file = self.vcf_file
         label = '_'.join(chroms)
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             f'-{label}.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         chroms = ','.join(chroms)
 
@@ -535,24 +535,24 @@ class Vcf():
                f'bcftools view'
                f'   -t "{chroms}"'
                f'   -O z'
-               f'   -o {output_filepath}'
+               f'   -o {output_file}'
                f'   --threads {self.n_threads}'
-               f'   {input_filepath}'
+               f'   {input_file}'
                f'   &> {log_filepath}'
                '')
 
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def exclude_chroms(self, chroms: list, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-ex_chroms.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         ex_chroms = ','.join(chroms)
 
@@ -560,30 +560,30 @@ class Vcf():
                f'bcftools view'
                f'   -t "^{ex_chroms}"'
                f'   -O z'
-               f'   -o {output_filepath}'
+               f'   -o {output_file}'
                f'   --threads {self.n_threads}'
-               f'   {input_filepath}'
+               f'   {input_file}'
                f'   &> {log_filepath}'
                '')
 
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def split_by_sample(self, delete_src=False):
-        input_filepath = self.filepath
-        output_dirpath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_dirpath = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz', '-samples')
 
         output_dirpath.mkdir(exist_ok=True)
-        log_filepath = output_dirpath / f'{input_filepath.name}.log'
+        log_filepath = output_dirpath / f'{input_file.name}.log'
 
         cmd = (''
                f'bcftools +split'
                f'   -O z'
                f'   -o {output_dirpath}'
-               f'   {input_filepath}'
+               f'   {input_file}'
                f'   &> {log_filepath}'
                '')
 
@@ -593,15 +593,15 @@ class Vcf():
 
         bag = []
 
-        for filepath in output_dirpath.glob('*.vcf.gz'):
-            old_filepath = filepath
-            filepath = old_filepath.with_suffix('.bgz')
-            shutil.move(old_filepath, filepath)
-            samplename = filepath.name.split('.')[0]
+        for vcf_file in output_dirpath.glob('*.vcf.gz'):
+            old_filepath = vcf_file
+            vcf_file = old_filepath.with_suffix('.bgz')
+            shutil.move(old_filepath, vcf_file)
+            samplename = vcf_file.name.split('.')[0]
 
             tmp_dir = self.tmp_dir / samplename
 
-            vcf = Vcf(filepath, tmp_dir)
+            vcf = Vcf(vcf_file, tmp_dir)
             vcf.index()
 
             bag.append(vcf)
@@ -610,8 +610,8 @@ class Vcf():
 
     def subset_samples(self, samples: set, delete_src=False):
         self.index()
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-samples.vcf.bgz',
         )
@@ -630,32 +630,32 @@ class Vcf():
             sep='\t',
         )
 
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'   --samples-file {samples_file}'
                f'   --force-samples'
                f'   -O z'
-               f'   -o {output_filepath}'
+               f'   -o {output_file}'
                f'   --threads {self.n_threads}'
-               f'   {input_filepath}'
+               f'   {input_file}'
                f'   &> {log_filepath}'
                '')
 
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def uppercase(self, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-uppercase.vcf.bgz',
         )
-        with bgzf.open(input_filepath,
-                       'rt') as ifd, bgzf.open(output_filepath, 'wt') as ofd:
+        with bgzf.open(input_file, 'rt') as ifd, bgzf.open(output_file,
+                                                           'wt') as ofd:
             for line in ifd:
                 if line.startswith('#'):
                     ofd.write(line)
@@ -671,7 +671,7 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        vcf = Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        vcf = Vcf(output_file, self.tmp_dir, self.n_threads)
 
         return vcf
 
@@ -681,19 +681,19 @@ class Vcf():
                   split_multiallelics=False,
                   delete_src=False):
 
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-norm.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools norm'
                f'      -f {genome_file}'
                f'      -c s'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
                '')
 
@@ -702,7 +702,7 @@ class Vcf():
         if split_multiallelics:
             cmd += '      -m -'
 
-        cmd += f'      {input_filepath}'
+        cmd += f'      {input_file}'
         cmd += f'      &> {log_filepath}'
 
         execute(cmd)
@@ -710,25 +710,25 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def fill_tags(self, tags=['AC', 'AN', 'AF', 'NS'], delete_src=False):
 
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-tag.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         tags_str = ','.join(tags)
 
         cmd = (''
                f'bcftools +fill-tags'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      -- -t {tags_str}'
                f'      &> {log_filepath}'
                '')
@@ -736,59 +736,59 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def drop_gt(self, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-site.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
         cmd = (''
                f'bcftools view'
                f'      -G'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
 
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def sort(self, delete_src=False):
-        input_filepath = self.filepath
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-sort.vcf.bgz',
         )
-        log_filepath = self.tmp_dir / f'{output_filepath.name}.log'
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
         tmp_dir = self.tmp_dir / 'tmp_sort'
 
         cmd = (''
                f'bcftools sort'
                f'      -O z'
-               f'      -o {output_filepath}'
+               f'      -o {output_file}'
                f'      --temp-dir {tmp_dir}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
 
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     @staticmethod
-    def _fix_duplicates(input_filepath, output_filepath, columns):
+    def _fix_duplicates(input_file, output_file, columns):
 
-        with gzip.open(input_filepath,
-                       'rt') as ifd, output_filepath.open('wt') as ofd:
+        with gzip.open(input_file,
+                       'rt') as ifd, output_file.open('wt') as ofd:
 
             ref_record = {
                 'chrom': None,
@@ -838,8 +838,8 @@ class Vcf():
 
     def annotate(self, annotations_vcf, columns: set, delete_src=False):
         self.index()
-        input_filepath = self.filepath
-        tmp1_filepath = self.tmp_dir / self.filepath.name.replace(
+        input_file = self.vcf_file
+        tmp1_filepath = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '-annot_raw.vcf.bgz',
         )
@@ -849,18 +849,18 @@ class Vcf():
 
         cmd = (''
                f'bcftools annotate'
-               f'      --annotations {annotations_vcf.filepath}'
+               f'      --annotations {annotations_vcf.vcf_file}'
                f'      --columns {columns_str}'
                f'      -O z'
                f'      -o {tmp1_filepath}'
                f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
+               f'      {input_file}'
                f'      &> {log_filepath}'
                '')
 
         execute(cmd)
 
-        tmp2_filepath = self.tmp_dir / self.filepath.name.replace(
+        tmp2_filepath = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz', '-annot.vcf')
 
         Vcf._fix_duplicates(
@@ -869,13 +869,13 @@ class Vcf():
             columns,
         )
 
-        output_filepath = self.tmp_dir / tmp2_filepath.name.replace(
+        output_file = self.tmp_dir / tmp2_filepath.name.replace(
             '.vcf', '.vcf.bgz')
 
         log_filepath = self.tmp_dir / f'{tmp2_filepath.name}.log'
         cmd = (''
                f' bgzip -c -@ {self.n_threads} {tmp2_filepath}'
-               f' > {output_filepath}'
+               f' > {output_file}'
                f' 2> {log_filepath}'
                '')
 
@@ -886,7 +886,7 @@ class Vcf():
             tmp1_filepath.unlink()
             tmp2_filepath.unlink()
 
-        return Vcf(output_filepath, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads)
 
     def to_df(self,
               format_: str = None,
@@ -912,9 +912,9 @@ class Vcf():
             else:
                 format_ = '[%CHROM\t%POS\t%ID\t%REF\t%ALT\t%FILTER\t%SAMPLE\t%GT\t%TGT\n]'
 
-        input_filepath = self.filepath
+        input_file = self.vcf_file
 
-        output_filepath = self.tmp_dir / self.filepath.name.replace(
+        output_file = self.tmp_dir / self.vcf_file.name.replace(
             '.vcf.bgz',
             '.tsv',
         )
@@ -925,18 +925,18 @@ class Vcf():
 
         format_ = repr(format_)[1:-1]    # turn \ into \\
 
-        output_gz_filepath = output_filepath.with_suffix('.tsv.gz')
+        output_gz_filepath = output_file.with_suffix('.tsv.gz')
 
         if output_gz_filepath.exists():
             output_gz_filepath.unlink()
 
         cmd = (''
-               f'echo "{cnames}" > {output_filepath};'
+               f'echo "{cnames}" > {output_file};'
                f'bcftools query'
                f'      -f "{format_}"'
-               f'      {input_filepath}'
-               f'      >> {output_filepath};'
-               f'gzip {output_filepath}'
+               f'      {input_file}'
+               f'      >> {output_file};'
+               f'gzip {output_file}'
                '')
 
         execute(cmd)
@@ -944,14 +944,14 @@ class Vcf():
         return output_gz_filepath
 
     def __str__(self):
-        return self.filepath.__str__()
+        return self.vcf_file.__str__()
 
     def __len__(self):
-        input_filepath = Path(f'{self.filepath}.csi')
-        if not input_filepath.exists():
+        input_file = Path(f'{self.vcf_file}.csi')
+        if not input_file.exists():
             self.index()
 
-        cmd = f'bcftools index -n {input_filepath}'
+        cmd = f'bcftools index -n {input_file}'
 
         stdout, stderr = execute(cmd, pipe=True)
         return int(stdout.strip())
@@ -1145,8 +1145,8 @@ def execute(cmd, pipe=False, debug=False):
 def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
-    vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().filepath
+    vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().vcf_file
+    vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().vcf_file
 
     modification = vcf2dict(vcf_file_x, vcf_file_y)
 
@@ -1159,8 +1159,8 @@ def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
     _update_vcf_file(vcf_file_x, modification, vcf_file_x_modified)
     _update_vcf_file(vcf_file_y, modification, vcf_file_y_modified)
 
-    vcf_file_x = Vcf(vcf_file_x_modified, output_dir).bgzip().index().filepath
-    vcf_file_y = Vcf(vcf_file_y_modified, output_dir).bgzip().index().filepath
+    vcf_file_x = Vcf(vcf_file_x_modified, output_dir).bgzip().index().vcf_file
+    vcf_file_y = Vcf(vcf_file_y_modified, output_dir).bgzip().index().vcf_file
 
     return vcf_file_x, vcf_file_y
 
@@ -1190,7 +1190,7 @@ def _update_vcf_file(input_vcf_file, modification, output_vcf_file):
 
 
 def merge(vcf_files: list,
-          output_filepath: Path,
+          output_file: Path,
           tmp_dir: Path,
           flag: str = 'none',
           n_threads: int = 1) -> Vcf:
@@ -1203,9 +1203,9 @@ def merge(vcf_files: list,
             Vcf(vcf_file, tmp_dir).index()
             fd.write(str(vcf_file) + '\n')
 
-    output_filepath = Path(output_filepath)
+    output_file = Path(output_file)
 
-    tmp_filename = output_filepath.name.replace(
+    tmp_filename = output_file.name.replace(
         '.vcf.bgz',
         '-merge.vcf.bgz',
     )
@@ -1227,15 +1227,15 @@ def merge(vcf_files: list,
     execute(cmd)
     result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
 
-    result.move_to(output_filepath)
+    result.move_to(output_file)
 
     vcfs_file.unlink()
 
-    return Vcf(output_filepath, tmp_dir)
+    return Vcf(output_file, tmp_dir)
 
 
 def concat(vcf_files: list,
-           output_filepath: Path,
+           output_file: Path,
            tmp_dir: Path,
            n_threads: int = 1) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -1247,9 +1247,9 @@ def concat(vcf_files: list,
             Vcf(vcf_file, tmp_dir).index()
             print(vcf_file, file=fd)
 
-    output_filepath = Path(output_filepath)
+    output_file = Path(output_file)
 
-    tmp_filename = output_filepath.name.replace(
+    tmp_filename = output_file.name.replace(
         '.vcf.bgz',
         '-concat.vcf.bgz',
     )
@@ -1271,6 +1271,6 @@ def concat(vcf_files: list,
     execute(cmd)
     result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
 
-    result.move_to(output_filepath)
+    result.move_to(output_file)
 
-    return Vcf(output_filepath, tmp_dir)
+    return Vcf(output_file, tmp_dir)
