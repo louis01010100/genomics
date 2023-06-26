@@ -53,7 +53,7 @@ def load(
             start += 1
 
         bag.append({
-            'gene_symbol': gene,
+            'gene': gene,
             'start': start,
             'end': end,
         })

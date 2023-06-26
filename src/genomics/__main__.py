@@ -22,7 +22,7 @@ def main():
             genome_file=Path(args.genome_file),
             genome_index_file=Path(args.genome_index_file),
             tmp_dir=Path(args.tmp_dir),
-            output_file=Path(args.output_file),
+            output_dir=Path(args.output_dir),
         )
     else:
         parser.print_help()
@@ -54,7 +54,7 @@ def _config_clinvar_parser(parser):
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--genome-index-file', required=True)
     parser.add_argument('--tmp-dir', required=True)
-    parser.add_argument('--output-file', required=True)
+    parser.add_argument('--output-dir', required=True)
 
 
 if __name__ == '__main__':

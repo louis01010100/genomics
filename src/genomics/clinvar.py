@@ -12,13 +12,14 @@ def process(
     genome_file: Path,
     genome_index_file: Path,
     tmp_dir: Path,
-    output_file: Path,
+    output_dir: Path,
 ):
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
-    shutil.rmtree(output_file, ignore_errors=True)
+    shutil.rmtree(output_dir, ignore_errors=True)
 
     tmp_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
 
     chrom_map = create_chrom_map()
 
@@ -50,9 +51,22 @@ def process(
 
     concat(
         vcf_files=[clinvar_vcf.vcf_file, clinvar_papu_vcf.vcf_file],
-        output_file=output_file,
+        output_file=output_dir / 'clinvar.vcf.bgz',
         tmp_dir=tmp_dir,
     )
+
+    output_file = Vcf(output_dir / 'clinvar.vcf.bgz', output_dir).to_df(
+        '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/CLNSIG\t%INFO/CLNREVSTAT\n'
+    ).rename(
+        columns={
+            'info/clnsig': 'clinical_significance',
+            'info/clnrevstat': 'review_status',
+        }).to_csv(
+            output_dir / 'clinvar.tsv.gz',
+            header=True,
+            index=False,
+            sep='\t',
+        )
 
 
 def target_chroms():
