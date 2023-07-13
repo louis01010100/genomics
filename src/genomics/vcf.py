@@ -99,7 +99,9 @@ class Vcf():
         elif self.filepath.name.endswith('.bgz'):
             output_file = self.tmp_dir / self.filepath.name.replace(
                 '.vcf', '').replace('.bgz', '.vcf.bgz')
-            shutil.copy2(self.filepath, output_file)
+
+            if not output_file.samefile(self.filepath):
+                shutil.copy2(self.filepath, output_file)
 
         else:
             raise Exception(self.filepath)
