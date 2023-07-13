@@ -50,7 +50,7 @@ def process(
                 .normalize(genome_file)\
 
     concat(
-        vcf_files=[clinvar_vcf.vcf_file, clinvar_papu_vcf.vcf_file],
+        vcf_files=[clinvar_vcf.filepath, clinvar_papu_vcf.filepath],
         output_file=output_dir / 'clinvar.vcf.bgz',
         tmp_dir=tmp_dir,
     )
@@ -61,6 +61,8 @@ def process(
         columns={
             'info/clnsig': 'clinical_significance',
             'info/clnrevstat': 'review_status',
+            'info/clnrevstat': 'review_status',
+            'info/clndn': 'disease_name',
         }).to_csv(
             output_dir / 'clinvar.tsv.gz',
             header=True,

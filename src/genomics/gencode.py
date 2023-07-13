@@ -44,16 +44,19 @@ def load(
         if len(data) == 1:
             start = data['tx_start'][0]
             end = data['tx_end'][0]
+            chrom = data['chrom'][0]
 
         else:
             start = data['tx_start'].min()
             end = data['tx_end'].max()
+            chrom = data['chrom'].max()
 
         if not zero_based:
             start += 1
 
         bag.append({
             'gene': gene,
+            'chrom': chrom,
             'start': start,
             'end': end,
         })
