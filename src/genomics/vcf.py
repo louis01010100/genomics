@@ -8,9 +8,10 @@ from subprocess import PIPE, STDOUT, Popen
 
 import pandas as pd
 from Bio import bgzf
+from icecream import ic
 
 from .genomic_region import GenomicRegion
-from .utils import is_gzipped, vcf2dict
+from .utils import execute, is_gzipped, vcf2dict
 
 COLUMN_IDX_MAP = {
     'CHROM': 0,
@@ -22,6 +23,40 @@ COLUMN_IDX_MAP = {
     'FILTER': 6,
     'INFO': 7,
 }
+
+
+class VcfRecord():
+
+    def __init__(self, chrom, pos, id_, ref, alt):
+        self.chrom = chrom
+        self.pos = pos
+        self.id = id_
+        self.ref = ref
+        self.alt = alt
+
+    def __hash__(self):
+        return hash((self.chrom, self.pos, self.id, self.ref, self.alt))
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+
+        if self.chrom != other.chrom:
+            return False
+
+        if self.pos != other.pos:
+            return False
+
+        if self.id_ != other.id_:
+            return False
+
+        if self.ref != other.ref:
+            return False
+
+        if self.alt != other.alt:
+            return False
+
+        return True
 
 
 class Vcf():
@@ -1122,26 +1157,26 @@ def _new_info(
     return ';'.join(bag)
 
 
-def execute(cmd, pipe=False, debug=False):
-    if debug:
-        print(cmd)
-    if pipe:
-        with Popen(cmd, shell=True, text=True, stdout=PIPE,
-                   stderr=PIPE) as proc:
-            stdout_data, stderr_data = proc.communicate()
-
-            return stdout_data, stderr_data
-    else:
-
-        with Popen(cmd, shell=True, text=True, stdout=PIPE,
-                   stderr=STDOUT) as proc:
-            for line in proc.stdout:
-                print(line, end='')
-
-            proc.wait()
-
-            if proc.returncode:
-                raise Exception(cmd)
+# def execute(cmd, pipe=False, debug=False):
+#     if debug:
+#         print(cmd)
+#     if pipe:
+#         with Popen(cmd, shell=True, text=True, stdout=PIPE,
+#                    stderr=PIPE) as proc:
+#             stdout_data, stderr_data = proc.communicate()
+#
+#             return stdout_data, stderr_data
+#     else:
+#
+#         with Popen(cmd, shell=True, text=True, stdout=PIPE,
+#                    stderr=STDOUT) as proc:
+#             for line in proc.stdout:
+#                 print(line, end='')
+#
+#             proc.wait()
+#
+#             if proc.returncode:
+#                 raise Exception(cmd)
 
 
 def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
@@ -1276,3 +1311,30 @@ def concat(vcf_files: list,
     result.copy_to(output_file)
 
     return Vcf(output_file, tmp_dir)
+
+
+def fetch_variants(region: GenomicRegion, vcf_file: Path) -> list:
+    cmd = (''
+           f'bcftools view'
+           f'      -H'
+           f'      -r {region}'
+           f'      {vcf_file}'
+           '')
+    records = execute(cmd, debug=False, pipe=True)
+
+    bag = list()
+
+    for line in records:
+        items = line.split('\t')
+
+        v = VcfRecord(
+            chrom=items[0],
+            pos=int(items[1]),
+            id_=items[2],
+            ref=items[3],
+            alt=items[4],
+        )
+
+        bag.append(v)
+
+    return bag

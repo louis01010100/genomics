@@ -3,6 +3,8 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
 
+from icecream import ic
+
 
 class _AllelePairs():
 
@@ -51,8 +53,7 @@ class _AllelePairs():
         for k, v in self.allele_pairs.items():
             value = '{' + f'{k}:{v}' + '}'
             bag.append(value)
-
-        output = ','.join(bag)
+            output = ','.join(bag)
 
         return f'[{output}]'
 
@@ -126,13 +127,22 @@ def bgzip(filepath: Path, index=True, n_threads=1):
         index(filepath.with_suffix('.vcf.bgz'))
 
 
-def execute(cmd):
+def execute(cmd, debug=False, pipe=False):
+
+    if debug:
+        print(cmd)
+
+    bag = []
+
     with Popen(cmd, shell=True, text=True, stdout=PIPE,
                stderr=STDOUT) as proc:
         for line in proc.stdout:
-            print(line)
+            if pipe:
+                bag.append(line.strip())
 
         proc.wait()
 
         if proc.returncode:
             raise Exception(cmd)
+
+    return bag
