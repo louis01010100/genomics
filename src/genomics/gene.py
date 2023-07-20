@@ -22,7 +22,7 @@ GENE_COLUMNS = [
 ]
 
 
-def load(
+def load_ucsc_gene(
     gene_file: Path,
     zero_based: bool = True,
     columns=['name2', 'name', 'chrom', 'tx_start', 'tx_end'],
@@ -39,17 +39,18 @@ def load(
     # return genes.unique()
 
     bag = []
-    for gene, data in genes.groupby('name2'):
+    for keys, data in genes.groupby('name2', 'chrom'):
+
+        gene = keys[0]
+        chrom = keys[1]
 
         if len(data) == 1:
             start = data['tx_start'][0]
             end = data['tx_end'][0]
-            chrom = data['chrom'][0]
 
         else:
             start = data['tx_start'].min()
             end = data['tx_end'].max()
-            chrom = data['chrom'].max()
 
         if not zero_based:
             start += 1

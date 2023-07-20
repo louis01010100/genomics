@@ -135,8 +135,12 @@ class Vcf():
             output_file = self.tmp_dir / self.filepath.name.replace(
                 '.vcf', '').replace('.bgz', '.vcf.bgz')
 
-            if not output_file.samefile(self.filepath):
+            if not output_file.exists():
                 shutil.copy2(self.filepath, output_file)
+            elif not output_file.samefile(self.filepath):
+                shutil.copy2(self.filepath, output_file)
+            else:
+                pass
 
         else:
             raise Exception(self.filepath)
