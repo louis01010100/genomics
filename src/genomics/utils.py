@@ -3,6 +3,7 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
 
+import pandas as pd
 from icecream import ic
 
 
@@ -146,3 +147,105 @@ def execute(cmd, debug=False, pipe=False):
             raise Exception(cmd)
 
     return bag
+
+
+def fix_vcf_file(axiom_vcf_file: Path,
+                 output_dir: Path,
+                 genome_index_file: Path,
+                 genome_file: Path = None,
+                 delete_src: bool = False,
+                 n_threads: int = 1) -> Path:
+    shutil.rmtree(output_dir, ignore_errors=True)
+    output_dir.mkdir(parents=True)
+
+    chroms = [f'chr{i}' for i in range(1, 22)]
+    chroms.extend(['chrX', 'chrY', 'chrM'])
+
+    chrom_map_file = output_dir / 'chrom_map.tsv'
+
+    chrom_map = _create_chrom_map()
+
+    df2tsv(chrom_map, chrom_map_file)
+
+    vcf = Vcf(axiom_vcf_file, output_dir, n_threads)\
+            .bgzip()\
+            .rename_chroms(chrom_map_file,  delete_src)\
+            .include_chroms(set(chrom_map['new_name']), delete_src )\
+            .fix_header(genome_index_file, delete_src )
+
+    if genome_file:
+        vcf = vcf.normalize(genome_file, delete_src ) \
+                 .index()
+
+    return vcf.filepath
+
+
+def _create_chrom_map():
+    chrom_map = []
+
+    for i in range(1, 22):
+        chrom_map.append({
+            'old_name': str(i),
+            'new_name': f'chr{i}',
+        })
+
+    chrom_map.append({
+        'old_name': 'X',
+        'new_name': 'chrX',
+    })
+
+    chrom_map.append({
+        'old_name': 'Y',
+        'new_name': 'chrY',
+    })
+    chrom_map.append({
+        'old_name': 'MT',
+        'new_name': 'chrM',
+    })
+
+    return pd.DataFrame.from_records(chrom_map)
+
+
+def df2tsv(df: pd.DataFrame,
+           output_file: Path,
+           header: bool = True,
+           index: bool = False,
+           na_rep: str = '',
+           sep='\t',
+           compress=False) -> None:
+    if compress:
+        if not output_file.name.endswith('.gz'):
+            output_file = output_file.parents[0] / f'{output_file.name}.gz'
+        with gzip.open(output_file, 'wt') as fh:
+            df.to_csv(
+                fh,
+                header=header,
+                index=index,
+                sep=sep,
+                na_rep=na_rep,
+            )
+
+    else:
+        df.to_csv(
+            output_file,
+            header=header,
+            index=index,
+            sep=sep,
+            na_rep=na_rep,
+        )
+
+
+def tsv2df(input_file: Path,
+           comment='#',
+           header=0,
+           sep='\t',
+           dtype='str',
+           keep_default_na: bool = True) -> pd.DataFrame:
+    return pd.read_csv(
+        input_file,
+        comment=comment,
+        header=header,
+        sep=sep,
+        dtype=dtype,
+        keep_default_na=True,
+    )

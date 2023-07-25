@@ -4,8 +4,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from vcf.genomic_region import GenomicRegion
-from vcf.vcf import Vcf, _get_prefix_suffix, sync_alleles
+from genomics.genomic_region import GenomicRegion
+from genomics.vcf import Vcf, _get_prefix_suffix, sync_alleles
 
 
 def test_meta(tmp_path):
@@ -103,7 +103,6 @@ def test_annotate_tag(tmp_path):
     annotation.index()
 
     result = target.annotate(annotation, 'INFO/AF')
-
 
     record = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n').iloc[0, :]
 
@@ -284,6 +283,7 @@ def test_annotate__superset(tmp_path):
 
     df = result.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO\n')
     assert 'rs100' == df.iloc[0, :]['id']
+
 
 def test_annotate__span(tmp_path):
     target_data = [
@@ -507,15 +507,19 @@ def _to_vcf(data, filepath):
             fd.write(line)
             fd.write('\n')
 
+
 def test__get_prefix_suffix():
 
-    assert ('01234', '89') == _get_prefix_suffix('0123456789', 100, 109, '567', 105)
-    assert ('', '3456789') == _get_prefix_suffix('0123456789', 100, 109, '012', 100)
-    assert ('0123456', '') == _get_prefix_suffix('0123456789', 100, 109, '789', 107)
+    assert ('01234', '89') == _get_prefix_suffix('0123456789', 100, 109,
+                                                 '567', 105)
+    assert ('', '3456789') == _get_prefix_suffix('0123456789', 100, 109,
+                                                 '012', 100)
+    assert ('0123456', '') == _get_prefix_suffix('0123456789', 100, 109,
+                                                 '789', 107)
 
 
 def test_sync_alleles(tmp_path: Path):
-    fixture_dir = Path(__file__).parents[0] / 'fixture_sync_alleles' 
+    fixture_dir = Path(__file__).parents[0] / 'fixture_sync_alleles'
 
     vcf_file_1 = Vcf(fixture_dir / 'one.vcf', tmp_path).bgzip()
     vcf_file_2 = Vcf(fixture_dir / 'two.vcf', tmp_path).bgzip()
@@ -524,12 +528,15 @@ def test_sync_alleles(tmp_path: Path):
     vcf_file_2_df = vcf_file_2.to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\n')
 
     assert {'AGGAGTC'} == set(vcf_file_1_df['ref'])
-    assert {'AGGAGTC','A'} == set(vcf_file_2_df['ref'])
+    assert {'AGGAGTC', 'A'} == set(vcf_file_2_df['ref'])
 
-    vcf_file_1_result, vcf_file_2_result = sync_alleles(vcf_file_2.filepath, vcf_file_1.filepath, tmp_path / 'after')
+    vcf_file_1_result, vcf_file_2_result = sync_alleles(
+        vcf_file_2.filepath, vcf_file_1.filepath, tmp_path / 'after')
 
-    vcf1_observed = Vcf(vcf_file_1_result, tmp_path / 'after').to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\n')
-    vcf2_observed = Vcf(vcf_file_2_result, tmp_path / 'after').to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\n')
+    vcf1_observed = Vcf(vcf_file_1_result, tmp_path
+                        / 'after').to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\n')
+    vcf2_observed = Vcf(vcf_file_2_result, tmp_path
+                        / 'after').to_df('%CHROM\t%POS\t%ID\t%REF\t%ALT\n')
 
     assert {'AGGAGTC'} == set(vcf1_observed['ref'])
     assert {'AGGAGTC'} == set(vcf2_observed['ref'])
