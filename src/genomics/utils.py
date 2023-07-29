@@ -1,4 +1,5 @@
 import gzip
+import shutil
 from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
@@ -149,38 +150,7 @@ def execute(cmd, debug=False, pipe=False):
     return bag
 
 
-def fix_vcf_file(axiom_vcf_file: Path,
-                 output_dir: Path,
-                 genome_index_file: Path,
-                 genome_file: Path = None,
-                 delete_src: bool = False,
-                 n_threads: int = 1) -> Path:
-    shutil.rmtree(output_dir, ignore_errors=True)
-    output_dir.mkdir(parents=True)
-
-    chroms = [f'chr{i}' for i in range(1, 22)]
-    chroms.extend(['chrX', 'chrY', 'chrM'])
-
-    chrom_map_file = output_dir / 'chrom_map.tsv'
-
-    chrom_map = _create_chrom_map()
-
-    df2tsv(chrom_map, chrom_map_file)
-
-    vcf = Vcf(axiom_vcf_file, output_dir, n_threads)\
-            .bgzip()\
-            .rename_chroms(chrom_map_file,  delete_src)\
-            .include_chroms(set(chrom_map['new_name']), delete_src )\
-            .fix_header(genome_index_file, delete_src )
-
-    if genome_file:
-        vcf = vcf.normalize(genome_file, delete_src ) \
-                 .index()
-
-    return vcf.filepath
-
-
-def _create_chrom_map():
+def create_chrom_map():
     chrom_map = []
 
     for i in range(1, 22):
