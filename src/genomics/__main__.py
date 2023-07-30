@@ -4,9 +4,9 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-from . import clinvar
+from . import clinvar, dbsnp
 
-__VERSION__ = '0.1.0'
+__VERSION__ = '0.2.0'
 
 
 def main():
@@ -29,8 +29,8 @@ def main():
             dbsnp_vcf_file=Path(args.dbsnp_vcf_file),
             genome_file=Path(args.genome_file),
             genome_index_file=Path(args.genome_index_file),
-            tmp_dir=Path(args.tmp_dir),
             output_dir=Path(args.output_dir),
+            n_threads=args.n_threads,
         )
     else:
         parser.print_help()
@@ -61,8 +61,8 @@ def _config_dbsnp_parser(parser):
     parser.add_argument('--dbsnp-vcf-file', required=True)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--genome-index-file', required=True)
-    parser.add_argument('--tmp-dir', required=True)
     parser.add_argument('--output-dir', required=True)
+    parser.add_argument('--n-threads', type=int, default=1)
 
 
 def _config_clinvar_parser(parser):
@@ -70,7 +70,6 @@ def _config_clinvar_parser(parser):
     parser.add_argument('--clinvar-papu-vcf-file', required=True)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--genome-index-file', required=True)
-    parser.add_argument('--tmp-dir', required=True)
     parser.add_argument('--output-dir', required=True)
 
 

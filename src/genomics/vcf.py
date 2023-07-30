@@ -884,7 +884,7 @@ class Vcf():
 
         stdout = execute(cmd, pipe=True)
 
-        bag = {}
+        bag = set()
 
         for line in stdout:
             id_ = line.strip().split('\t')[0]
