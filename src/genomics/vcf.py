@@ -1302,7 +1302,7 @@ def concat(vcf_files: list,
            f'      &> {log_filepath}'
            '')
 
-    execute(cmd, debug=True)
+    execute(cmd)
     result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
 
     result.copy_to(output_file)

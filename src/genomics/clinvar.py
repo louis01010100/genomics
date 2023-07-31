@@ -14,10 +14,10 @@ def process(
     output_dir: Path,
 ):
 
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+    output_dir.mkdir(parents=True)
+
     shutil.rmtree(output_dir, ignore_errors=True)
 
-    output_dir.mkdir(parents=True)
     tmp_dir = output_dir / 'tmp'
     tmp_dir.mkdir(parents=True)
 
