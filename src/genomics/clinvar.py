@@ -11,15 +11,15 @@ def process(
     clinvar_papu_vcf_file: Path,
     genome_file: Path,
     genome_index_file: Path,
-    tmp_dir: Path,
     output_dir: Path,
 ):
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
     shutil.rmtree(output_dir, ignore_errors=True)
 
-    tmp_dir.mkdir(parents=True)
     output_dir.mkdir(parents=True)
+    tmp_dir = output_dir / 'tmp'
+    tmp_dir.mkdir(parents=True)
 
     chrom_map = create_chrom_map()
 

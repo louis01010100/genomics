@@ -21,7 +21,6 @@ def main():
             clinvar_papu_vcf_file=Path(args.clinvar_papu_vcf_file),
             genome_file=Path(args.genome_file),
             genome_index_file=Path(args.genome_index_file),
-            tmp_dir=Path(args.tmp_dir),
             output_dir=Path(args.output_dir),
         )
     elif args.subcommand == 'dbsnp':
