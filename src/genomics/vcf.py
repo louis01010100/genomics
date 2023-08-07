@@ -1268,10 +1268,12 @@ def merge(vcf_files: list,
     return Vcf(output_file, tmp_dir)
 
 
-def concat(vcf_files: list,
-           output_file: Path,
-           tmp_dir: Path,
-           n_threads: int = 1) -> Vcf:
+def concat(
+    vcf_files: list,
+    output_file: Path,
+    tmp_dir: Path,
+    n_threads: int = 1,
+) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     vcfs_file = tmp_dir / 'vcfs.tsv'
@@ -1302,7 +1304,7 @@ def concat(vcf_files: list,
            f'      &> {log_filepath}'
            '')
 
-    execute(cmd)
+    execute(cmd, debug=True)
     result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
 
     result.copy_to(output_file)

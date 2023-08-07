@@ -1,6 +1,8 @@
 import shutil
 from pathlib import Path
+from subprocess import PIPE, STDOUT, Popen
 
+import numpy as np
 import polars as pl
 from pathos.multiprocessing import ProcessPool
 
@@ -19,8 +21,8 @@ def process(
     n_cram_samples: int = 10,
 ):
 
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
+    # if output_dir.exists():
+    #     shutil.rmtree(output_dir)
     output_dir.mkdir(exist_ok=True)
 
     kgp_vcf_tmp_dir = output_dir / 'vcf'
@@ -49,8 +51,6 @@ def process(
         coordinates=coordinates,
         n_threads=n_threads,
     )
-
-    print(result_vcf.filepath)
 
     result = extract_depth(
         cram_dir,
@@ -94,17 +94,23 @@ def extract_variants(
                 .filepath
 
     bag = []
-    with ProcessPool(n_threads) as pool:
-        for vcf_file in pool.uimap(
-                process, jobs(
-                    vcf_dir,
-                    output_dir,
-                    samples,
-                    coordinates,
-                )):
-            bag.append(vcf_file)
+    # with ProcessPool(n_threads) as pool:
+    #     for vcf_file in pool.uimap(
+    #             process, jobs(
+    #                 vcf_dir,
+    #                 output_dir,
+    #                 samples,
+    #                 coordinates,
+    #             )):
+    #         bag.append(vcf_file)
+    # result_vcf = concat(
+    #     vcf_files=bag,
+    #     output_file=output_dir / 'kgp.vcf.bgz',
+    #     tmp_dir=output_dir,
+    #     n_threads=n_threads,
+    # )
 
-    result_vcf = concat(bag, output_dir, 'kgp.vcf.gz', n_threads)
+    result_vcf = output_dir / 'kgp.vcf.bgz'
 
     return result_vcf
 
@@ -118,70 +124,90 @@ def extract_depth(
     n_samples: int,
 ):
 
-    def jobs(cram_dir, ref_file, coordinates_file):
+    # def jobs(cram_dir, ref_file, coordinates_file):
+    #
+    #     n = 0
+    #
+    #     for cram_file in cram_dir.glob('*.cram'):
+    #         yield {
+    #             'cram_file': cram_file,
+    #             'coordinates_file': coordinates_file,
+    #             'ref_file': ref_file,
+    #         }
+    #         n += 1
+    #         if n >= n_samples:
+    #             break
+    #
+    # def parse_cram(args):
+    #     cram_file = args['cram_file']
+    #     ref_file = args['ref_file']
+    #     coordinates_file = args['coordinates_file']
+    #
+    #     cmd = (''
+    #            f'samtools mpileup'
+    #            f'    -l {coordinates_file}'
+    #            f'    -f {ref_file}'
+    #            f'    {cram_file}'
+    #            '')
+    #
+    #     with Popen(cmd, shell=True, text=True, stdout=PIPE) as proc:
+    #         bag = []
+    #         for line in proc.stdout:
+    #             items = line.strip().split('\t')
+    #             chrom = items[0]
+    #             pos = items[1]
+    #             ref = items[2]
+    #             depth = items[3]
+    #
+    #             bag.append({
+    #                 'chrom': chrom,
+    #                 'pos': pos,
+    #                 'ref': ref,
+    #                 'depth': depth
+    #             })
+    #
+    #         proc.wait()
+    #
+    #         if proc.returncode:
+    #             raise Exception(cmd)
+    #     sample_name = cram_file.name.split('.')[0]
+    #     return sample_name, pl.from_dicts(bag)
+    #
+    # coordinates_file = output_dir / 'coordinates.tsv'
+    #
+    # coordinates.write_csv(coordinates_file, has_header=False, separator='\t')
+    #
+    # depth_bag = {}
+    # with ProcessPool(n_threads) as pool:
+    #     for future in pool.uimap(
+    #             parse_cram,
+    #             jobs(cram_dir, ref_file, coordinates_file),
+    #     ):
+    #         sample_name = future[0]
+    #         depth_df = future[1]
+    #
+    #         output_file = output_dir / f'{sample_name}.tsv'
+    #         depth_df.write_csv(output_file, has_header=True, separator='\t')
+    #
+    #         depth_bag[sample_name] = output_file
 
-        n = 0
+    bag = []
+    for f in output_dir.glob('*.tsv'):
+        if f.name == 'coordinates.tsv':
+            continue
+        d = pl.read_csv(f, has_header=True, separator='\t')
+        bag.append(d)
 
-        for cram_file in cram_dir.glob('*'):
-            yield {
-                'cram_file': cram_file,
-                'coordinates_file': coordinates_file,
-                'ref_file': ref_file,
-            }
-            n += 1
-            if n >= n_samples:
-                break
+    data = pl.concat(bag)
 
-    def parse_cram(args):
-        cram_file = args['cram_file']
-        ref_file = args['ref_file']
-        coordinates_file = args['coordinates_file']
+    bag = []
+    for keys, df in data.groupby(['chrom', 'pos', 'ref']):
+        median = np.median(df['depth'])
+        bag.append({
+            'chrom': keys[0],
+            'pos': keys[1],
+            'ref': keys[2],
+            'depth': median
+        })
 
-        cmd = (''
-               f'samtools mpileup'
-               f'    -l {coordinates_file}'
-               f'    -f {ref_file}'
-               f'    {cram_file}'
-               '')
-
-        with Popen(cmd, shell=True, text=True, stdout=PIPE) as proc:
-            bag = []
-            for line in proc.stdout:
-                items = line.strip().split('\t')
-                chrom = items[0]
-                pos = items[1]
-                ref = items[2]
-                depth = items[3]
-
-                bag.append({
-                    'chrom': chrom,
-                    'pos': pos,
-                    'ref': ref,
-                    'depth': depth
-                })
-
-            proc.wait()
-
-            if proc.returncode:
-                raise Exception(cmd)
-        return cram_file.name, pl.from_dicts(bag)
-
-    coordinates_file = output_dir / 'coordinates.tsv'
-
-    coordinates.write_csv(coordinates_file, has_header=False, separator='\t')
-
-    depth_bag = {}
-    with ProcessPool(n_threads) as pool:
-        for future in pool.uimap(
-                parse_cram,
-                jobs(cram_dir, ref_file, coordinates_file),
-        ):
-            sample_name = future[0]
-            depth_df = future[1]
-
-            output_file = output_dir / f'{sample_name}.tsv'
-            depth_df.write_csv(output_file, has_header=True, separator='\t')
-
-            depth_bag[sample_name] = output_file
-
-    return depth_bag
+    return pl.from_dicts(bag)
