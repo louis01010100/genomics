@@ -136,8 +136,7 @@ def execute(cmd, debug=False, pipe=False):
 
     bag = []
 
-    with Popen(cmd, shell=True, text=True, stdout=PIPE,
-               stderr=STDOUT) as proc:
+    with Popen(cmd, shell=True, text=True, stdout=PIPE) as proc:
         for line in proc.stdout:
             if pipe:
                 bag.append(line.strip())

@@ -5,12 +5,15 @@ import string
 from io import StringIO
 from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
+from typing import TextIO, Tuple, Union
 
+import numpy as np
 import pandas as pd
 from Bio import bgzf
 from icecream import ic
 
 from .genomic_region import GenomicRegion
+from .snv import Snv
 from .utils import create_chrom_map, df2tsv, execute, is_gzipped
 
 COLUMN_IDX_MAP = {
@@ -25,38 +28,56 @@ COLUMN_IDX_MAP = {
 }
 
 
-class VcfRecord():
+class AllelePairs():
 
-    def __init__(self, chrom, pos, id_, ref, alt):
-        self.chrom = chrom
-        self.pos = pos
-        self.id = id_
-        self.ref = ref
-        self.alt = alt
+    def __init__(self):
+        self.allele_pairs = dict()
 
-    def __hash__(self):
-        return hash((self.chrom, self.pos, self.id, self.ref, self.alt))
+    def update(self, other) -> None:
+        self.allele_pairs.update(other.allele_pairs)
 
-    def __eq__(self, other):
-        if self is other:
-            return True
+    def add_allele_pair(self, ref, alt) -> None:
+        key = (ref, alt)
+        self.allele_pairs[key] = {'ref': ref, 'alt': alt}
 
-        if self.chrom != other.chrom:
-            return False
+        longest_ref = max([x['ref'] for x in self.allele_pairs.values()],
+                          key=len)
 
-        if self.pos != other.pos:
-            return False
+        delta = dict()
 
-        if self.id_ != other.id_:
-            return False
+        for key, value in self.allele_pairs.items():
+            ref = value['ref']
+            alt = value['alt']
 
-        if self.ref != other.ref:
-            return False
+            if ref == longest_ref:
+                continue
 
-        if self.alt != other.alt:
-            return False
+            suffix = longest_ref[len(ref):]
 
-        return True
+            new_ref = ref + suffix
+            new_alt = ','.join([x + suffix for x in alt.split(',')])
+
+            delta[key] = {'ref': new_ref, 'alt': new_alt}
+
+        self.allele_pairs.update(delta)
+
+    def get_updated_allele_pair(self, ref, alt) -> dict:
+        key = (ref, alt)
+        return self.allele_pairs[key]
+
+    def __str__(self) -> str:
+        return __repr__(self)
+
+    def __repr__(self) -> str:
+
+        bag = []
+
+        for k, v in self.allele_pairs.items():
+            value = '{' + f'{k}:{v}' + '}'
+            bag.append(value)
+            output = ','.join(bag)
+
+        return f'[{output}]'
 
 
 class Vcf():
@@ -352,12 +373,14 @@ class Vcf():
                f'       --stats {self.index_file}'
                '')
 
-        stdout, stderr = execute(cmd, pipe=True)
-        data = StringIO(stdout)
+        stdout = execute(cmd, pipe=True)
+        data = StringIO(''.join(stdout))
 
-        df = pd.read_csv(data,
-                         names=['contig_name', 'contig_size', 'n_records'],
-                         sep='\t')
+        df = pd.read_csv(
+            data,
+            names=['contig_name', 'contig_size', 'n_records'],
+            sep='\t',
+        )
         return sorted(list(set(df['contig_name'])))
 
     def rename_chroms(self, chrom_map_file, delete_src=False):
@@ -536,30 +559,40 @@ class Vcf():
             self.delete()
         return Vcf(output_file, self.tmp_dir, self.n_threads)
 
-    # def subset_chrom(self, chrom: str, delete_src: bool =False):
-    #
-    #     self.index()
-    #     input_filepath = self.filepath
-    #     output_file = self.tmp_dir / self.filepath.name.replace(
-    #         '.vcf.bgz',
-    #         f'-{chrom}.vcf.bgz',
-    #     )
-    #     log_filepath = self.tmp_dir / f'{output_file.name}.log'
-    #
-    #     cmd = (''
-    #            f'bcftools view'
-    #            f'      -r "{chrom}"'
-    #            f'      -O z'
-    #            f'      -o {output_file}'
-    #            f'      --threads {self.n_threads}'
-    #            f'      {input_filepath}'
-    #            f'      &> {log_filepath}'
-    #            '')
-    #
-    #     execute(cmd)
-    #     if delete_src:
-    #         self.delete()
-    #     return Vcf(output_file, self.tmp_dir, self.n_threads)
+    def fetch_variant(self, chrom: str, pos: int):
+
+        cmd = (''
+               f'bcftools view'
+               f'      -H'
+               f'      -r {chrom}:{pos}'
+               f'      {self.filepath}'
+               '')
+
+        records = execute(cmd, debug=True, pipe=True)
+        # print(records)
+        assert False
+
+        bag = []
+
+        for record in records:
+
+            items = record.strip().split('\t')
+            chrom = items[0]
+            pos_fetched = int(items[1])
+            id_ = items[2]
+            ref = items[3]
+            alt = items[4]
+
+            bag.append({
+                'chrom': chrom,
+                'pos': pos_fetched,
+                'id': id_,
+                'ref': ref,
+                'alt': alt,
+                'match': pos_fetched == pos,
+            })
+
+        return bag
 
     def include_chroms(self, chroms: set, delete_src: bool = False):
         input_filepath = self.filepath
@@ -1278,10 +1311,10 @@ def concat(
 
     vcfs_file = tmp_dir / 'vcfs.tsv'
 
-    with vcfs_file.open('wt') as fd:
-        for vcf_file in vcf_files:
-            Vcf(vcf_file, tmp_dir).bgzip().index()
-            print(vcf_file, file=fd)
+    # with vcfs_file.open('wt') as fd:
+    #     for vcf_file in vcf_files:
+    #         Vcf(vcf_file, tmp_dir).bgzip().index()
+    #         print(vcf_file, file=fd)
 
     output_file = Path(output_file)
 
@@ -1312,11 +1345,11 @@ def concat(
     return Vcf(output_file, tmp_dir)
 
 
-def fetch_variants(region: GenomicRegion, vcf_file: Path) -> list:
+def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
     cmd = (''
            f'bcftools view'
            f'      -H'
-           f'      -r {region}'
+           f'      -r {chrom}:{pos}'
            f'      {vcf_file}'
            '')
     records = execute(cmd, debug=False, pipe=True)
@@ -1326,7 +1359,7 @@ def fetch_variants(region: GenomicRegion, vcf_file: Path) -> list:
     for line in records:
         items = line.split('\t')
 
-        v = VcfRecord(
+        v = Snv(
             chrom=items[0],
             pos=int(items[1]),
             id_=items[2],
@@ -1368,3 +1401,102 @@ def fix_vcf_file(axiom_vcf_file: Path,
                  .index()
 
     return vcf.filepath
+
+
+def vcf2dict(*vcf_files) -> dict:
+    result = None
+
+    for vcf_file in vcf_files:
+        if is_gzipped(vcf_file):
+            with gzip.open(vcf_file, 'rt') as fh:
+                output = _vcf2dict(fh)
+        else:
+            with vcf_file.open('rt') as fh:
+                output = _vcf2dict(fh)
+
+        if not result:
+            result = output
+
+        for coordinate, allele_pairs in output.items():
+            if coordinate not in result:
+                continue
+            result[coordinate].update(allele_pairs)
+
+    return result
+
+
+def _vcf2dict(fh: TextIO) -> dict:
+    bag = dict()
+    for line in fh:
+        if line.startswith('#'):
+            continue
+
+        chrom, pos, id_, ref, alt, rest = line.strip().split('\t', 5)
+
+        coordinate = (chrom, pos)
+
+        if coordinate not in bag:
+            bag[coordinate] = AllelePairs()
+        bag[coordinate].add_allele_pair(ref, alt)
+
+    return bag
+
+
+def filter_variants(ref_snv: Snv, snvs: list):
+
+    target = None
+    target_updated = None
+    for snv in snvs:
+        if ref_snv == snv:
+            target = snv
+            target_updated = snv
+            break
+    if target:
+        return target, target_updated
+
+    for snv in snvs:
+        snv_synced = _sync_variant(ref_snv, snv)
+
+        if snv_synced.ref != ref_snv.ref:
+            continue
+        if not (snv_synced.alts & ref_snv.alts):
+            continue
+        target_updated = snv_synced
+        target = snv
+        break
+
+    return target, target_updated
+
+
+# the snv.pos
+def _sync_variant(ref_snv: Snv, snv: Snv):
+
+    assert ref_snv.pos >= snv.pos
+
+    offset = ref_snv.pos - snv.pos
+
+    ref_synced = snv.ref[offset:]
+
+    if len(ref_synced) > len(ref_snv.ref):
+        ref_synced = ref_synced[0:len(ref_snv.ref)]
+
+    bag = set()
+
+    alt_sizes = set(len(x) for x in ref_snv.alts)
+
+    for alt_size in alt_sizes:
+        for alt in snv.alts:
+            tmp = alt[offset:]
+            if len(tmp) > alt_size:
+                tmp = alt[0:alt_size]
+            bag.add(tmp)
+
+    alt_synced = ','.join(sorted(list(bag)))
+
+    return Snv(
+        chrom=snv.chrom,
+        pos=ref_snv.pos,
+        id_=snv.id,
+        ref=ref_synced,
+        alt=alt_synced,
+    )

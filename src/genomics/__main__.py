@@ -43,7 +43,7 @@ def main():
             ref_file=Path(args.ref_file),
             output_dir=Path(args.output_dir),
             samples_file=Path(args.samples_file),
-            coordinates_file=Path(args.coordinates_file),
+            coordinate_vcf_file=Path(args.coordinate_vcf_file),
             n_cram_samples=args.n_cram_samples,
             min_read_depth=args.min_read_depth,
             n_threads=args.n_threads,
@@ -102,7 +102,7 @@ def _config_kgp_parser(parser):
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--ref-file', required=True)
     parser.add_argument('--samples-file', required=True)
-    parser.add_argument('--coordinates-file', required=True)
+    parser.add_argument('--coordinate-vcf-file', required=True)
     parser.add_argument('--min-read-depth', type=int, default=2)
     parser.add_argument('--n-cram-samples', type=int, default=10)
     parser.add_argument('--n-threads', type=int, default=1)
