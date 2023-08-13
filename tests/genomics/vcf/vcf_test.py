@@ -628,7 +628,7 @@ def test__sync_variant():
 
     snv = Snv(chrom='chr1', pos=100, id_='rs100', ref='AT', alt='CG')
     ref_snv = Snv(chrom='chr1', pos=101, id_='AX-100', ref='T', alt='C')
-    expected = Snv(chrom='chr1', pos=101, id_='rs100', ref='T', alt='G')
+    expected = Snv(chrom='chr1', pos=101, id_='rs100', ref='T', alt='')
     actual = _sync_variant(ref_snv, snv)
 
     assert actual == expected
@@ -636,6 +636,22 @@ def test__sync_variant():
     snv = Snv(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG')
     ref_snv = Snv(chrom='chr1', pos=201, id_='AX-100', ref='C', alt='G')
     expected = Snv(chrom='chr1', pos=201, id_='rs101', ref='C', alt='G')
+    actual = _sync_variant(ref_snv, snv)
+
+    assert actual == expected
+
+    snv = Snv(chrom='chr1', pos=200, id_='rs101', ref='TCC', alt='GGGG')
+    ref_snv = Snv(chrom='chr1', pos=201, id_='AX-100', ref='C', alt='G')
+    expected = Snv(chrom='chr1', pos=201, id_='rs101', ref='C', alt='G')
+    actual = _sync_variant(ref_snv, snv)
+
+    assert actual == expected
+
+    snv = Snv(chrom='chr1', pos=200, id_='rs101', ref='TG', alt='T,TGG')
+
+    ref_snv = Snv(chrom='chr1', pos=200, id_='AX-100', ref='TG', alt='CA,TGG')
+
+    expected = Snv(chrom='chr1', pos=200, id_='rs101', ref='TG', alt='TGG')
     actual = _sync_variant(ref_snv, snv)
 
     assert actual == expected

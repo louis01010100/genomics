@@ -570,7 +570,6 @@ class Vcf():
 
         records = execute(cmd, debug=True, pipe=True)
         # print(records)
-        assert False
 
         bag = []
 
@@ -696,6 +695,9 @@ class Vcf():
             bag.append({'sample_name': sample})
 
         samples_file = self.tmp_dir / 'samples.tsv'
+        filename = ''.join(random.choices(string.ascii_letters, k=10))
+
+        samples_file = self.tmp_dir / f'samples-{filename}'
 
         pd.DataFrame.from_records(bag).to_csv(
             samples_file,
@@ -1311,10 +1313,10 @@ def concat(
 
     vcfs_file = tmp_dir / 'vcfs.tsv'
 
-    # with vcfs_file.open('wt') as fd:
-    #     for vcf_file in vcf_files:
-    #         Vcf(vcf_file, tmp_dir).bgzip().index()
-    #         print(vcf_file, file=fd)
+    with vcfs_file.open('wt') as fd:
+        for vcf_file in vcf_files:
+            Vcf(vcf_file, tmp_dir).bgzip().index()
+            print(vcf_file, file=fd)
 
     output_file = Path(output_file)
 
@@ -1338,11 +1340,14 @@ def concat(
            '')
 
     execute(cmd, debug=True)
-    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
+    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True)
 
     result.copy_to(output_file)
 
-    return Vcf(output_file, tmp_dir)
+    result = Vcf(output_file, tmp_dir)
+    result.index()
+
+    return result
 
 
 def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
@@ -1447,7 +1452,8 @@ def filter_variants(ref_snv: Snv, snvs: list):
     target = None
     target_updated = None
     for snv in snvs:
-        if ref_snv == snv:
+        if ref_snv.pos == snv.pos and ref_snv.ref == snv.ref and (ref_snv.alts
+                                                                  & snv.alts):
             target = snv
             target_updated = snv
             break
@@ -1482,14 +1488,12 @@ def _sync_variant(ref_snv: Snv, snv: Snv):
 
     bag = set()
 
-    alt_sizes = set(len(x) for x in ref_snv.alts)
+    for alt in snv.alts:
+        alt_synced = alt[offset:]
+        if len(alt) == len(snv.ref):
+            alt_synced = alt_synced[0:len(ref_synced)]
 
-    for alt_size in alt_sizes:
-        for alt in snv.alts:
-            tmp = alt[offset:]
-            if len(tmp) > alt_size:
-                tmp = alt[0:alt_size]
-            bag.add(tmp)
+        bag.add(alt_synced)
 
     alt_synced = ','.join(sorted(list(bag)))
 

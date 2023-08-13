@@ -6,7 +6,7 @@ import numpy as np
 import polars as pl
 from pathos.multiprocessing import ProcessPool
 
-from .vcf import Vcf, concat
+from .vcf import Vcf, concat, fetch_variants, filter_variants
 
 
 def process(
@@ -21,8 +21,8 @@ def process(
     n_cram_samples: int = 10,
 ):
 
-    # if output_dir.exists():
-    #     shutil.rmtree(output_dir)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
     output_dir.mkdir(exist_ok=True)
 
     kgp_vcf_tmp_dir = output_dir / 'vcf'
@@ -42,7 +42,7 @@ def process(
             separator='\t',
         )['sample_id'])
 
-    variants = extract_variants(
+    variants = subset_variants(
         vcf_dir=vcf_dir,
         output_dir=kgp_vcf_tmp_dir,
         samples=samples,
@@ -50,7 +50,12 @@ def process(
         n_threads=n_threads,
     )
 
-    tmp = result.join(
+    variants_file = output_dir / 'variants.tsv'
+    variants.write_csv(variants_file, has_header=True, separator='\t')
+
+    variants = pl.read_csv(variants_file, has_header=True, separator='\t')
+
+    tmp = variants.join(
         coordinates.with_columns(pl.lit(True).alias('coord')),
         on=['chrom', 'pos'],
         how='left',
@@ -71,7 +76,7 @@ def process(
     print(result)
 
 
-def extract_variants(
+def subset_variants(
     vcf_dir: Path,
     output_dir: Path,
     samples: set,
@@ -79,13 +84,13 @@ def extract_variants(
     n_threads: int,
 ):
 
-    merged_vcf_file = subset_samples(vcf_dir, output_dir, samples, n_threads)
+    vcf_file = subset_samples(vcf_dir, output_dir, samples, n_threads)
 
-    merged_vcf = Vcf(merged_vcf_file, output_dir)
+    merged_vcf = Vcf(vcf_file, output_dir)
     merged_vcf.index()
 
-    variants = subset_variants(
-        merged_vcf,
+    variants = subset_snvs(
+        merged_vcf.filepath,
         output_dir,
         coordinates,
         n_threads,
@@ -94,18 +99,12 @@ def extract_variants(
     variants = variants.with_columns(
         pl.col('pos').cast(pl.Int64).alias('pos'))
 
-    variants_file = output_dir / 'variants.tsv'
-
-    variants.write_csv(variants_file, has_header=True, separator='\t')
-
-    variants = pl.read_csv(variants_file, has_header=True, separator='\t')
-
     return variants
 
 
-def subset_variants(merged_vcf, output_dir, coordinates, n_threads):
+def subset_snvs(vcf_file, output_dir, coordinates, n_threads):
 
-    def jobs(coordinates, merged_vcf):
+    def jobs(coordinates, vcf_file):
         for coord in coordinates.to_dicts():
             yield {
                 'chrom': coord['chrom'],
@@ -113,7 +112,7 @@ def subset_variants(merged_vcf, output_dir, coordinates, n_threads):
                 'id': coord['id'],
                 'ref': coord['ref'],
                 'alt': coord['alt'],
-                'vcf': merged_vcf,
+                'vcf_file': vcf_file,
             }
 
     def process(job):
@@ -125,15 +124,15 @@ def subset_variants(merged_vcf, output_dir, coordinates, n_threads):
 
         print(chrom, pos, id_, ref, alt)
 
-        merged_vcf = job['vcf']
+        vcf_file = job['vcf_file']
 
-        records = merged_vcf.fetch_variant(chrom, pos)
+        records = fetch_variants(chrom, pos, vcf_file)
 
         return records
 
     bag = []
     with ProcessPool(n_threads) as pool:
-        for records in pool.uimap(process, jobs(coordinates, merged_vcf)):
+        for records in pool.uimap(process, jobs(coordinates, vcf_file)):
             bag.extend(records)
 
     data = pl.from_dicts(bag)
@@ -155,19 +154,19 @@ def subset_samples(vcf_dir, output_dir, samples, n_threads):
         vcf_file = job['vcf_file']
         output_dir = job['output_dir']
         samples = job['samples']
-        return Vcf( vcf_file, output_dir) \
+        return Vcf(vcf_file, output_dir) \
                 .subset_samples(samples) \
                 .trim_alts() \
                 .filepath
 
     bag = []
 
-    # with ProcessPool(n_threads) as pool:
-    #     for vcf_file in pool.uimap(
-    #             process,
-    #             jobs(vcf_dir, output_dir, samples),
-    #     ):
-    #         bag.append(vcf_file)
+    with ProcessPool(n_threads) as pool:
+        for vcf_file in pool.uimap(
+                process,
+                jobs(vcf_dir, output_dir, samples),
+        ):
+            bag.append(vcf_file)
 
     output_file = output_dir / 'kgp.vcf.bgz'
     result_vcf = concat(
