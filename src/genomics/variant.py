@@ -1,4 +1,4 @@
-class Snv():
+class Variant():
 
     def __init__(self, chrom, pos, ref, alt, id_='.'):
         self.chrom = chrom
@@ -13,6 +13,14 @@ class Snv():
         if not self._alts:
             self._alts = set(self.alt.split(','))
         return self._alts
+
+    @property
+    def is_mnv(self):
+        mnv = True
+        for alt in self._alts:
+            if len(alt) != len(self.ref):
+                mnv = False
+        return mnv
 
     def __str__(self):
 

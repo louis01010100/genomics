@@ -4,9 +4,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from genomics.genomic_region import GenomicRegion
-from genomics.snv import Snv
-from genomics.vcf import (AllelePairs, Vcf, _get_prefix_suffix, _sync_variant,
-                          filter_variants, sync_alleles, vcf2dict)
+from genomics.variant import Variant
+from genomics.vcf import (AllelePairs, Vcf, filter_variants, split_rtrim,
+                          sync_alleles, vcf2dict)
 
 
 def test_meta(tmp_path):
@@ -508,15 +508,14 @@ def _to_vcf(data, filepath):
             fd.write('\n')
 
 
-def test__get_prefix_suffix():
-
-    assert ('01234', '89') == _get_prefix_suffix('0123456789', 100, 109,
-                                                 '567', 105)
-    assert ('', '3456789') == _get_prefix_suffix('0123456789', 100, 109,
-                                                 '012', 100)
-    assert ('0123456', '') == _get_prefix_suffix('0123456789', 100, 109,
-                                                 '789', 107)
-
+# def test__get_prefix_suffix():
+#
+#     assert ('01234', '89') == _get_prefix_suffix('0123456789', 100, 109,
+#                                                  '567', 105)
+#     assert ('', '3456789') == _get_prefix_suffix('0123456789', 100, 109,
+#                                                  '012', 100)
+#     assert ('0123456', '') == _get_prefix_suffix('0123456789', 100, 109,
+#                                                  '789', 107)
 
 # def test_sync_alleles(tmp_path: Path):
 #     fixture_dir = Path(__file__).parents[0] / 'fixture_sync_alleles'
@@ -585,73 +584,43 @@ def test__AllelePairs():
 
 def test_filter_variants():
     snvs = [
-        Snv(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
-        Snv(chrom='chr1', pos=200, id_='rs101', ref='T', alt='G'),
+        Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
+        Variant(chrom='chr1', pos=200, id_='rs101', ref='T', alt='G'),
     ]
 
-    ref_snv = Snv(chrom='chr1', pos=200, id_='AX-100', ref='T', alt='G')
+    ref_snv = Variant(chrom='chr1', pos=200, id_='AX-100', ref='T', alt='G')
 
-    actual, actual_synced = filter_variants(ref_snv, snvs)
+    actual = filter_variants(ref_snv, snvs)
 
     assert ref_snv == actual
-    assert ref_snv == actual_synced
 
     snvs = [
-        Snv(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
-        Snv(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG'),
+        Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
+        Variant(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG'),
     ]
 
-    ref_snv = Snv(chrom='chr1', pos=201, id_='AX-100', ref='C', alt='G')
+    ref_snv = Variant(chrom='chr1', pos=201, id_='AX-100', ref='C', alt='G')
 
-    expected = Snv(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG')
-    expected_synced = Snv(
-        chrom='chr1',
-        pos=201,
-        id_='rs101',
-        ref='C',
-        alt='G',
-    )
+    expected = Variant(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG')
 
-    actual, actual_synced = filter_variants(ref_snv, snvs)
+    actual = filter_variants(ref_snv, snvs)
 
     assert expected == actual
-    assert expected_synced == actual_synced
+
+    snvs = [
+        Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C,G'),
+    ]
+    ref_snv = Variant(chrom='chr1', pos=100, id_='AX-100', ref='A', alt='T')
+
+    expected = Variant(chrom='chr1', pos=100, id_='rs101', ref='A', alt='C,G')
+
+    assert filter_variants(ref_snv, snvs, check_alt=True) is None
+    assert expected == filter_variants(ref_snv, snvs, check_alt=False)
 
 
-def test__sync_variant():
-    snv = Snv(chrom='chr1', pos=100, id_='rs100', ref='AT', alt='CG')
-    ref_snv = Snv(chrom='chr1', pos=100, id_='AX-100', ref='A', alt='C')
-    expected = Snv(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C')
-    actual = _sync_variant(ref_snv, snv)
+def test_split_rtrim():
+    snv = Variant(chrom='chr1', pos=100, id_='rs100', ref='AT', alt='CG')
 
-    assert actual == expected
+    result = split_rtrim(snv)
 
-    snv = Snv(chrom='chr1', pos=100, id_='rs100', ref='AT', alt='CG')
-    ref_snv = Snv(chrom='chr1', pos=101, id_='AX-100', ref='T', alt='C')
-    expected = Snv(chrom='chr1', pos=101, id_='rs100', ref='T', alt='')
-    actual = _sync_variant(ref_snv, snv)
-
-    assert actual == expected
-
-    snv = Snv(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG')
-    ref_snv = Snv(chrom='chr1', pos=201, id_='AX-100', ref='C', alt='G')
-    expected = Snv(chrom='chr1', pos=201, id_='rs101', ref='C', alt='G')
-    actual = _sync_variant(ref_snv, snv)
-
-    assert actual == expected
-
-    snv = Snv(chrom='chr1', pos=200, id_='rs101', ref='TCC', alt='GGGG')
-    ref_snv = Snv(chrom='chr1', pos=201, id_='AX-100', ref='C', alt='G')
-    expected = Snv(chrom='chr1', pos=201, id_='rs101', ref='C', alt='G')
-    actual = _sync_variant(ref_snv, snv)
-
-    assert actual == expected
-
-    snv = Snv(chrom='chr1', pos=200, id_='rs101', ref='TG', alt='T,TGG')
-
-    ref_snv = Snv(chrom='chr1', pos=200, id_='AX-100', ref='TG', alt='CA,TGG')
-
-    expected = Snv(chrom='chr1', pos=200, id_='rs101', ref='TG', alt='TGG')
-    actual = _sync_variant(ref_snv, snv)
-
-    assert actual == expected
+    assert len(result)

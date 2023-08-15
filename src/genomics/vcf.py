@@ -13,8 +13,8 @@ from Bio import bgzf
 from icecream import ic
 
 from .genomic_region import GenomicRegion
-from .snv import Snv
 from .utils import create_chrom_map, df2tsv, execute, is_gzipped
+from .variant import Variant
 
 COLUMN_IDX_MAP = {
     'CHROM': 0,
@@ -214,8 +214,10 @@ class Vcf():
         output_file = Path(output_file)
 
         shutil.copy2(self.filepath, output_file)
-        shutil.copy2(self.filepath.with_suffix('.bgz.csi'),
-                     output_file.with_suffix('.bgz.csi'))
+
+        idx_file = self.filepath.with_suffix('.bgz.csi')
+        if idx_file.exists():
+            shutil.copy2(idx_file, output_file.with_suffix('.bgz.csi'))
 
     def move_to(self, output_file):
         output_file = Path(output_file)
@@ -1150,14 +1152,6 @@ def _new_vcf_record(current_line, ref_line, columns):
     return '\t'.join(current_record)
 
 
-def _get_prefix_suffix(new_ref, start, stop, ref, pos):
-
-    allele_prefix = new_ref[0:pos - start]
-    allele_suffix = new_ref[pos + len(ref) - start:]
-
-    return allele_prefix, allele_suffix
-
-
 def _new_info(
     current_alt,
     current_info,
@@ -1313,10 +1307,10 @@ def concat(
 
     vcfs_file = tmp_dir / 'vcfs.tsv'
 
-    with vcfs_file.open('wt') as fd:
-        for vcf_file in vcf_files:
-            Vcf(vcf_file, tmp_dir).bgzip().index()
-            print(vcf_file, file=fd)
+    # with vcfs_file.open('wt') as fd:
+    #     for vcf_file in vcf_files:
+    #         Vcf(vcf_file, tmp_dir).bgzip().index()
+    #         print(vcf_file, file=fd)
 
     output_file = Path(output_file)
 
@@ -1340,7 +1334,7 @@ def concat(
            '')
 
     execute(cmd, debug=True)
-    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True)
+    result = Vcf(tmp_filepath, tmp_dir).sort()
 
     result.copy_to(output_file)
 
@@ -1364,7 +1358,7 @@ def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
     for line in records:
         items = line.split('\t')
 
-        v = Snv(
+        v = Variant(
             chrom=items[0],
             pos=int(items[1]),
             id_=items[2],
@@ -1447,60 +1441,73 @@ def _vcf2dict(fh: TextIO) -> dict:
     return bag
 
 
-def filter_variants(ref_snv: Snv, snvs: list):
+def filter_variants(ref_snv: Variant, snvs: list, check_alt=True):
 
     target = None
-    target_updated = None
     for snv in snvs:
-        if ref_snv.pos == snv.pos and ref_snv.ref == snv.ref and (ref_snv.alts
-                                                                  & snv.alts):
-            target = snv
-            target_updated = snv
-            break
+        if ref_snv.pos == snv.pos and ref_snv.ref == snv.ref:
+            if not check_alt:
+                target = snv
+
+            if ref_snv.alts & snv.alts:
+                target = snv
+
     if target:
-        return target, target_updated
+        return target
+
+    ref_pairs = split_rtrim(ref_snv)
 
     for snv in snvs:
-        snv_synced = _sync_variant(ref_snv, snv)
 
-        if snv_synced.ref != ref_snv.ref:
+        pairs = split_rtrim(snv)
+
+        for ref_pair in ref_pairs:
+            for pair in pairs:
+                if ref_pair[0] != pair[0]:
+                    continue
+
+                if not check_alt:
+                    target = snv
+
+                if ref_pair[1] == pair[1]:
+                    target = snv
+
+    if target:
+        return target
+
+    if not ref_snv.is_mnv:
+        return target
+
+    for snv in snvs:
+        if not snv.is_mnv:
             continue
-        if not (snv_synced.alts & ref_snv.alts):
-            continue
-        target_updated = snv_synced
-        target = snv
-        break
 
-    return target, target_updated
+        offset = ref_snv.pos - snv.pos
+        ref = snv.ref[offset:offset + len(ref_snv.ref)]
+        alts = {alt[offset:offset + len(ref_snv.ref)] for alt in snv.alts}
+
+        if ref == ref_snv.ref and (ref_snv.alts & alts):
+            target = snv
+
+    return target
 
 
-# the snv.pos
-def _sync_variant(ref_snv: Snv, snv: Snv):
+def split_rtrim(snv: Variant):
 
-    assert ref_snv.pos >= snv.pos
+    def trim(a, b):
+        if len(a) == 1:
+            return a, b
+        if len(b) == 1:
+            return a, b
 
-    offset = ref_snv.pos - snv.pos
+        if a[-1] != b[-1]:
+            return a, b
 
-    ref_synced = snv.ref[offset:]
-
-    if len(ref_synced) > len(ref_snv.ref):
-        ref_synced = ref_synced[0:len(ref_snv.ref)]
+        return trim(a[0:-1], b[0:-1])
 
     bag = set()
-
     for alt in snv.alts:
-        alt_synced = alt[offset:]
-        if len(alt) == len(snv.ref):
-            alt_synced = alt_synced[0:len(ref_synced)]
+        x, y = trim(snv.ref, alt)
+        bag.add((x, y))
 
-        bag.add(alt_synced)
-
-    alt_synced = ','.join(sorted(list(bag)))
-
-    return Snv(
-        chrom=snv.chrom,
-        pos=ref_snv.pos,
-        id_=snv.id,
-        ref=ref_synced,
-        alt=alt_synced,
-    )
+    return bag

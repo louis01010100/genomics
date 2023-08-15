@@ -21,9 +21,9 @@ def process(
     n_cram_samples: int = 10,
 ):
 
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    output_dir.mkdir(exist_ok=True)
+    # if output_dir.exists():
+    #     shutil.rmtree(output_dir)
+    # output_dir.mkdir(exist_ok=True)
 
     kgp_vcf_tmp_dir = output_dir / 'vcf'
     kgp_cram_tmp_dir = output_dir / 'cram'
@@ -96,9 +96,6 @@ def subset_variants(
         n_threads,
     )
 
-    variants = variants.with_columns(
-        pl.col('pos').cast(pl.Int64).alias('pos'))
-
     return variants
 
 
@@ -121,8 +118,6 @@ def subset_snvs(vcf_file, output_dir, coordinates, n_threads):
         id_ = job['id']
         ref = job['ref']
         alt = job['alt']
-
-        print(chrom, pos, id_, ref, alt)
 
         vcf_file = job['vcf_file']
 
@@ -161,20 +156,20 @@ def subset_samples(vcf_dir, output_dir, samples, n_threads):
 
     bag = []
 
-    with ProcessPool(n_threads) as pool:
-        for vcf_file in pool.uimap(
-                process,
-                jobs(vcf_dir, output_dir, samples),
-        ):
-            bag.append(vcf_file)
+    # with ProcessPool(n_threads) as pool:
+    #     for vcf_file in pool.uimap(
+    #             process,
+    #             jobs(vcf_dir, output_dir, samples),
+    #     ):
+    #         bag.append(vcf_file)
 
     output_file = output_dir / 'kgp.vcf.bgz'
-    result_vcf = concat(
-        vcf_files=bag,
-        output_file=output_file,
-        tmp_dir=output_dir,
-        n_threads=n_threads,
-    )
+    # result_vcf = concat(
+    #     vcf_files=bag,
+    #     output_file=output_file,
+    #     tmp_dir=output_dir,
+    #     n_threads=n_threads,
+    # )
 
     return output_file
 
