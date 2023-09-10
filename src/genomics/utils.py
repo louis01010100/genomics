@@ -1,4 +1,5 @@
 import gzip
+import pickle
 import shutil
 from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
@@ -149,32 +150,6 @@ def execute(cmd, debug=False, pipe=False):
     return bag
 
 
-def create_chrom_map():
-    chrom_map = []
-
-    for i in range(1, 22):
-        chrom_map.append({
-            'old_name': str(i),
-            'new_name': f'chr{i}',
-        })
-
-    chrom_map.append({
-        'old_name': 'X',
-        'new_name': 'chrX',
-    })
-
-    chrom_map.append({
-        'old_name': 'Y',
-        'new_name': 'chrY',
-    })
-    chrom_map.append({
-        'old_name': 'MT',
-        'new_name': 'chrM',
-    })
-
-    return pd.DataFrame.from_records(chrom_map)
-
-
 def df2tsv(df: pd.DataFrame,
            output_file: Path,
            header: bool = True,
@@ -218,3 +193,13 @@ def tsv2df(input_file: Path,
         dtype=dtype,
         keep_default_na=True,
     )
+
+
+def save(obj, file_):
+    with gzip.open(file_, 'wb') as fh:
+        pickle.dump(obj, fh)
+
+
+def load(file_):
+    with gzip.open(file_, 'rb') as fh:
+        return pickle.load(fh)

@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 import random
 import shutil
 import string
@@ -9,11 +10,12 @@ from typing import TextIO, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import polars as pl
 from Bio import bgzf
 from icecream import ic
 
 from .genomic_region import GenomicRegion
-from .utils import create_chrom_map, df2tsv, execute, is_gzipped
+from .utils import df2tsv, execute, is_gzipped
 from .variant import Variant
 
 COLUMN_IDX_MAP = {
@@ -82,9 +84,12 @@ class AllelePairs():
 
 class Vcf():
 
-    def __init__(self, filepath, tmp_dir, n_threads=1):
+    def __init__(self, filepath, tmp_dir, n_threads=1, new_tmp=True):
 
-        tmp_dir = Path(tmp_dir)
+        if new_tmp:
+            tmp_dir = Path(tmp_dir) / hashlib.md5(
+                str(filepath).encode()).hexdigest()
+
         tmp_dir.mkdir(parents=True, exist_ok=True)
         self.filepath = Path(filepath)
         self.n_threads = n_threads
@@ -125,7 +130,7 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def bgzip(self, delete_src=False):
 
@@ -169,16 +174,18 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
-    def index(self):
+    def index(self, force=False):
         log_filepath = self.tmp_dir / f'{self.filepath.name}.csi.log'
 
-        if (self.filepath.parent / f'{self.filepath.name}.csi').exists():
+        if not force and (self.filepath.parent
+                          / f'{self.filepath.name}.csi').exists():
             return self
 
         cmd = (''
                f'bcftools index'
+               f'      -f'
                f'      {self.filepath}'
                f'      &> {log_filepath}'
                '')
@@ -208,7 +215,7 @@ class Vcf():
 
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def copy_to(self, output_file):
         output_file = Path(output_file)
@@ -228,18 +235,17 @@ class Vcf():
             shutil.move(index_file, output_file.with_suffix('.bgz.csi'))
 
     @property
-    def samples(self) -> list[str]:
+    def samples(self) -> set[str]:
 
         cmd = (''
                f'bcftools query -l {self.filepath}'
                '')
         try:
-            stdout, stderr = execute(cmd, pipe=True)
+            stdout = execute(cmd, pipe=True)
         except Exception as e:
-            print(stderr)
             raise e
 
-        return stdout.strip().split('\n')
+        return set(stdout)
 
     def view(self, chrom, start, stop=None):
 
@@ -251,8 +257,11 @@ class Vcf():
                f'      -r "{chrom}:{start}-{stop}"'
                f'      {self.filepath}'
                '')
-        stdout, stderr = execute(cmd, pipe=True)
-        return stdout.strip().split('\n')
+        try:
+            stdout = execute(cmd, pipe=True)
+        except Exception as e:
+            raise e
+        return stdout
 
     def drop_id(self, delete_src=False):
         input_filepath = self.filepath
@@ -275,7 +284,7 @@ class Vcf():
 
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def include(self, criteria, delete_src=False):
         input_filepath = self.filepath
@@ -296,7 +305,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def exclude(self, criteria, delete_src=False):
         input_filepath = self.filepath
@@ -317,7 +326,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def filter(self, criteria: str = 'PASS', delete_src: bool = False):
         input_filepath = self.filepath
@@ -338,7 +347,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def drop_format(self, fields, delete_src=False):
         expression = ','.join([f'FORMAT/{x}' for x in fields])
@@ -361,7 +370,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     @property
     def index_file(self):
@@ -405,7 +414,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def drop_info(self, delete_src=False):
         input_filepath = self.filepath
@@ -427,7 +436,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def trim_alts(self, delete_src=False):
         input_filepath = self.filepath
@@ -450,7 +459,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def subset(self, expression, op_name, delete_src=False):
         input_filepath = self.filepath
@@ -475,7 +484,7 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def subset_biallelics(self, delete_src=False):
         input_filepath = self.filepath
@@ -498,7 +507,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def subset_variants_by_id(self, ids: set, delete_src: bool = False):
 
@@ -523,22 +532,20 @@ class Vcf():
 
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
-    def subset_variants(self, coordinates_df: pd.DataFrame, delete_src=False):
+    def subset_variants(self, coordinates: pl.DataFrame, delete_src=False):
 
         self.index()
 
         input_filepath = self.filepath
 
-        coordinates_file = self.tmp_dir / ''.join(
-            random.choices(string.ascii_letters, k=10))
+        coordinates_file = self.tmp_dir / 'coordinates.tsv'
 
-        coordinates_df.to_csv(
+        coordinates.write_csv(
             coordinates_file,
-            header=False,
-            index=False,
-            sep='\t',
+            has_header=False,
+            separator='\t',
         )
 
         output_file = self.tmp_dir / self.filepath.name.replace(
@@ -559,7 +566,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def fetch_variant(self, chrom: str, pos: int):
 
@@ -619,7 +626,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def exclude_chroms(self, chroms: list, delete_src=False):
         input_filepath = self.filepath
@@ -644,9 +651,9 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
-    def split_by_sample(self, delete_src=False):
+    def split_by_samples(self, delete_src=False):
         input_filepath = self.filepath
         output_dirpath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz', '-samples')
@@ -666,7 +673,7 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        bag = []
+        bag = dict()
 
         for filepath in output_dirpath.glob('*.vcf.gz'):
             old_filepath = filepath
@@ -676,10 +683,9 @@ class Vcf():
 
             tmp_dir = self.tmp_dir / samplename
 
-            vcf = Vcf(filepath, tmp_dir)
+            vcf = Vcf(filepath, tmp_dir, new_tmp=False)
             vcf.index()
-
-            bag.append(vcf)
+            bag[samplename] = str(vcf.filepath)
 
         return bag
 
@@ -697,9 +703,8 @@ class Vcf():
             bag.append({'sample_name': sample})
 
         samples_file = self.tmp_dir / 'samples.tsv'
-        filename = ''.join(random.choices(string.ascii_letters, k=10))
-
-        samples_file = self.tmp_dir / f'samples-{filename}'
+        # filename = ''.join(random.choices(string.ascii_letters, k=10))
+        # samples_file = self.tmp_dir / f'samples-{filename}'
 
         pd.DataFrame.from_records(bag).to_csv(
             samples_file,
@@ -724,7 +729,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def uppercase(self, delete_src=False):
         input_filepath = self.filepath
@@ -749,7 +754,7 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        vcf = Vcf(output_file, self.tmp_dir, self.n_threads)
+        vcf = Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
         return vcf
 
@@ -788,7 +793,7 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def fill_tags(self, tags=['AC', 'AN', 'AF', 'NS'], delete_src=False):
 
@@ -814,7 +819,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def drop_gt(self, delete_src=False):
         input_filepath = self.filepath
@@ -837,7 +842,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def sort(self, delete_src=False):
         input_filepath = self.filepath
@@ -860,7 +865,7 @@ class Vcf():
         execute(cmd)
         if delete_src:
             self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     @staticmethod
     def _fix_duplicates(input_filepath, output_file, columns):
@@ -979,12 +984,12 @@ class Vcf():
             tmp1_filepath.unlink()
             tmp2_filepath.unlink()
 
-        return Vcf(output_file, self.tmp_dir, self.n_threads)
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def to_df(self,
               format_: str = None,
               site_only: bool = False,
-              delete_src=False) -> pd.DataFrame:
+              delete_src=False) -> pl.DataFrame:
         if not format_:
             if site_only:
                 format_ = '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO\n'
@@ -996,7 +1001,12 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        return pd.read_csv(output_file, header=0, sep='\t', dtype='str')
+        return pl.read_csv(
+            output_file,
+            has_header=True,
+            separator='\t',
+            infer_schema_length=0,
+        )
 
     def to_tsv(self, format_: str = None, site_only: bool = False) -> Path:
         if not format_:
@@ -1046,8 +1056,9 @@ class Vcf():
 
         cmd = f'bcftools index -n {input_filepath}'
 
-        stdout, stderr = execute(cmd, pipe=True)
-        return int(stdout.strip())
+        stdout = execute(cmd, pipe=True)
+        assert len(stdout) == 1
+        return int(stdout[0].strip())
 
 
 def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
@@ -1064,9 +1075,9 @@ def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
            f'     "{chrom}:{start}-{stop}"'
            '')
 
-    stdout, stderr = execute(cmd, pipe=True)
+    stdout = execute(cmd, pipe=True)
 
-    for line in stdout.split('\n'):
+    for line in stdout:
         if line.startswith('>'):
             continue
         return line.strip()
@@ -1288,13 +1299,14 @@ def merge(vcf_files: list,
            '')
 
     execute(cmd)
-    result = Vcf(tmp_filepath, tmp_dir).sort(delete_src=True).index()
+    result = Vcf(tmp_filepath, tmp_dir,
+                 new_tmp=False).sort(delete_src=True, new_tmp=False).index()
 
     result.move_to(output_file)
 
     vcfs_file.unlink()
 
-    return Vcf(output_file, tmp_dir)
+    return Vcf(output_file, tmp_dir, new_tmp=False)
 
 
 def concat(
@@ -1307,10 +1319,10 @@ def concat(
 
     vcfs_file = tmp_dir / 'vcfs.tsv'
 
-    # with vcfs_file.open('wt') as fd:
-    #     for vcf_file in vcf_files:
-    #         Vcf(vcf_file, tmp_dir).bgzip().index()
-    #         print(vcf_file, file=fd)
+    with vcfs_file.open('wt') as fd:
+        for vcf_file in vcf_files:
+            Vcf(vcf_file, tmp_dir).bgzip().index(force=True)
+            print(vcf_file, file=fd)
 
     output_file = Path(output_file)
 
@@ -1338,8 +1350,8 @@ def concat(
 
     result.copy_to(output_file)
 
-    result = Vcf(output_file, tmp_dir)
-    result.index()
+    result = Vcf(output_file, tmp_dir, new_tmp=False)
+    result.index(force=True)
 
     return result
 
@@ -1356,50 +1368,80 @@ def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
     bag = list()
 
     for line in records:
+        line = line.strip()
         items = line.split('\t')
 
-        v = Variant(
-            chrom=items[0],
-            pos=int(items[1]),
-            id_=items[2],
-            ref=items[3],
-            alt=items[4],
-        )
-
-        bag.append(v)
+        bag.append(
+            Variant(
+                chrom=items[0],
+                pos=int(items[1]),
+                id_=items[2],
+                ref=items[3],
+                alt=items[4],
+                data=line,
+            ))
 
     return bag
 
 
-def fix_vcf_file(axiom_vcf_file: Path,
-                 output_dir: Path,
-                 genome_index_file: Path,
-                 genome_file: Path = None,
-                 delete_src: bool = False,
-                 n_threads: int = 1) -> Path:
+def fix_axiom_vcf_file(
+    vcf_file: Path,
+    output_dir: Path,
+    genome_index_file: Path,
+    genome_file: Path = None,
+    delete_src: bool = False,
+    n_threads: int = 1,
+) -> Path:
+
+    def create_chrom_map():
+        chrom_map = []
+
+        for i in range(1, 22):
+            chrom_map.append({
+                'old_name': str(i),
+                'new_name': f'chr{i}',
+            })
+
+        chrom_map.append({
+            'old_name': 'X',
+            'new_name': 'chrX',
+        })
+
+        chrom_map.append({
+            'old_name': 'Y',
+            'new_name': 'chrY',
+        })
+        chrom_map.append({
+            'old_name': 'MT',
+            'new_name': 'chrM',
+        })
+
+        return pl.from_dicts(chrom_map)
+
     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True)
-
-    chroms = [f'chr{i}' for i in range(1, 22)]
-    chroms.extend(['chrX', 'chrY', 'chrM'])
 
     chrom_map_file = output_dir / 'chrom_map.tsv'
 
     chrom_map = create_chrom_map()
 
-    df2tsv(chrom_map, chrom_map_file)
+    chrom_map.write_csv(chrom_map_file, has_header=True, separator='\t')
 
-    vcf = Vcf(axiom_vcf_file, output_dir, n_threads)\
+    vcf = Vcf(vcf_file, output_dir, n_threads,)\
             .bgzip()\
             .rename_chroms(chrom_map_file,  delete_src)\
             .include_chroms(set(chrom_map['new_name']), delete_src )\
             .fix_header(genome_index_file, delete_src )
 
     if genome_file:
-        vcf = vcf.normalize(genome_file, delete_src ) \
+        vcf = vcf.normalize(genome_file, delete_src ,) \
                  .index()
 
-    return vcf.filepath
+    result_file = output_dir / vcf_file.name.replace('.vcf', '-norm.vcf.bgz')
+
+    vcf.move_to(result_file)
+
+    return result_file
 
 
 def vcf2dict(*vcf_files) -> dict:
@@ -1441,19 +1483,16 @@ def _vcf2dict(fh: TextIO) -> dict:
     return bag
 
 
-def filter_variants(ref_snv: Variant, snvs: list, check_alt=True):
+def filter_variants(ref_snv: Variant, snvs: list, fuzzy=False):
 
-    target = None
+    target = list()
     for snv in snvs:
         if ref_snv.pos == snv.pos and ref_snv.ref == snv.ref:
-            if not check_alt:
-                target = snv
+            if fuzzy:
+                target.append(snv)
 
-            if ref_snv.alts & snv.alts:
-                target = snv
-
-    if target:
-        return target
+            if ref_snv.alts == snv.alts:
+                target.append(snv)
 
     ref_pairs = split_rtrim(ref_snv)
 
@@ -1466,17 +1505,8 @@ def filter_variants(ref_snv: Variant, snvs: list, check_alt=True):
                 if ref_pair[0] != pair[0]:
                     continue
 
-                if not check_alt:
-                    target = snv
-
-                if ref_pair[1] == pair[1]:
-                    target = snv
-
-    if target:
-        return target
-
-    if not ref_snv.is_mnv:
-        return target
+                if fuzzy:
+                    target.append(snv)
 
     for snv in snvs:
         if not snv.is_mnv:
@@ -1486,8 +1516,9 @@ def filter_variants(ref_snv: Variant, snvs: list, check_alt=True):
         ref = snv.ref[offset:offset + len(ref_snv.ref)]
         alts = {alt[offset:offset + len(ref_snv.ref)] for alt in snv.alts}
 
-        if ref == ref_snv.ref and (ref_snv.alts & alts):
-            target = snv
+        if ref == ref_snv.ref:    # and (ref_snv.alts & alts):
+            if fuzzy:
+                target.append(snv)
 
     return target
 
@@ -1511,3 +1542,14 @@ def split_rtrim(snv: Variant):
         bag.add((x, y))
 
     return bag
+
+
+def list_samples(vcf_file):
+
+    cmd = f'bcftools query -l {vcf_file}'
+    try:
+        output = execute(cmd, pipe=True)
+    except Exception as e:
+        raise e
+
+    return output[0].strip().split('\n')

@@ -592,7 +592,8 @@ def test_filter_variants():
 
     actual = filter_variants(ref_snv, snvs)
 
-    assert ref_snv == actual
+    assert 1 == len(actual)
+    assert ref_snv == actual[0]
 
     snvs = [
         Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
@@ -604,18 +605,21 @@ def test_filter_variants():
     expected = Variant(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG')
 
     actual = filter_variants(ref_snv, snvs)
+    assert 0 == len(actual)
 
-    assert expected == actual
+    actual = filter_variants(ref_snv, snvs, fuzzy=True)
+    assert 1 == len(actual)
 
     snvs = [
         Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C,G'),
     ]
+
     ref_snv = Variant(chrom='chr1', pos=100, id_='AX-100', ref='A', alt='T')
 
     expected = Variant(chrom='chr1', pos=100, id_='rs101', ref='A', alt='C,G')
 
-    assert filter_variants(ref_snv, snvs, check_alt=True) is None
-    assert expected == filter_variants(ref_snv, snvs, check_alt=False)
+    assert len(filter_variants(ref_snv, snvs, fuzzy=False)) == 0
+    assert expected == filter_variants(ref_snv, snvs, fuzzy=True)[0]
 
 
 def test_split_rtrim():

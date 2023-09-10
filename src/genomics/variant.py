@@ -1,12 +1,17 @@
 class Variant():
 
-    def __init__(self, chrom, pos, ref, alt, id_='.'):
+    def __init__(self, chrom, pos, ref, alt, id_='.', data=''):
         self.chrom = chrom
         self.pos = pos
         self.id = id_
         self.ref = ref
         self.alt = alt
         self._alts = set()
+        self._data = data
+
+    @property
+    def data(self):
+        return self._data
 
     @property
     def alts(self):
