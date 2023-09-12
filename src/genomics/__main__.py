@@ -36,14 +36,6 @@ def main():
             input_file=Path(args.input_file),
             output_file=Path(args.output_file),
         )
-    elif args.subcommand == 'fix-axiom-vcf':
-        vcf.fix_axiom_vcf_file(
-            vcf_file=Path(args.vcf_file),
-            output_dir=Path(args.output_dir),
-            genome_file=Path(args.genome_file),
-            genome_index_file=Path(args.genome_index_file),
-            n_threads=args.n_threads,
-        )
     elif args.subcommand == 'kgp':
         kgp.process(
             vcf_dir=Path(args.vcf_dir),
@@ -82,14 +74,6 @@ def config_parsers():
     _config_fix_axiom_vcf_parser(parsers.add_parser('fix-axiom-vcf'))
 
     return parser
-
-
-def _config_fix_axiom_vcf_parser(parser):
-    parser.add_argument('--vcf-file', required=True)
-    parser.add_argument('--genome-file', required=True)
-    parser.add_argument('--genome-index-file', required=True)
-    parser.add_argument('--output-dir', required=True)
-    parser.add_argument('--n-threads', type=int, default=1)
 
 
 def _config_dbsnp_parser(parser):
