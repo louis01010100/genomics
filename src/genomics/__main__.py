@@ -71,7 +71,6 @@ def config_parsers():
     _config_dbsnp_parser(parsers.add_parser('dbsnp'))
     _config_acmg_parser(parsers.add_parser('acmg'))
     _config_kgp_parser(parsers.add_parser('kgp'))
-    _config_fix_axiom_vcf_parser(parsers.add_parser('fix-axiom-vcf'))
 
     return parser
 
