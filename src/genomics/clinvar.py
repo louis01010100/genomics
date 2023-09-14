@@ -56,10 +56,11 @@ def process(
     )
 
     output_file = Vcf(output_dir / 'clinvar.vcf.bgz', output_dir).to_df(
-        '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/CLNSIG\t%INFO/CLNREVSTAT\t%INFO/CLNDN\n'
+        '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/CLNSIG\t%INFO/CLNREVSTAT\t%INFO/CLNSIGCONF\t%INFO/CLNDN\n'
     ).rename(
         columns={
             'info/clnsig': 'clnsig',
+            'info/clnsigconf': 'clnsigconf',
             'info/clnrevstat': 'clnrevstat',
             'info/clndn': 'clndn',
         }).to_csv(
