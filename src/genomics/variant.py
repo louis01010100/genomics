@@ -5,6 +5,13 @@ REGULAR_BASE = re.compile(r'^[ACGT]+$')
 from .genome import Genome
 
 
+class Region():
+
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+
 class Variant():
 
     def __init__(
@@ -14,7 +21,7 @@ class Variant():
         ref: str,
         alt: str,
         id_: str = None,
-        into: str = None,
+        info: str = None,
     ):
 
         self.id = id_
@@ -40,6 +47,10 @@ class Variant():
             self.ref,
             self.alt,
         )
+
+    @property
+    def alts(self):
+        return self.alt.split(',')
 
     def fix_ref(self, genome: Genome):
         g_ref = genome.slice(self.chrom, self.pos - 1,
@@ -98,6 +109,26 @@ class Variant():
             info=self.info,
         )
 
+    @property
+    def is_snv(self):
+        return is_snv(self.ref, self.alt)
+
+    @property
+    def is_ins(self):
+        return is_ins(self.ref, self.alt)
+
+    @property
+    def is_del(self):
+        return is_del(self.ref, self.alt)
+
+    @property
+    def is_ma(self):
+        return is_ma(self.ref, self.alt)
+
+    @property
+    def is_mnv(self):
+        return is_mnv(self.ref, self.alt)
+
     def _norm_left(self, genome):
         alts = [alt for alt in self.alt.split(',')]
         pos, ref, alts = trim_right_bases(
@@ -153,7 +184,7 @@ def get_region(pos, ref, alt):
         return Region(pos + 1, pos + len(ref) - 1)
     if is_ma(ref, alt):
         return Region(pos, pos)
-    if is_mnp(ref, alt):
+    if is_mnv(ref, alt):
         return Region(pos, pos + len(ref) - 1)
     raise Exception(f'{pos} {ref} {alt}')
 
@@ -186,17 +217,20 @@ def is_ma(ref, alt):
     return ',' in alt
 
 
-def is_mnp(ref, alt):
-    if Variant.is_snv(ref, alt):
+def is_mnv(ref, alt):
+    if is_snv(ref, alt):
         return False
-    if Variant.is_ins(ref, alt):
-        return False
-
-    if Variant.is_del(ref, alt):
+    if is_ins(ref, alt):
         return False
 
-    if Variant.is_ma(ref, alt):
+    if is_del(ref, alt):
         return False
+
+    if is_ma(ref, alt):
+        return False
+
+    if len(ref) == len(alt):
+        return True
 
     return True
 

@@ -14,9 +14,8 @@ def process(
     output_dir: Path,
 ):
 
-    output_dir.mkdir(parents=True)
-
     shutil.rmtree(output_dir, ignore_errors=True)
+    output_dir.mkdir(parents=True)
 
     tmp_dir = output_dir / 'tmp'
     tmp_dir.mkdir(parents=True)
@@ -38,6 +37,7 @@ def process(
                 .fix_header(genome_index_file)\
                 .index()\
                 .normalize(genome_file)\
+                .index()
 
     clinvar_papu_vcf = Vcf(
         clinvar_papu_vcf_file, tmp_dir,) \
@@ -48,6 +48,7 @@ def process(
                 .fix_header(genome_index_file)\
                 .index()\
                 .normalize(genome_file)\
+                .index()
 
     concat(
         vcf_files=[clinvar_vcf.filepath, clinvar_papu_vcf.filepath],
@@ -55,20 +56,18 @@ def process(
         tmp_dir=tmp_dir,
     )
 
-    output_file = Vcf(output_dir / 'clinvar.vcf.bgz', output_dir).to_df(
+    Vcf(output_dir / 'clinvar.vcf.bgz', output_dir).to_df(
         '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/CLNSIG\t%INFO/CLNREVSTAT\t%INFO/CLNSIGCONF\t%INFO/CLNDN\n'
-    ).rename(
-        columns={
-            'info/clnsig': 'clnsig',
-            'info/clnsigconf': 'clnsigconf',
-            'info/clnrevstat': 'clnrevstat',
-            'info/clndn': 'clndn',
-        }).to_csv(
-            output_dir / 'clinvar.tsv.gz',
-            header=True,
-            index=False,
-            sep='\t',
-        )
+    ).rename({
+        'info/clnsig': 'clnsig',
+        'info/clnsigconf': 'clnsigconf',
+        'info/clnrevstat': 'clnrevstat',
+        'info/clndn': 'clndn',
+    }).write_csv(
+        output_dir / 'clinvar.tsv',
+        has_header=True,
+        separator='\t',
+    )
 
 
 def target_chroms():

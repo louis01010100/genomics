@@ -30,58 +30,6 @@ COLUMN_IDX_MAP = {
 }
 
 
-class AllelePairs():
-
-    def __init__(self):
-        self.allele_pairs = dict()
-
-    def update(self, other) -> None:
-        self.allele_pairs.update(other.allele_pairs)
-
-    def add_allele_pair(self, ref, alt) -> None:
-        key = (ref, alt)
-        self.allele_pairs[key] = {'ref': ref, 'alt': alt}
-
-        longest_ref = max([x['ref'] for x in self.allele_pairs.values()],
-                          key=len)
-
-        delta = dict()
-
-        for key, value in self.allele_pairs.items():
-            ref = value['ref']
-            alt = value['alt']
-
-            if ref == longest_ref:
-                continue
-
-            suffix = longest_ref[len(ref):]
-
-            new_ref = ref + suffix
-            new_alt = ','.join([x + suffix for x in alt.split(',')])
-
-            delta[key] = {'ref': new_ref, 'alt': new_alt}
-
-        self.allele_pairs.update(delta)
-
-    def get_updated_allele_pair(self, ref, alt) -> dict:
-        key = (ref, alt)
-        return self.allele_pairs[key]
-
-    def __str__(self) -> str:
-        return __repr__(self)
-
-    def __repr__(self) -> str:
-
-        bag = []
-
-        for k, v in self.allele_pairs.items():
-            value = '{' + f'{k}:{v}' + '}'
-            bag.append(value)
-            output = ','.join(bag)
-
-        return f'[{output}]'
-
-
 class Vcf():
 
     def __init__(self, filepath, tmp_dir, n_threads=1, new_tmp=True):
@@ -89,11 +37,13 @@ class Vcf():
         if new_tmp:
             tmp_dir = Path(tmp_dir) / hashlib.md5(
                 str(filepath).encode()).hexdigest()
+        else:
+            tmp_dir = Path(tmp_dir)
 
         tmp_dir.mkdir(parents=True, exist_ok=True)
         self.filepath = Path(filepath)
         self.n_threads = n_threads
-        self.tmp_dir = Path(tmp_dir)
+        self.tmp_dir = tmp_dir
 
     @property
     def meta(self):
@@ -534,7 +484,12 @@ class Vcf():
             self.delete()
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
-    def subset_variants(self, coordinates: pl.DataFrame, delete_src=False):
+    def subset_variants(
+        self,
+        coordinates: pl.DataFrame,
+        delete_src=False,
+        region_overlap=0,
+    ):
 
         self.index()
 
@@ -557,12 +512,55 @@ class Vcf():
         cmd = (''
                f'bcftools view'
                f'      --regions-file {coordinates_file}'
+               f'      --regions-overlap {region_overlap}'
                f'      -O z'
                f'      -o {output_file}'
                f'      --threads {self.n_threads}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
+
+    def subset_samples(self, samples: set, delete_src=False):
+        self.index()
+        input_filepath = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-samples.vcf.bgz',
+        )
+
+        bag = []
+
+        for sample in samples:
+            bag.append({'sample_name': sample})
+
+        samples_file = self.tmp_dir / 'samples.tsv'
+        # filename = ''.join(random.choices(string.ascii_letters, k=10))
+        # samples_file = self.tmp_dir / f'samples-{filename}'
+
+        pd.DataFrame.from_records(bag).to_csv(
+            samples_file,
+            header=False,
+            index=False,
+            sep='\t',
+        )
+
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
+
+        cmd = (''
+               f'bcftools view'
+               f'   --samples-file {samples_file}'
+               f'   --force-samples'
+               f'   -O z'
+               f'   -o {output_file}'
+               f'   --threads {self.n_threads}'
+               f'   {input_filepath}'
+               f'   &> {log_filepath}'
+               '')
+
         execute(cmd)
         if delete_src:
             self.delete()
@@ -679,57 +677,13 @@ class Vcf():
             old_filepath = filepath
             filepath = old_filepath.with_suffix('.bgz')
             shutil.move(old_filepath, filepath)
-            samplename = filepath.name.split('.')[0]
 
-            tmp_dir = self.tmp_dir / samplename
-
-            vcf = Vcf(filepath, tmp_dir, new_tmp=False)
+            vcf = Vcf(filepath, self.tmp_dir, new_tmp=False)
             vcf.index()
+            samplename = vcf.samples.pop()
             bag[samplename] = str(vcf.filepath)
 
         return bag
-
-    def subset_samples(self, samples: set, delete_src=False):
-        self.index()
-        input_filepath = self.filepath
-        output_file = self.tmp_dir / self.filepath.name.replace(
-            '.vcf.bgz',
-            '-samples.vcf.bgz',
-        )
-
-        bag = []
-
-        for sample in samples:
-            bag.append({'sample_name': sample})
-
-        samples_file = self.tmp_dir / 'samples.tsv'
-        # filename = ''.join(random.choices(string.ascii_letters, k=10))
-        # samples_file = self.tmp_dir / f'samples-{filename}'
-
-        pd.DataFrame.from_records(bag).to_csv(
-            samples_file,
-            header=False,
-            index=False,
-            sep='\t',
-        )
-
-        log_filepath = self.tmp_dir / f'{output_file.name}.log'
-
-        cmd = (''
-               f'bcftools view'
-               f'   --samples-file {samples_file}'
-               f'   --force-samples'
-               f'   -O z'
-               f'   -o {output_file}'
-               f'   --threads {self.n_threads}'
-               f'   {input_filepath}'
-               f'   &> {log_filepath}'
-               '')
-
-        execute(cmd)
-        if delete_src:
-            self.delete()
-        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def uppercase(self, delete_src=False):
         input_filepath = self.filepath
@@ -1061,6 +1015,58 @@ class Vcf():
         return int(stdout[0].strip())
 
 
+class AllelePairs():
+
+    def __init__(self):
+        self.allele_pairs = dict()
+
+    def update(self, other) -> None:
+        self.allele_pairs.update(other.allele_pairs)
+
+    def add_allele_pair(self, ref, alt) -> None:
+        key = (ref, alt)
+        self.allele_pairs[key] = {'ref': ref, 'alt': alt}
+
+        longest_ref = max([x['ref'] for x in self.allele_pairs.values()],
+                          key=len)
+
+        delta = dict()
+
+        for key, value in self.allele_pairs.items():
+            ref = value['ref']
+            alt = value['alt']
+
+            if ref == longest_ref:
+                continue
+
+            suffix = longest_ref[len(ref):]
+
+            new_ref = ref + suffix
+            new_alt = ','.join([x + suffix for x in alt.split(',')])
+
+            delta[key] = {'ref': new_ref, 'alt': new_alt}
+
+        self.allele_pairs.update(delta)
+
+    def get_updated_allele_pair(self, ref, alt) -> dict:
+        key = (ref, alt)
+        return self.allele_pairs[key]
+
+    def __str__(self) -> str:
+        return __repr__(self)
+
+    def __repr__(self) -> str:
+
+        bag = []
+
+        for k, v in self.allele_pairs.items():
+            value = '{' + f'{k}:{v}' + '}'
+            bag.append(value)
+            output = ','.join(bag)
+
+        return f'[{output}]'
+
+
 def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
 
     # samtools faidx hs38DH.fa 'chr12:1000000-1000010'
@@ -1378,7 +1384,6 @@ def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
                 id_=items[2],
                 ref=items[3],
                 alt=items[4],
-                data=line,
             ))
 
     return bag
