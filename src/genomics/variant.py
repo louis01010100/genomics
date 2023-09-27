@@ -3,13 +3,7 @@ import re
 REGULAR_BASE = re.compile(r'^[ACGT]+$')
 
 from .genome import Genome
-
-
-class Region():
-
-    def __init__(self, start, end):
-        self.start = start
-        self.end = end
+from .gregion import GenomicRegion
 
 
 class Variant():
@@ -21,7 +15,7 @@ class Variant():
         ref: str,
         alt: str,
         id_: str = None,
-        info: str = None,
+        data: str = None,
     ):
 
         self.id = id_
@@ -29,7 +23,7 @@ class Variant():
         self.pos = pos
         self.ref = ref
         self.alt = alt
-        self.info = info
+        self.data = data
 
         if not REGULAR_BASE.match(self.ref):
             print(
@@ -42,11 +36,16 @@ class Variant():
                     f'[WARN]\tWEIRD ALT: {self.chrom}:{self.pos} {self.ref}>{self.alt}'
                 )
 
-        self.region = get_region(
+        self._region = get_region(
+            self.chrom,
             self.pos,
             self.ref,
             self.alt,
         )
+
+    @property
+    def region(self):
+        return self._region
 
     @property
     def alts(self):
@@ -66,7 +65,7 @@ class Variant():
             id_=self.id_,
             ref=g_ref,
             alt=self.alt,
-            info=self.info,
+            data=self.data,
         )
 
     def norm(self, genome, left_justified=True):
@@ -106,7 +105,7 @@ class Variant():
             id=self.id,
             ref=ref,
             alt=','.join(alts),
-            info=self.info,
+            data=self.data,
         )
 
     @property
@@ -151,7 +150,7 @@ class Variant():
             id=self.id,
             ref=ref,
             alt=','.join(alts),
-            info=self.info,
+            data=self.data,
         )
 
     def __eq__(self, other):
@@ -169,23 +168,23 @@ class Variant():
         return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}'
 
     def __str__(self):
-        return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.info}'
+        return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.data}'
 
     def __repr__(self):
-        return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.info}'
+        return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.data}'
 
 
-def get_region(pos, ref, alt):
+def get_region(chrom, pos, ref, alt):
     if is_snv(ref, alt):
-        return Region(pos, pos)
+        return GenomicRegion(chrom, pos, pos)
     if is_ins(ref, alt):
-        return Region(pos, pos + 1)
+        return GenomicRegion(chrom, pos, pos + 1)
     if is_del(ref, alt):
-        return Region(pos + 1, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos + 1, pos + len(ref) - 1)
     if is_ma(ref, alt):
-        return Region(pos, pos)
+        return GenomicRegion(chrom, pos, pos)
     if is_mnv(ref, alt):
-        return Region(pos, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos, pos + len(ref) - 1)
     raise Exception(f'{pos} {ref} {alt}')
 
 

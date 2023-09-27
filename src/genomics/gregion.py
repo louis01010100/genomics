@@ -1,18 +1,20 @@
 class GenomicRegion():
-    def __init__(self, chrom, start, stop):
+
+    def __init__(self, chrom, start, end):
         self._chrom = chrom
         self._start = start
-        self._stop = stop
+        self._stop = end
 
     def is_overlapping(self, other):
         if self.chrom != other.chrom:
             return False
-        return self.start <= other.stop and self.stop >= other.start
+        return self.start <= other.end and self.end >= other.start
 
     def merge(self, other):
         if self.chrom != other.chrom:
             raise Exception('{self} and {other} cannot be merged')
-        return GenomicRegion(self.chrom, min(self.start, other.start), max(self.stop, other.stop))
+        return GenomicRegion(self.chrom, min(self.start, other.start),
+                             max(self.end, other.end))
 
     @property
     def chrom(self):
@@ -23,14 +25,14 @@ class GenomicRegion():
         return self._start
 
     @property
-    def stop(self):
+    def end(self):
         return self._stop
 
     def __eq__(self, other):
-        return self.chrom == other.chrom and self.start == other.start and self.stop == other.stop
+        return self.chrom == other.chrom and self.start == other.start and self.end == other.end
 
     def __str__(self):
-        return f'{self.chrom}:{self.start}-{self.stop}'
+        return f'{self.chrom}:{self.start}-{self.end}'
 
     def __repr__(self):
         return self.__str__()

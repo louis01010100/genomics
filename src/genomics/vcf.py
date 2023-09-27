@@ -14,7 +14,7 @@ import polars as pl
 from Bio import bgzf
 from icecream import ic
 
-from .genomic_region import GenomicRegion
+from .gregion import GenomicRegion
 from .utils import df2tsv, execute, is_gzipped
 from .variant import Variant
 
@@ -976,7 +976,8 @@ class Vcf():
             '.tsv',
         )
 
-        cnames_str = format_.strip('[]\n').replace(' ', '\t').replace('%', '')
+        cnames_str = format_.strip('[]\n').replace(' ', '\t').replace(
+            '%', '').replace('/', '_')
 
         cnames = '\t'.join([x.lower() for x in cnames_str.split('\t')])
 
@@ -996,7 +997,7 @@ class Vcf():
                f'gzip {output_file}'
                '')
 
-        execute(cmd)
+        execute(cmd, debug=False)
 
         return output_gz_filepath
 
@@ -1384,6 +1385,7 @@ def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
                 id_=items[2],
                 ref=items[3],
                 alt=items[4],
+                data=line,
             ))
 
     return bag
@@ -1488,7 +1490,7 @@ def _vcf2dict(fh: TextIO) -> dict:
     return bag
 
 
-def filter_variants(ref_snv: Variant, snvs: list, fuzzy=False):
+def filter_variants(ref_snv: Variant, snvs: list[Variant], fuzzy=False):
 
     target = list()
     for snv in snvs:

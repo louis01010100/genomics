@@ -1,3 +1,3 @@
-from .genomic_region import *
+from .gregion import *
 from .utils import *
 from .vcf import *
