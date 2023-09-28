@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from genomics.genomic_region import GenomicRegion
+from genomics.gregion import GenomicRegion
 from genomics.variant import Variant
 from genomics.vcf import (AllelePairs, Vcf, filter_variants, split_rtrim,
                           sync_alleles, vcf2dict)
@@ -590,10 +590,12 @@ def test_filter_variants():
 
     ref_snv = Variant(chrom='chr1', pos=200, id_='AX-100', ref='T', alt='G')
 
+    expected = Variant(chrom='chr1', pos=200, id_='rs101', ref='T', alt='G')
+
     actual = filter_variants(ref_snv, snvs)
 
     assert 1 == len(actual)
-    assert ref_snv == actual[0]
+    assert expected == actual[0]
 
     snvs = [
         Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
@@ -611,7 +613,7 @@ def test_filter_variants():
     assert 1 == len(actual)
 
     snvs = [
-        Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C,G'),
+        Variant(chrom='chr1', pos=100, id_='rs101', ref='A', alt='C,G'),
     ]
 
     ref_snv = Variant(chrom='chr1', pos=100, id_='AX-100', ref='A', alt='T')

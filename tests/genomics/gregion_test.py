@@ -1,6 +1,6 @@
 import pytest
 
-from genomics.genomic_region import GenomicRegion
+from genomics.gregion import GenomicRegion
 
 
 def test_is_overlapping():
