@@ -25,16 +25,16 @@ class Variant():
         self.alt = alt
         self.data = data
 
-        if not REGULAR_BASE.match(self.ref):
-            print(
-                f'[WARN]\tWEIRD REF: {self.chrom}:{self.pos} {self.ref}>{self.alt}'
-            )
-
-        for alt in self.alt.split(','):
-            if not REGULAR_BASE.match(alt):
-                print(
-                    f'[WARN]\tWEIRD ALT: {self.chrom}:{self.pos} {self.ref}>{self.alt}'
-                )
+        # if not REGULAR_BASE.match(self.ref):
+        #     print(
+        #         f'[WARN]\tWEIRD REF: {self.chrom}:{self.pos} {self.ref}>{self.alt}'
+        #     )
+        #
+        # for alt in self.alt.split(','):
+        #     if not REGULAR_BASE.match(alt):
+        #         print(
+        #             f'[WARN]\tWEIRD ALT: {self.chrom}:{self.pos} {self.ref}>{self.alt}'
+        #         )
 
         self._region = get_region(
             self.chrom,

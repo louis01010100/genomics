@@ -14,12 +14,12 @@ from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples
 MIN_READ_DEPTH = 10
 
 
-def process(
+def export_snv_truth(
     vcf_dir,
     samples_file: Path,
-    coordinate_vcf_file: Path,
+    coordinates_vcf_file: Path,
     cram_dir: Path,
-    ref_file: Path,
+    genome_file: Path,
     output_dir: Path,
     n_threads: int = 1,
     min_read_depth: int = 2,
@@ -36,12 +36,15 @@ def process(
     kgp_vcf_tmp_dir.mkdir(exist_ok=True)
     kgp_cram_tmp_dir.mkdir(exist_ok=True)
 
-    coordinates = Vcf(coordinate_vcf_file, kgp_vcf_tmp_dir,
-                      n_threads).to_df(site_only=True)
+    coordinates = Vcf(
+        coordinates_vcf_file,
+        kgp_vcf_tmp_dir,
+        n_threads,
+    ).to_df(site_only=True, )
 
     # depths = extract_depth(
     #     cram_dir,
-    #     ref_file,
+    #     genome_file,
     #     coordinates,
     #     kgp_cram_tmp_dir,
     #     n_threads,
@@ -59,12 +62,14 @@ def process(
             separator='\t',
         )['sample_id'])
 
-    vcf_file = subset_samples(
-        vcf_dir,
-        kgp_vcf_tmp_dir,
-        samples,
-        n_threads,
-    )
+    # vcf_file = subset_samples(
+    #     vcf_dir,
+    #     kgp_vcf_tmp_dir,
+    #     samples,
+    #     n_threads,
+    # )
+
+    vcf_file = kgp_vcf_tmp_dir / 'kgp.vcf.bgz'
 
     subset_snvs(
         vcf_file=vcf_file,
@@ -87,6 +92,35 @@ def subset_snvs(
     n_threads: int,
 ):
 
+    def jobs(coordinates, vcf_file):
+        for record in coordinates.to_dicts():
+            yield {
+                'chrom': record['chrom'],
+                'pos': int(record['pos']),
+                'ref': record['ref'],
+                'alt': record['alt'],
+                'vcf_file': vcf_file,
+            }
+
+    def process(job):
+        chrom = job['chrom']
+        pos = int(job['pos'])
+        ref = job['ref']
+        alt = job['alt']
+        vcf_file = job['vcf_file']
+
+        refsnv = Variant(chrom, pos, ref, alt)
+
+        snvs = fetch_variants(refsnv.chrom, refsnv.pos, vcf_file)
+
+        snvs = filter_variants(refsnv, snvs)
+
+        return {
+            'snvs': snvs,
+            'chrom': chrom,
+            'pos': pos,
+        }
+
     n_samples = len(list_samples(vcf_file))
 
     output_file = output_dir / vcf_file.name.replace('.vcf.bgz', '-snv.vcf')
@@ -100,35 +134,40 @@ def subset_snvs(
             break
 
     with output_file.open('at') as fh:
-        for coord in coordinates.to_dicts():
-            chrom = coord['chrom']
-            pos = int(coord['pos'])
-            ref = coord['ref']
-            alt = coord['alt']
 
-            refsnv = Variant(chrom, pos, ref, alt)
+        with ProcessPool(n_threads) as pool:
+            for result in pool.uimap(process, jobs(coordinates, vcf_file)):
+                snvs = result['snvs']
 
-            snvs = fetch_variants(refsnv.chrom, refsnv.pos, vcf_file)
+                if len(snvs) == 1:
+                    snv = snvs[0]
+                    fh.write(f'{snv.data}\n')
+                    continue
 
-            snv = filter_variants(refsnv, snvs)
+                if len(snvs) > 1:
+                    logging.warning(f'{snvs}')
+                    snv = snvs[0]
+                    fh.write(f'{snv.data}\n')
+                    continue
 
-            if snv:
-                fh.write(f'{snv.data}\n')
-                continue
-            key = (chrom, pos)
+                chrom = result['chrom']
+                pos = result['pos']
 
-            if key not in depths:
-                gt = '\t'.join(['./.' for i in range(0, n_samples)])
-                continue
+                key = (chrom, pos)
 
-            depth = depths[key]
+                if key not in depths:
+                    gt = '\t'.join(['./.' for i in range(0, n_samples)])
+                    continue
 
-            if depth > MIN_READ_DEPTH:
-                gt = '\t'.join(['0/0' for i in range(0, n_samples)])
-            else:
-                gt = '\t'.join(['./.' for i in range(0, n_samples)])
+                depth = depths[key]
 
-            fh.write(f'{chrom}\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{gt}\n')
+                if depth > MIN_READ_DEPTH:
+                    gt = '\t'.join(['0/0' for i in range(0, n_samples)])
+                else:
+                    gt = '\t'.join(['./.' for i in range(0, n_samples)])
+
+                fh.write(
+                    f'{chrom}\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{gt}\n')
 
     return Vcf(output_file, output_dir, n_threads).bgzip().index().to_df()
 
@@ -157,37 +196,37 @@ def subset_samples(vcf_dir, output_dir, samples, n_threads):
 
     bag = []
 
-    # with ProcessPool(n_threads) as pool:
-    #     for vcf_file in pool.uimap(
-    #             process,
-    #             jobs(vcf_dir, output_dir, samples),
-    #     ):
-    #         bag.append(vcf_file)
+    with ProcessPool(n_threads) as pool:
+        for vcf_file in pool.uimap(
+                process,
+                jobs(vcf_dir, output_dir, samples),
+        ):
+            bag.append(vcf_file)
 
     bag = [x for x in output_dir.glob('*/*trim_alt.vcf.bgz')]
 
     output_file = output_dir / 'kgp.vcf.bgz'
 
-    # result_vcf = concat(
-    #     vcf_files=bag,
-    #     output_file=output_file,
-    #     tmp_dir=output_dir,
-    #     n_threads=n_threads,
-    # )
+    result_vcf = concat(
+        vcf_files=bag,
+        output_file=output_file,
+        tmp_dir=output_dir,
+        n_threads=n_threads,
+    )
 
     return output_file
 
 
 def extract_depth(
     cram_dir: Path,
-    ref_file: Path,
+    genome_file: Path,
     coordinates: pl.DataFrame,
     output_dir: Path,
     n_threads: int,
     n_samples: int,
 ):
 
-    def jobs(cram_dir, ref_file, coordinates_file):
+    def jobs(cram_dir, genome_file, coordinates_file):
 
         n = 0
 
@@ -195,7 +234,7 @@ def extract_depth(
             yield {
                 'cram_file': cram_file,
                 'coordinates_file': coordinates_file,
-                'ref_file': ref_file,
+                'genome_file': genome_file,
             }
             n += 1
             if n >= n_samples:
@@ -203,13 +242,13 @@ def extract_depth(
 
     def parse_cram(args):
         cram_file = args['cram_file']
-        ref_file = args['ref_file']
+        genome_file = args['genome_file']
         coordinates_file = args['coordinates_file']
 
         cmd = (''
                f'samtools mpileup'
                f'    -l {coordinates_file}'
-               f'    -f {ref_file}'
+               f'    -f {genome_file}'
                f'    {cram_file}'
                '')
 
@@ -243,7 +282,7 @@ def extract_depth(
     with ProcessPool(n_threads) as pool:
         for future in pool.uimap(
                 parse_cram,
-                jobs(cram_dir, ref_file, coordinates_file),
+                jobs(cram_dir, genome_file, coordinates_file),
         ):
             sample_name = future[0]
             depth_df = future[1]

@@ -37,13 +37,13 @@ def main():
             output_file=Path(args.output_file),
         )
     elif args.subcommand == 'kgp':
-        kgp.process(
+        kgp.export_snv_truth(
             vcf_dir=Path(args.vcf_dir),
             cram_dir=Path(args.cram_dir),
-            ref_file=Path(args.ref_file),
+            genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
             samples_file=Path(args.samples_file),
-            coordinate_vcf_file=Path(args.coordinate_vcf_file),
+            coordinates_vcf_file=Path(args.coordinates_vcf_file),
             n_cram_samples=args.n_cram_samples,
             min_read_depth=args.min_read_depth,
             n_threads=args.n_threads,
@@ -100,9 +100,9 @@ def _config_kgp_parser(parser):
     parser.add_argument('--vcf-dir', required=True)
     parser.add_argument('--cram-dir', required=True)
     parser.add_argument('--output-dir', required=True)
-    parser.add_argument('--ref-file', required=True)
+    parser.add_argument('--genome-file', required=True)
     parser.add_argument('--samples-file', required=True)
-    parser.add_argument('--coordinate-vcf-file', required=True)
+    parser.add_argument('--coordinates-vcf-file', required=True)
     parser.add_argument('--min-read-depth', type=int, default=2)
     parser.add_argument('--n-cram-samples', type=int, default=10)
     parser.add_argument('--n-threads', type=int, default=1)
