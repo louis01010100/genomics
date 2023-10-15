@@ -165,9 +165,6 @@ class Variant():
         return hash(self.chrom, self.pos, self.id, self.ref, self.alt)
 
     def __str__(self):
-        return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}'
-
-    def __str__(self):
         return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.data}'
 
     def __repr__(self):

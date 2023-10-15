@@ -2,6 +2,7 @@ import gzip
 import shutil
 from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
+import logging
 
 import numpy as np
 import polars as pl
@@ -28,6 +29,7 @@ def export_snv_truth(
 
     # if output_dir.exists():
     #     shutil.rmtree(output_dir)
+
     output_dir.mkdir(exist_ok=True)
 
     kgp_vcf_tmp_dir = output_dir / 'vcf'
@@ -42,16 +44,16 @@ def export_snv_truth(
         n_threads,
     ).to_df(site_only=True, )
 
-    # depths = extract_depth(
-    #     cram_dir,
-    #     genome_file,
-    #     coordinates,
-    #     kgp_cram_tmp_dir,
-    #     n_threads,
-    #     n_samples=n_cram_samples,
-    # )
-    #
-    # save(depths, output_dir / 'depths.gz')
+    depths = extract_depth(
+        cram_dir,
+        genome_file,
+        coordinates,
+        kgp_cram_tmp_dir,
+        n_threads,
+        n_samples=n_cram_samples,
+    )
+
+    save(depths, output_dir / 'depths.gz')
 
     depths = load(output_dir / 'depths.gz')
 
@@ -62,22 +64,26 @@ def export_snv_truth(
             separator='\t',
         )['sample_id'])
 
-    # vcf_file = subset_samples(
-    #     vcf_dir,
-    #     kgp_vcf_tmp_dir,
-    #     samples,
-    #     n_threads,
-    # )
+    vcf_file = subset_samples(
+        vcf_dir,
+        kgp_vcf_tmp_dir,
+        samples,
+        n_threads,
+    )
 
-    vcf_file = kgp_vcf_tmp_dir / 'kgp.vcf.bgz'
+    vcf_file = kgp_vcf_tmp_dir / 'kgp-samples.vcf.bgz'
 
-    subset_snvs(
+    result_vcf = subset_snvs(
         vcf_file=vcf_file,
         coordinates=coordinates,
         depths=depths,
         output_dir=kgp_vcf_tmp_dir,
         n_threads=n_threads,
-    ).write_csv(
+    )
+
+    kgp_truth_vcf = result_vcf.move_to(output_dir / 'kgp_truth.vcf.bgz')
+
+    kgp_truth_vcf.to_df().write_csv(
         output_dir / 'kgp_truth.tsv',
         has_header=True,
         separator='\t',
@@ -169,7 +175,8 @@ def subset_snvs(
                 fh.write(
                     f'{chrom}\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{gt}\n')
 
-    return Vcf(output_file, output_dir, n_threads).bgzip().index().to_df()
+    output_file = 'workspace/vcf/kgp-samples-snv.vcf'
+    return Vcf(output_file, output_dir, n_threads).bgzip().sort().index()
 
 
 def subset_samples(vcf_dir, output_dir, samples, n_threads):
@@ -203,9 +210,9 @@ def subset_samples(vcf_dir, output_dir, samples, n_threads):
         ):
             bag.append(vcf_file)
 
-    bag = [x for x in output_dir.glob('*/*trim_alt.vcf.bgz')]
+    # bag = [x for x in output_dir.glob('*/*trim_alt.vcf.bgz')]
 
-    output_file = output_dir / 'kgp.vcf.bgz'
+    output_file = output_dir / 'kgp-samples.vcf.bgz'
 
     result_vcf = concat(
         vcf_files=bag,

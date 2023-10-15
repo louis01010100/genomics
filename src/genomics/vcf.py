@@ -127,6 +127,7 @@ class Vcf():
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def index(self, force=False):
+
         log_filepath = self.tmp_dir / f'{self.filepath.name}.csi.log'
 
         if not force and (self.filepath.parent
@@ -183,6 +184,8 @@ class Vcf():
         index_file = self.filepath.with_suffix('.bgz.csi')
         if index_file.exists():
             shutil.move(index_file, output_file.with_suffix('.bgz.csi'))
+
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     @property
     def samples(self) -> set[str]:
@@ -486,7 +489,7 @@ class Vcf():
 
     def subset_variants(
         self,
-        coordinates: pl.DataFrame,
+        coordinates_file: Path,
         delete_src=False,
         region_overlap=0,
     ):
@@ -494,14 +497,6 @@ class Vcf():
         self.index()
 
         input_filepath = self.filepath
-
-        coordinates_file = self.tmp_dir / 'coordinates.tsv'
-
-        coordinates.write_csv(
-            coordinates_file,
-            has_header=False,
-            separator='\t',
-        )
 
         output_file = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
@@ -576,7 +571,6 @@ class Vcf():
                '')
 
         records = execute(cmd, debug=True, pipe=True)
-        # print(records)
 
         bag = []
 
@@ -1329,7 +1323,7 @@ def concat(
     with vcfs_file.open('wt') as fd:
         for vcf_file in vcf_files:
             Vcf(vcf_file, tmp_dir).bgzip().index(force=True)
-            print(vcf_file, file=fd)
+            fd.write(f'{vcf_file}\n')
 
     output_file = Path(output_file)
 
@@ -1352,7 +1346,7 @@ def concat(
            f'      &> {log_filepath}'
            '')
 
-    execute(cmd, debug=True)
+    execute(cmd)
     result = Vcf(tmp_filepath, tmp_dir).sort()
 
     result.copy_to(output_file)
