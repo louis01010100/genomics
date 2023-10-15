@@ -27,8 +27,8 @@ def export_snv_truth(
     n_cram_samples: int = 10,
 ):
 
-    # if output_dir.exists():
-    #     shutil.rmtree(output_dir)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
 
     output_dir.mkdir(exist_ok=True)
 
