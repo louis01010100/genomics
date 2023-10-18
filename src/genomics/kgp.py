@@ -10,9 +10,15 @@ from pathos.multiprocessing import ProcessPool
 
 from .utils import load, save
 from .variant import Variant
-from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples
+from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, merge
 
 MIN_READ_DEPTH = 10
+
+TMP_DEPTH_FILENAME = 'depth.gz'
+
+KGP_TRUTH_VCF_FILENAME = 'kgp_truth.vcf.bgz'
+VCF_DIRNAME = 'vcf'
+CRAM_DIRNAME = 'cram'
 
 
 def export_snv_truth(
@@ -27,22 +33,17 @@ def export_snv_truth(
     n_cram_samples: int = 10,
 ):
 
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
+    # shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(exist_ok=True)
 
-    kgp_vcf_tmp_dir = output_dir / 'vcf'
-    kgp_cram_tmp_dir = output_dir / 'cram'
+    kgp_vcf_tmp_dir = output_dir / VCF_DIRNAME
+    kgp_cram_tmp_dir = output_dir / CRAM_DIRNAME
 
     kgp_vcf_tmp_dir.mkdir(exist_ok=True)
     kgp_cram_tmp_dir.mkdir(exist_ok=True)
 
-    coordinates = Vcf(
-        coordinates_vcf_file,
-        kgp_vcf_tmp_dir,
-        n_threads,
-    ).to_df(site_only=True, )
+    coordinates = mung_coordinates(coordinates_vcf_file, output_dir)
 
     depths = extract_depth(
         cram_dir,
@@ -53,9 +54,11 @@ def export_snv_truth(
         n_samples=n_cram_samples,
     )
 
-    save(depths, output_dir / 'depths.gz')
+    save(depths, output_dir / TMP_DEPTH_FILENAME)
 
-    depths = load(output_dir / 'depths.gz')
+    depths = load(output_dir / TMP_DEPTH_FILENAME)
+
+    print('depths loaded')
 
     samples = set(
         pl.read_csv(
@@ -64,12 +67,12 @@ def export_snv_truth(
             separator='\t',
         )['sample_id'])
 
-    vcf_file = subset_samples(
-        vcf_dir,
-        kgp_vcf_tmp_dir,
-        samples,
-        n_threads,
-    )
+    # vcf_file = subset_samples(
+    #     vcf_dir,
+    #     kgp_vcf_tmp_dir,
+    #     samples,
+    #     n_threads,
+    # )
 
     vcf_file = kgp_vcf_tmp_dir / 'kgp-samples.vcf.bgz'
 
@@ -83,11 +86,52 @@ def export_snv_truth(
 
     kgp_truth_vcf = result_vcf.move_to(output_dir / 'kgp_truth.vcf.bgz')
 
-    kgp_truth_vcf.to_df().write_csv(
-        output_dir / 'kgp_truth.tsv',
-        has_header=True,
-        separator='\t',
-    )
+
+def mung_coordinates(coordinates_vcf_file, output_dir) -> pl.DataFrame:
+
+    vcf_file1 = output_dir / 'file1.vcf'
+    vcf_file2 = output_dir / 'file2.vcf'
+
+    with gzip.open(coordinates_vcf_file, 'rt') as fh, vcf_file1.open(
+            'wt') as fh1, vcf_file2.open('wt') as fh2:
+        for line in fh:
+            if line.startswith('#'):
+                fh1.write(line)
+                fh2.write(line)
+                continue
+            fh1.write(line)
+            fh2.write(line)
+            break
+
+        coordinates = pl.read_csv(
+            coordinates_vcf_file,
+            comment_char='#',
+            has_header=False,
+            new_columns=[
+                'chrom', 'pos', 'id', 'ref', 'alt', 'qual', 'filter', 'info'
+            ],
+            separator='\t',
+        )
+
+        for coordinate, data in coordinates.groupby(['chrom', 'pos']):
+            data2 = data.drop('id').unique().to_dicts()
+
+            record = data2[0]
+
+            fh1.write(
+                f"{record['chrom']}\t{record['pos']}\t\t{record['ref']}\t{record['alt']}\t\t\t\n"
+            )
+
+            for record in data2[1:]:
+                fh2.write(
+                    f"{record['chrom']}\t{record['pos']}\t\t{record['ref']}\t{record['alt']}\t\t\t\n"
+                )
+
+    output_vcf_file = output_dir / 'coordinates.vcf.bgz'
+
+    merge([vcf_file2, vcf_file2], output_dir, output_vcf_file, flag='all')
+
+    return Vcf(output_vcf_file, output_dir).to_df(site_only=True)
 
 
 def subset_snvs(
@@ -125,6 +169,8 @@ def subset_snvs(
             'snvs': snvs,
             'chrom': chrom,
             'pos': pos,
+            'ref': ref,
+            'alt': alt,
         }
 
     n_samples = len(list_samples(vcf_file))
@@ -139,10 +185,14 @@ def subset_snvs(
             ofh.write(line)
             break
 
+    n_total = len(coordinates)
+    n_done = 0
     with output_file.open('at') as fh:
 
         with ProcessPool(n_threads) as pool:
             for result in pool.uimap(process, jobs(coordinates, vcf_file)):
+                n_done += 1
+                print(f'{n_done / n_total}', end='\r')
                 snvs = result['snvs']
 
                 if len(snvs) == 1:
@@ -157,25 +207,27 @@ def subset_snvs(
                     continue
 
                 chrom = result['chrom']
-                pos = result['pos']
+                pos = str(result['pos'])
+                ref = result['ref']
+                alt = result['alt']
 
                 key = (chrom, pos)
 
                 if key not in depths:
                     gt = '\t'.join(['./.' for i in range(0, n_samples)])
-                    continue
-
-                depth = depths[key]
-
-                if depth > MIN_READ_DEPTH:
-                    gt = '\t'.join(['0/0' for i in range(0, n_samples)])
                 else:
-                    gt = '\t'.join(['./.' for i in range(0, n_samples)])
+                    depth = depths[key]
+
+                    if depth > MIN_READ_DEPTH:
+                        gt = '\t'.join(['0/0' for i in range(0, n_samples)])
+                    else:
+                        print(key)
+                        gt = '\t'.join(['./.' for i in range(0, n_samples)])
 
                 fh.write(
                     f'{chrom}\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{gt}\n')
 
-    output_file = 'workspace/vcf/kgp-samples-snv.vcf'
+    # output_file = 'workspace/vcf/kgp-samples-snv.vcf'
     return Vcf(output_file, output_dir, n_threads).bgzip().sort().index()
 
 
@@ -312,7 +364,7 @@ def extract_depth(
     data = pl.concat(bag)
 
     result = dict()
-    for key, df in data.groupby(['chrom', 'pos', 'ref']):
+    for key, df in data.groupby(['chrom', 'pos']):
         result[key] = np.median(df['depth'])
 
     return result

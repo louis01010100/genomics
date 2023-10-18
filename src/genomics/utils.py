@@ -8,6 +8,8 @@ from typing import TextIO, Tuple, Union
 import pandas as pd
 from icecream import ic
 
+COMPLEMENT_BASES = str.maketrans("ACGT", "TGCA")
+
 
 class _AllelePairs():
 
@@ -193,6 +195,10 @@ def tsv2df(input_file: Path,
         dtype=dtype,
         keep_default_na=True,
     )
+
+
+def revcom(seq):
+    return seq.translate(COMPLEMENT_BASES)[::-1]
 
 
 def save(obj, file_):

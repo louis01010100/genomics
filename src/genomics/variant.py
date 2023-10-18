@@ -108,6 +108,19 @@ class Variant():
             data=self.data,
         )
 
+    def merge(self, other):
+        assert self.chrom == other.chrom and self.pos == other.pos
+
+        if self == other:
+            return Variant(
+                chrom=self.chrom,
+                pos=self.pos,
+                id_=self.id,
+                ref=self.ref,
+                alt=self.alt,
+                data=self.data,
+            )
+
     @property
     def is_snv(self):
         return is_snv(self.ref, self.alt)

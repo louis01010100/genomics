@@ -1553,4 +1553,4 @@ def list_samples(vcf_file):
     except Exception as e:
         raise e
 
-    return output[0].strip().split('\n')
+    return output
