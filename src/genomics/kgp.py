@@ -10,7 +10,7 @@ from pathos.multiprocessing import ProcessPool
 
 from .utils import load, save
 from .variant import Variant
-from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, merge
+from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples
 
 MIN_READ_DEPTH = 10
 
@@ -33,7 +33,7 @@ def export_snv_truth(
     n_cram_samples: int = 10,
 ):
 
-    # shutil.rmtree(output_dir, ignore_errors=True)
+    shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(exist_ok=True)
 
@@ -43,7 +43,11 @@ def export_snv_truth(
     kgp_vcf_tmp_dir.mkdir(exist_ok=True)
     kgp_cram_tmp_dir.mkdir(exist_ok=True)
 
-    coordinates = mung_coordinates(coordinates_vcf_file, output_dir)
+    coordinates = mung_coordinates(
+        coordinates_vcf_file,
+        output_dir,
+        n_threads,
+    ).select(pl.col(['chrom', 'pos']))
 
     depths = extract_depth(
         cram_dir,
@@ -87,51 +91,38 @@ def export_snv_truth(
     kgp_truth_vcf = result_vcf.move_to(output_dir / 'kgp_truth.vcf.bgz')
 
 
-def mung_coordinates(coordinates_vcf_file, output_dir) -> pl.DataFrame:
+def mung_coordinates(coordinates_vcf_file, output_dir,
+                     n_threads) -> pl.DataFrame:
 
-    vcf_file1 = output_dir / 'file1.vcf'
-    vcf_file2 = output_dir / 'file2.vcf'
+    coordinates = pl.read_csv(
+        coordinates_vcf_file,
+        comment_char='#',
+        has_header=False,
+        new_columns=[
+            'chrom', 'pos', 'id', 'ref', 'alt', 'qual', 'filter', 'info'
+        ],
+        separator='\t',
+    )
 
-    with gzip.open(coordinates_vcf_file, 'rt') as fh, vcf_file1.open(
-            'wt') as fh1, vcf_file2.open('wt') as fh2:
-        for line in fh:
-            if line.startswith('#'):
-                fh1.write(line)
-                fh2.write(line)
-                continue
-            fh1.write(line)
-            fh2.write(line)
-            break
+    bag = list()
+    for coordinate, data in coordinates.groupby(['chrom', 'pos']):
+        chrom = coordinate[0]
+        pos = coordinate[1]
 
-        coordinates = pl.read_csv(
-            coordinates_vcf_file,
-            comment_char='#',
-            has_header=False,
-            new_columns=[
-                'chrom', 'pos', 'id', 'ref', 'alt', 'qual', 'filter', 'info'
-            ],
-            separator='\t',
-        )
+        result = None
+        for record in data.to_dicts():
+            variant = Variant(chrom, pos, record['ref'], record['alt'])
+            if not result:
+                result = variant
+            else:
+                print()
+                print(result)
+                print(variant)
+                result = result.merge(variant)
+        bag.append(result)
+    data = pl.from_dicts(bag)
 
-        for coordinate, data in coordinates.groupby(['chrom', 'pos']):
-            data2 = data.drop('id').unique().to_dicts()
-
-            record = data2[0]
-
-            fh1.write(
-                f"{record['chrom']}\t{record['pos']}\t\t{record['ref']}\t{record['alt']}\t\t\t\n"
-            )
-
-            for record in data2[1:]:
-                fh2.write(
-                    f"{record['chrom']}\t{record['pos']}\t\t{record['ref']}\t{record['alt']}\t\t\t\n"
-                )
-
-    output_vcf_file = output_dir / 'coordinates.vcf.bgz'
-
-    merge([vcf_file2, vcf_file2], output_dir, output_vcf_file, flag='all')
-
-    return Vcf(output_vcf_file, output_dir).to_df(site_only=True)
+    return data
 
 
 def subset_snvs(
@@ -163,7 +154,7 @@ def subset_snvs(
 
         snvs = fetch_variants(refsnv.chrom, refsnv.pos, vcf_file)
 
-        snvs = filter_variants(refsnv, snvs)
+        snvs = filter_variants(refsnv, snvs, fuzzy=True)
 
         return {
             'snvs': snvs,

@@ -1275,8 +1275,10 @@ def merge(vcf_files: list,
 
     with vcfs_file.open('wt') as fd:
         for vcf_file in vcf_files:
-            Vcf(vcf_file, tmp_dir).bgzip().index()
+            vcf_file = Vcf(vcf_file, tmp_dir).bgzip().sort().index().filepath
+            print(vcf_file)
             fd.write(str(vcf_file) + '\n')
+    print(vcfs_file)
 
     output_file = Path(output_file)
 
@@ -1300,8 +1302,11 @@ def merge(vcf_files: list,
            '')
 
     execute(cmd)
-    result = Vcf(tmp_filepath, tmp_dir,
-                 new_tmp=False).sort(delete_src=True, new_tmp=False).index()
+    result = Vcf(
+        tmp_filepath,
+        tmp_dir,
+        new_tmp=False,
+    ).sort(delete_src=True).index()
 
     result.move_to(output_file)
 
