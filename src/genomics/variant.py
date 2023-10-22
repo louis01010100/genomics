@@ -213,7 +213,7 @@ class Variant():
                 and self.alt == other.alt)
 
     def __hash__(self):
-        return hash(self.chrom, self.pos, self.id, self.ref, self.alt)
+        return hash((self.chrom, self.pos, self.id, self.ref, self.alt))
 
     def __str__(self):
         return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.data}'

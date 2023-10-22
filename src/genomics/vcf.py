@@ -1010,58 +1010,6 @@ class Vcf():
         return int(stdout[0].strip())
 
 
-class AllelePairs():
-
-    def __init__(self):
-        self.allele_pairs = dict()
-
-    def update(self, other) -> None:
-        self.allele_pairs.update(other.allele_pairs)
-
-    def add_allele_pair(self, ref, alt) -> None:
-        key = (ref, alt)
-        self.allele_pairs[key] = {'ref': ref, 'alt': alt}
-
-        longest_ref = max([x['ref'] for x in self.allele_pairs.values()],
-                          key=len)
-
-        delta = dict()
-
-        for key, value in self.allele_pairs.items():
-            ref = value['ref']
-            alt = value['alt']
-
-            if ref == longest_ref:
-                continue
-
-            suffix = longest_ref[len(ref):]
-
-            new_ref = ref + suffix
-            new_alt = ','.join([x + suffix for x in alt.split(',')])
-
-            delta[key] = {'ref': new_ref, 'alt': new_alt}
-
-        self.allele_pairs.update(delta)
-
-    def get_updated_allele_pair(self, ref, alt) -> dict:
-        key = (ref, alt)
-        return self.allele_pairs[key]
-
-    def __str__(self) -> str:
-        return __repr__(self)
-
-    def __repr__(self) -> str:
-
-        bag = []
-
-        for k, v in self.allele_pairs.items():
-            value = '{' + f'{k}:{v}' + '}'
-            bag.append(value)
-            output = ','.join(bag)
-
-        return f'[{output}]'
-
-
 def _fetch_seq(genome_file: Path, region: GenomicRegion) -> str:
 
     # samtools faidx hs38DH.fa 'chr12:1000000-1000010'
@@ -1217,27 +1165,149 @@ def _new_info(
     return ';'.join(bag)
 
 
-def sync_alleles(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
-    output_dir.mkdir(parents=True, exist_ok=True)
+def sync_alleles(coordinate_vcf_file: Path, vcf_file: Path,
+                 output_dir: Path) -> Path:
+    coordinate = Vcf(
+        coordinate_vcf_file,
+        output_dir,
+    ).to_df(site_only=True).select(pl.col(['chrom', 'pos', 'ref', 'alt']))
 
-    vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
-    vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().filepath
+    data = Vcf(vcf_file, output_dir).to_df().rename({
+        'ref': 'gt_ref',
+        'alt': 'gt_alt'
+    })
 
-    modification = vcf2dict(vcf_file_x, vcf_file_y)
+    data = coordinate.join(data, on=['chrom', 'pos'], how='left')
 
-    vcf_file_x_modified = output_dir / vcf_file_x.name.replace(
-        '.vcf.bgz', '-sync.vcf')
+    output_vcf_filename = vcf_file.name.replace('.vcf.bgz',
+                                                '-sync_allele.vcf.bgz')
+    output_vcf_file = output_dir / output_vcf_filename
 
-    vcf_file_y_modified = output_dir / vcf_file_y.name.replace(
-        '.vcf.bgz', '-sync.vcf')
+    columns = None
 
-    _update_vcf_file(vcf_file_x, modification, vcf_file_x_modified)
-    _update_vcf_file(vcf_file_y, modification, vcf_file_y_modified)
+    with vcf_file.open('rt') as ifh, output_vcf_file.open('wt') as ofh:
+        for line in ifh:
+            if line.startswith('#'):
+                ofh.write(line)
+                continue
+            ofh.write(line)
+            columns = line.strip().split('\t')
+            break
 
-    vcf_file_x = Vcf(vcf_file_x_modified, output_dir).bgzip().index().filepath
-    vcf_file_y = Vcf(vcf_file_y_modified, output_dir).bgzip().index().filepath
+        for record in data.to_dicts():
+            result = _sync_alleles(columns, record)
+            ofh.write(f'{result}\n')
 
-    return vcf_file_x, vcf_file_y
+
+def _sync_alleles(columns, record):
+
+    ref = record['ref']
+    alt = record['alt']
+
+    gt_ref = record['gt_ref']
+    gt_alt = record['gt_alt']
+
+    allele2idx = _load_allele2idx(ref, alt)
+    idx2allele = _load_idx2allele(gt_ref, gt_alt)
+
+    bag = list()
+
+    for column in columns:
+
+        if k in [
+                'CHROM', 'POS', 'ID', 'REF', 'QUAL', 'FILTER', 'INFO',
+                'FORMAT'
+        ]:
+            bag.append(record[k.lower()])
+            continue
+
+        gt = record[k]
+
+        new_gt = _transcode_gt(gt, allele2idx, idx2allele)
+        bag.append(new_gt)
+
+    return '\t'.join(bag)
+
+
+def _transcode_gt(gt, idx2allele, allele2idx):
+    bag = list()
+
+    if '/' in gt:
+        for allele in gt.split('/'):
+            bag.append(allele2idx[idx2allele[allele]])
+        if '.' in bag:
+            bag.remove('.')
+            bag = sorted(bag)
+            bag.append('.')
+            return '/'.join(bag)
+        else:
+            return '/'.join(sorted(bag))
+    elif '|' in gt:
+        for allele in gt.split('|'):
+            bag.append(allele2idx[idx2allele[allele]])
+        if '.' in bag:
+            bag.remove('.')
+            bag = sorted(bag)
+            bag.append('.')
+            return '|'.join(bag)
+        else:
+            return '|'.join(sorted(bag))
+    elif gt == '.':
+        return '.'
+    elif gt.isnumeric():
+        allele = gt
+        return allele2idx[idx2allele[allele]]
+    else:
+        raise Exception(gt)
+
+
+def _load_allele2idx(ref: str, alt: str):
+
+    allele_dict = {
+        allele: str(index + 1)
+        for index, allele in enumerate(
+            [allele for allele in alt.split(',') if allele != '.'])
+    }
+    allele_dict[ref] = '0'
+    allele_dict['.'] = '.'
+
+    return allele_dict
+
+
+def _load_idx2allele(ref: str, alt: str):
+    allele_dict = {
+        str(index + 1): allele
+        for index, allele in enumerate(
+            [allele for allele in alt.split(',') if allele != '.'])
+    }
+
+    allele_dict['0'] = ref
+    allele_dict['.'] = '.'
+
+    return allele_dict
+
+
+# def sync_alleles_bkp(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
+#     output_dir.mkdir(parents=True, exist_ok=True)
+#
+#     vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
+#     vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().filepath
+#
+#     modification = vcf2dict(vcf_file_x, vcf_file_y)
+#
+#     vcf_file_x_modified = output_dir / vcf_file_x.name.replace(
+#         '.vcf.bgz', '-sync.vcf')
+#
+#     vcf_file_y_modified = output_dir / vcf_file_y.name.replace(
+#         '.vcf.bgz', '-sync.vcf')
+#
+#     _update_vcf_file(vcf_file_x, modification, vcf_file_x_modified)
+#     _update_vcf_file(vcf_file_y, modification, vcf_file_y_modified)
+#
+#     vcf_file_x = Vcf(vcf_file_x_modified, output_dir).bgzip().index().filepath
+#     vcf_file_y = Vcf(vcf_file_y_modified, output_dir).bgzip().index().filepath
+#
+#     return vcf_file_x, vcf_file_y
 
 
 def _update_vcf_file(input_vcf_file, modification, output_vcf_file):
@@ -1390,6 +1460,46 @@ def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
     return bag
 
 
+def filter_variants(ref_snv: Variant, snvs: list[Variant], fuzzy=False):
+
+    target = set()
+    for snv in snvs:
+        if ref_snv.pos == snv.pos and ref_snv.ref == snv.ref:
+            if fuzzy:
+                target.add(snv)
+
+            if ref_snv.alts == snv.alts:
+                target.add(snv)
+
+    ref_pairs = split_rtrim(ref_snv)
+
+    for snv in snvs:
+
+        pairs = split_rtrim(snv)
+
+        for ref_pair in ref_pairs:
+            for pair in pairs:
+                if ref_pair[0] != pair[0]:
+                    continue
+
+                if fuzzy:
+                    target.add(snv)
+
+    for snv in snvs:
+        if not snv.is_mnv:
+            continue
+
+        offset = ref_snv.pos - snv.pos
+        ref = snv.ref[offset:offset + len(ref_snv.ref)]
+        alts = {alt[offset:offset + len(ref_snv.ref)] for alt in snv.alts}
+
+        if ref == ref_snv.ref:    # and (ref_snv.alts & alts):
+            if fuzzy:
+                target.add(snv)
+
+    return list(target)
+
+
 def fix_axiom_vcf_file(
     vcf_file: Path,
     output_dir: Path,
@@ -1448,85 +1558,6 @@ def fix_axiom_vcf_file(
     vcf.move_to(result_file)
 
     return result_file
-
-
-def vcf2dict(*vcf_files) -> dict:
-    result = None
-
-    for vcf_file in vcf_files:
-        if is_gzipped(vcf_file):
-            with gzip.open(vcf_file, 'rt') as fh:
-                output = _vcf2dict(fh)
-        else:
-            with vcf_file.open('rt') as fh:
-                output = _vcf2dict(fh)
-
-        if not result:
-            result = output
-
-        for coordinate, allele_pairs in output.items():
-            if coordinate not in result:
-                continue
-            result[coordinate].update(allele_pairs)
-
-    return result
-
-
-def _vcf2dict(fh: TextIO) -> dict:
-    bag = dict()
-    for line in fh:
-        if line.startswith('#'):
-            continue
-
-        chrom, pos, id_, ref, alt, rest = line.strip().split('\t', 5)
-
-        coordinate = (chrom, pos)
-
-        if coordinate not in bag:
-            bag[coordinate] = AllelePairs()
-        bag[coordinate].add_allele_pair(ref, alt)
-
-    return bag
-
-
-def filter_variants(ref_snv: Variant, snvs: list[Variant], fuzzy=False):
-
-    target = list()
-    for snv in snvs:
-        if ref_snv.pos == snv.pos and ref_snv.ref == snv.ref:
-            if fuzzy:
-                target.append(snv)
-
-            if ref_snv.alts == snv.alts:
-                target.append(snv)
-
-    ref_pairs = split_rtrim(ref_snv)
-
-    for snv in snvs:
-
-        pairs = split_rtrim(snv)
-
-        for ref_pair in ref_pairs:
-            for pair in pairs:
-                if ref_pair[0] != pair[0]:
-                    continue
-
-                if fuzzy:
-                    target.append(snv)
-
-    for snv in snvs:
-        if not snv.is_mnv:
-            continue
-
-        offset = ref_snv.pos - snv.pos
-        ref = snv.ref[offset:offset + len(ref_snv.ref)]
-        alts = {alt[offset:offset + len(ref_snv.ref)] for alt in snv.alts}
-
-        if ref == ref_snv.ref:    # and (ref_snv.alts & alts):
-            if fuzzy:
-                target.append(snv)
-
-    return target
 
 
 def split_rtrim(snv: Variant):

@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 from genomics.gregion import GenomicRegion
 from genomics.variant import Variant
-from genomics.vcf import (AllelePairs, Vcf, filter_variants, split_rtrim,
-                          sync_alleles, vcf2dict)
+from genomics.vcf import (Vcf, filter_variants, split_rtrim, sync_alleles,
+                          _load_allele2idx, _load_idx2allele, _transcode_gt)
 
 
 def test_meta(tmp_path):
@@ -541,47 +541,6 @@ def _to_vcf(data, filepath):
 #     assert {'AGGAGTC'} == set(vcf2_observed['ref'])
 
 
-def test_vcf2dict():
-    fixture = Path(__file__).parents[0] / 'fixture.vcf'
-
-    result = vcf2dict(fixture, fixture)
-
-    allele_pairs = result[('chr13', '48037782')]
-    assert {
-        'ref': 'AGGAGTC',
-        'alt': 'A'
-    } == allele_pairs.get_updated_allele_pair('AGGAGTC', 'A')
-    assert {
-        'ref': 'AGGAGTC',
-        'alt': 'A,AGGAGTCGGAGTC'
-    } == allele_pairs.get_updated_allele_pair('AGGAGTC', 'A,AGGAGTCGGAGTC')
-    assert {
-        'ref': 'AGGAGTC',
-        'alt': 'AGGAGTCGGAGTC'
-    } == allele_pairs.get_updated_allele_pair('A', 'AGGAGTC')
-
-
-def test__AllelePairs():
-
-    ap = AllelePairs()
-    ap.add_allele_pair('A', 'AGGAGTC')
-    ap.add_allele_pair('AGGAGTC', 'A')
-    ap.add_allele_pair('AGGAGTC', 'A,GGAGTCGGAGTC')
-
-    assert {
-        'ref': 'AGGAGTC',
-        'alt': 'AGGAGTCGGAGTC'
-    } == ap.get_updated_allele_pair('A', 'AGGAGTC')
-    assert {
-        'ref': 'AGGAGTC',
-        'alt': 'A'
-    } == ap.get_updated_allele_pair('AGGAGTC', 'A')
-    assert {
-        'ref': 'AGGAGTC',
-        'alt': 'A,GGAGTCGGAGTC'
-    } == ap.get_updated_allele_pair('AGGAGTC', 'A,GGAGTCGGAGTC')
-
-
 def test_filter_variants():
     snvs = [
         Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
@@ -630,3 +589,36 @@ def test_split_rtrim():
     result = split_rtrim(snv)
 
     assert len(result)
+
+
+def test__load_allele2idx():
+    assert _load_allele2idx('A', 'C') == {'A': '0', 'C': '1', '.': '.'}
+    assert _load_allele2idx('C', 'CT,G') == {
+        'C': '0',
+        'CT': '1',
+        'G': '2',
+        '.': '.'
+    }
+
+
+def test__load_idx2allele():
+    assert _load_idx2allele('A', 'C') == {'0': 'A', '1': 'C', '.': '.'}
+    assert _load_idx2allele('C', 'CT,G') == {
+        '0': 'C',
+        '1': 'CT',
+        '2': 'G',
+        '.': '.'
+    }
+
+
+def test__transcode_gt():
+
+    idx2allele = {'0': 'A', '1': 'G', '.': '.'}
+    allele2idx = {'A': '0', 'C': '1', 'G': '2', '.': '.'}
+
+    assert _transcode_gt('0/0', idx2allele, allele2idx) == '0/0'
+    assert _transcode_gt('0/1', idx2allele, allele2idx) == '0/2'
+    assert _transcode_gt('.', idx2allele, allele2idx) == '.'
+    assert _transcode_gt('0', idx2allele, allele2idx) == '0'
+    assert _transcode_gt('./0', idx2allele, allele2idx) == '0/.'
+    assert _transcode_gt('0/.', idx2allele, allele2idx) == '0/.'

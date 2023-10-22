@@ -33,7 +33,7 @@ def export_snv_truth(
     n_cram_samples: int = 10,
 ):
 
-    shutil.rmtree(output_dir, ignore_errors=True)
+    # shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(exist_ok=True)
 
@@ -47,18 +47,22 @@ def export_snv_truth(
         coordinates_vcf_file,
         output_dir,
         n_threads,
-    ).select(pl.col(['chrom', 'pos']))
-
-    depths = extract_depth(
-        cram_dir,
-        genome_file,
-        coordinates,
-        kgp_cram_tmp_dir,
-        n_threads,
-        n_samples=n_cram_samples,
     )
 
-    save(depths, output_dir / TMP_DEPTH_FILENAME)
+    print(coordinates['chrom'].value_counts())
+
+    coordinates = coordinates.filter(pl.col('chrom') == 'chr21')
+
+    # depths = extract_depth(
+    #     cram_dir,
+    #     genome_file,
+    #     coordinates,
+    #     kgp_cram_tmp_dir,
+    #     n_threads,
+    #     n_samples=n_cram_samples,
+    # )
+    #
+    # save(depths, output_dir / TMP_DEPTH_FILENAME)
 
     depths = load(output_dir / TMP_DEPTH_FILENAME)
 
@@ -102,7 +106,7 @@ def mung_coordinates(coordinates_vcf_file, output_dir,
             'chrom', 'pos', 'id', 'ref', 'alt', 'qual', 'filter', 'info'
         ],
         separator='\t',
-    )
+    ).drop('id').unique()
 
     bag = list()
     for coordinate, data in coordinates.groupby(['chrom', 'pos']):
@@ -115,11 +119,13 @@ def mung_coordinates(coordinates_vcf_file, output_dir,
             if not result:
                 result = variant
             else:
-                print()
-                print(result)
-                print(variant)
                 result = result.merge(variant)
-        bag.append(result)
+        bag.append({
+            'chrom': result.chrom,
+            'pos': result.pos,
+            'ref': result.ref,
+            'alt': result.alt,
+        })
     data = pl.from_dicts(bag)
 
     return data
@@ -252,8 +258,6 @@ def subset_samples(vcf_dir, output_dir, samples, n_threads):
                 jobs(vcf_dir, output_dir, samples),
         ):
             bag.append(vcf_file)
-
-    # bag = [x for x in output_dir.glob('*/*trim_alt.vcf.bgz')]
 
     output_file = output_dir / 'kgp-samples.vcf.bgz'
 
