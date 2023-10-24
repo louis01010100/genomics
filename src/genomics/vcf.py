@@ -1224,7 +1224,7 @@ def sync_alleles(
             )
 
             result = coordiate.sync_alleles(v)
-            ofh.write(f'{result.data}\n')
+            ofh.write(f'{result}\n')
 
     return output_vcf_file
 
@@ -1348,6 +1348,13 @@ def fetch_variants(
         line = line.strip()
         items = line.split('\t')
 
+        if len(items) > 8:
+            format_ = items[8]
+            calls = '\t'.join(items[9:])
+        else:
+            format_ = None
+            calls = None
+
         bag.append(
             Variant(
                 chrom=items[0],
@@ -1355,7 +1362,11 @@ def fetch_variants(
                 id_=items[2],
                 ref=items[3],
                 alt=items[4],
-                data=line,
+                qual=items[5],
+                filter_=items[6],
+                info=items[7],
+                format_=format_,
+                calls=calls,
             ))
 
     return bag

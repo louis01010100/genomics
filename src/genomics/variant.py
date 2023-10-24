@@ -23,23 +23,68 @@ class Variant():
         calls: str = None,
     ):
 
-        self.chrom = chrom
-        self.pos = pos
-        self.id = id_
-        self.ref = ref
-        self.alt = alt
-        self.qual = qual
-        self.filter = filter_
-        self.info = info
-        self.format = format_
-        self.calls = calls
+        self._chrom = chrom
+        self._pos = pos
+        self._id = id_
+        self._ref = ref
+        self._alt = alt
+        self._qual = qual
+        self._filter = filter_
+        self._info = info
+        self._format = format_
+        self._calls = calls
+
+        if format_ is not None:
+            assert calls is not None
+        if calls is not None:
+            assert format_ is not None
 
         self._region = get_region(
-            self.chrom,
-            self.pos,
-            self.ref,
-            self.alt,
+            self._chrom,
+            self._pos,
+            self._ref,
+            self._alt,
         )
+
+    @property
+    def chrom(self):
+        return self._chrom
+
+    @property
+    def pos(self):
+        return self._pos
+
+    @property
+    def id(self):
+        return self._id
+
+    @property
+    def ref(self):
+        return self._ref
+
+    @property
+    def alt(self):
+        return self._alt
+
+    @property
+    def qual(self):
+        return self._qual
+
+    @property
+    def filter(self):
+        return self._filter
+
+    @property
+    def info(self):
+        return self._info
+
+    @property
+    def format(self):
+        return self._format
+
+    @property
+    def calls(self):
+        return self._calls
 
     @property
     def region(self):
@@ -117,7 +162,6 @@ class Variant():
             raise Exception(self, other)
 
         if self == other:
-            return self
             return Variant(
                 chrom=self.chrom,
                 pos=self.pos,
@@ -125,9 +169,8 @@ class Variant():
                 ref=self.ref,
                 alt=self.alt,
                 qual=self.qual,
-                filter_=self.filter_,
+                filter_=self.filter,
                 info=self.info,
-                format_=self.format,
                 calls=self.calls,
             )
 
@@ -160,13 +203,16 @@ class Variant():
         new_alt = ','.join(new_alts)
         new_id_ = merge_variant_id(self.id, other.id)
 
-        if site_only:
+        if site_only or other.calls is None:
             return Variant(
                 chrom=self.chrom,
                 pos=new_pos,
+                id_=new_id_,
                 ref=new_ref,
                 alt=new_alt,
-                id_=new_id_,
+                qual=other.qual,
+                filter_=other.filter,
+                info=other.info,
             )
 
         idx2allele = _load_idx2allele(other.ref, other.alt)
@@ -175,6 +221,7 @@ class Variant():
         allele2allele = _load_allele2allele([other.ref, *other.alts],
                                             [new_ref, *o_alts])
 
+        calls = other.calls.split('\t')
         bag = list()
         for call in other.calls.split('\t'):
             bag.append(
@@ -185,16 +232,18 @@ class Variant():
                     allele2allele=allele2allele,
                 ))
 
-        return Variant(chrom=other.chrom,
-                       pos=new_pos,
-                       id_=new_id_,
-                       ref=new_ref,
-                       alt=new_alt,
-                       qual=other.qual,
-                       filter_=other.filter,
-                       info=other.info,
-                       format_='GT',
-                       calls='\t'.join(bag))
+        return Variant(
+            chrom=other.chrom,
+            pos=new_pos,
+            id_=new_id_,
+            ref=new_ref,
+            alt=new_alt,
+            qual=other.qual,
+            filter_=other.filter,
+            info=other.info,
+            format_=other.format,
+            calls='\t'.join(bag),
+        )
 
     @property
     def is_snv(self):
@@ -274,6 +323,7 @@ class Variant():
         bag.append(self.qual if self.qual else '.')
         bag.append(self.filter if self.filter else '.')
         bag.append(self.info if self.info else '.')
+
         if self.format:
             bag.append(self.format)
         if self.calls:

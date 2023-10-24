@@ -35,7 +35,7 @@ def export_snv_truth(
     n_cram_samples: int = 10,
 ):
 
-    shutil.rmtree(output_dir, ignore_errors=True)
+    # shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(exist_ok=True)
 
@@ -45,29 +45,24 @@ def export_snv_truth(
     kgp_vcf_tmp_dir.mkdir(exist_ok=True)
     kgp_cram_tmp_dir.mkdir(exist_ok=True)
 
-    export_coordinates(
-        coordinates_vcf_file,
-        output_dir / COORDINATES_FILENAME,
-    )
+    # export_coordinates(
+    #     coordinates_vcf_file,
+    #     output_dir / COORDINATES_FILENAME,
+    # )
 
-    coordinates = pl.read_csv(
-        output_dir / COORDINATES_FILENAME,
-        has_header=True,
-        separator='\t',
-    )
+    coordinates = Vcf(output_dir / COORDINATES_FILENAME,
+                      output_dir).to_df(site_only=True)
 
-    assert False
-
-    depths = extract_depth(
-        cram_dir,
-        genome_file,
-        coordinates,
-        kgp_cram_tmp_dir,
-        n_threads,
-        n_samples=n_cram_samples,
-    )
-
-    save(depths, output_dir / TMP_DEPTH_FILENAME)
+    # depths = extract_depth(
+    #     cram_dir,
+    #     genome_file,
+    #     coordinates,
+    #     kgp_cram_tmp_dir,
+    #     n_threads,
+    #     n_samples=n_cram_samples,
+    # )
+    #
+    # save(depths, output_dir / TMP_DEPTH_FILENAME)
 
     depths = load(output_dir / TMP_DEPTH_FILENAME)
 
