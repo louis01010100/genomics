@@ -16,26 +16,23 @@ class Variant():
         ref: str,
         alt: str,
         id_: str = None,
-        data: str = None,
+        qual: str = None,
+        filter_: str = None,
+        info: str = None,
+        format_: str = None,
+        calls: str = None,
     ):
 
-        self.id = id_
         self.chrom = chrom
         self.pos = pos
+        self.id = id_
         self.ref = ref
         self.alt = alt
-        self.data = data
-
-        # if not REGULAR_BASE.match(self.ref):
-        #     print(
-        #         f'[WARN]\tWEIRD REF: {self.chrom}:{self.pos} {self.ref}>{self.alt}'
-        #     )
-        #
-        # for alt in self.alt.split(','):
-        #     if not REGULAR_BASE.match(alt):
-        #         print(
-        #             f'[WARN]\tWEIRD ALT: {self.chrom}:{self.pos} {self.ref}>{self.alt}'
-        #         )
+        self.qual = qual
+        self.filter = filter_
+        self.info = info
+        self.format = format_
+        self.calls = calls
 
         self._region = get_region(
             self.chrom,
@@ -51,6 +48,9 @@ class Variant():
     @property
     def alts(self):
         return self.alt.split(',')
+
+    def is_overlapping(self, other):
+        return self.region.is_overlapping(other.region)
 
     def fix_ref(self, genome: Genome):
         g_ref = genome.slice(self.chrom, self.pos - 1,
@@ -109,30 +109,30 @@ class Variant():
             data=self.data,
         )
 
-    def merge(self, other):
+    # self: site vcf
+    # other: regular vcf
+    def sync_alleles(self, other, site_only: bool = False):
+
+        if not self.is_overlapping(other):
+            raise Exception(self, other)
 
         if self == other:
+            return self
             return Variant(
                 chrom=self.chrom,
                 pos=self.pos,
                 id_=self.id,
                 ref=self.ref,
                 alt=self.alt,
-                data=self.data,
+                qual=self.qual,
+                filter_=self.filter_,
+                info=self.info,
+                format_=self.format,
+                calls=self.calls,
             )
 
         sregion = self.region
         oregion = other.region
-
-        if not sregion.is_overlapping(oregion):
-            raise Exception(sregion, oregion)
-
-        if self.pos == other.pos and self.ref == other.ref:
-            bag = set()
-            for alt in [*self.alts, *other.alts]:
-                bag.add(alt)
-            alt = ','.join(sorted(list(bag)))
-            return Variant(self.chrom, self.pos, self.ref, alt)
 
         pos, s_ref, s_alts, o_ref, o_alts = sync_prefix(
             start1=sregion.start,
@@ -152,12 +152,49 @@ class Variant():
             alts2=o_alts,
         )
 
-        assert s_ref == o_ref, f'{s_ref} != {o_ref}'
+        assert s_ref == o_ref, f'{s_ref} != {o_ref};{self};{other}'
 
-        ref = s_ref
-        alts = ','.join(sorted(list(set([*s_alts, *o_alts]))))
+        new_pos = pos
+        new_ref = s_ref
+        new_alts = sorted(list(set([*s_alts, *o_alts])))
+        new_alt = ','.join(new_alts)
+        new_id_ = merge_variant_id(self.id, other.id)
 
-        return Variant(self.chrom, pos, ref, alts)
+        if site_only:
+            return Variant(
+                chrom=self.chrom,
+                pos=new_pos,
+                ref=new_ref,
+                alt=new_alt,
+                id_=new_id_,
+            )
+
+        idx2allele = _load_idx2allele(other.ref, other.alt)
+        allele2idx = _load_allele2idx(new_ref, new_alt)
+
+        allele2allele = _load_allele2allele([other.ref, *other.alts],
+                                            [new_ref, *o_alts])
+
+        bag = list()
+        for call in other.calls.split('\t'):
+            bag.append(
+                _transcode_gt(
+                    gt=call,
+                    idx2allele=idx2allele,
+                    allele2idx=allele2idx,
+                    allele2allele=allele2allele,
+                ))
+
+        return Variant(chrom=other.chrom,
+                       pos=new_pos,
+                       id_=new_id_,
+                       ref=new_ref,
+                       alt=new_alt,
+                       qual=other.qual,
+                       filter_=other.filter,
+                       info=other.info,
+                       format_='GT',
+                       calls='\t'.join(bag))
 
     @property
     def is_snv(self):
@@ -208,18 +245,44 @@ class Variant():
         if self is other:
             return True
 
-        return (self.chrom == other.chrom and self.pos == other.pos
-                and self.id == other.id and self.ref == other.ref
-                and self.alt == other.alt)
+        same_site = (self.chrom == other.chrom and self.pos == other.pos
+                     and self.id == other.id and self.ref == other.ref
+                     and self.alt == other.alt)
+
+        if not same_site:
+            return False
+
+        if self.calls is None and other.calls is None:
+            return True
+        else:
+            return self.calls == other.calls
 
     def __hash__(self):
-        return hash((self.chrom, self.pos, self.id, self.ref, self.alt))
+        return hash(
+            (self.chrom, self.pos, self.id, self.ref, self.alt, self.qual,
+             self.filter, self.info, self.format, self.calls))
 
     def __str__(self):
-        return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.data}'
+
+        bag = list()
+
+        bag.append(self.chrom)
+        bag.append(str(self.pos))
+        bag.append(self.id if self.id else '.')
+        bag.append(self.ref)
+        bag.append(self.alt)
+        bag.append(self.qual if self.qual else '.')
+        bag.append(self.filter if self.filter else '.')
+        bag.append(self.info if self.info else '.')
+        if self.format:
+            bag.append(self.format)
+        if self.calls:
+            bag.append(self.calls)
+
+        return '\t'.join(bag)
 
     def __repr__(self):
-        return f'{self.chrom}\t{self.pos}\t{self.id}\t{self.ref}\t{self.alt}\t.\t.\t{self.data}'
+        return self.__str__()
 
 
 def get_region(chrom, pos, ref, alt):
@@ -238,7 +301,7 @@ def get_region(chrom, pos, ref, alt):
 
 def is_snv(ref, alt):
 
-    if (len(ref) == len(alt) == 1):
+    if (len(ref) == len(alt) == 1) and not is_ma(ref, alt):
         return True
 
     return False
@@ -246,7 +309,7 @@ def is_snv(ref, alt):
 
 def is_ins(ref, alt):
 
-    if alt.startswith(ref) and len(ref) < len(alt):
+    if alt.startswith(ref) and len(ref) < len(alt) and not is_ma(ref, alt):
         return True
 
     return False
@@ -254,7 +317,7 @@ def is_ins(ref, alt):
 
 def is_del(ref, alt):
 
-    if ref.startswith(alt) and len(ref) > len(alt):
+    if ref.startswith(alt) and len(ref) > len(alt) and not is_ma(ref, alt):
         return True
 
     return False
@@ -413,6 +476,14 @@ def sync_prefix(
     return pos, ref1, alts1, ref2, alts2
 
 
+def merge_variant_id(*ids):
+    id_ = sorted([id_ for id_ in ids if id_ is not None])
+
+    if len(id_) == 0:
+        return None
+    return ','.join(id_)
+
+
 def sync_suffix(
     end1: int,
     ref1: str,
@@ -438,3 +509,102 @@ def sync_suffix(
         raise Exception(end1, end2)
 
     return ref1, alts1, ref2, alts2
+
+
+def _transcode_gt(
+    gt: str,
+    idx2allele: dict,
+    allele2idx: dict,
+    allele2allele: dict = None,
+):
+    bag = list()
+
+    if '/' in gt:
+        for idx in gt.split('/'):
+
+            allele = idx2allele[idx]
+
+            if allele2allele:
+                allele = allele2allele[allele]
+            else:
+                allele = allele
+
+            idx = allele2idx[allele]
+
+            bag.append(idx)
+        if '.' in bag:
+            bag.remove('.')
+            bag = sorted(bag)
+            bag.append('.')
+            return '/'.join(bag)
+        else:
+            return '/'.join(sorted(bag))
+    elif '|' in gt:
+        for idx in gt.split('|'):
+            allele = idx2allele[idx]
+
+            if allele2allele:
+                allele = allele2allele[allele]
+            else:
+                allele = allele
+
+            idx = allele2idx[allele]
+
+            bag.append(idx)
+
+        if '.' in bag:
+            bag.remove('.')
+            bag = sorted(bag)
+            bag.append('.')
+            return '|'.join(bag)
+        else:
+            return '|'.join(sorted(bag))
+    elif gt == '.':
+        return '.'
+    elif gt.isnumeric():
+        idx = gt
+        allele = idx2allele[idx]
+
+        if allele2allele:
+            allele = allele2allele[allele]
+        else:
+            allele = allele
+
+        idx = allele2idx[allele]
+        return idx
+    else:
+        raise Exception(gt)
+
+
+def _load_allele2allele(old: list, new: list) -> dict:
+    bag = dict()
+    for x, y in zip(old, new):
+        bag[x] = y
+
+    return bag
+
+
+def _load_allele2idx(ref: str, alt: str):
+
+    allele_dict = {
+        allele: str(index + 1)
+        for index, allele in enumerate(
+            [allele for allele in alt.split(',') if allele != '.'])
+    }
+    allele_dict[ref] = '0'
+    allele_dict['.'] = '.'
+
+    return allele_dict
+
+
+def _load_idx2allele(ref: str, alt: str):
+    allele_dict = {
+        str(index + 1): allele
+        for index, allele in enumerate(
+            [allele for allele in alt.split(',') if allele != '.'])
+    }
+
+    allele_dict['0'] = ref
+    allele_dict['.'] = '.'
+
+    return allele_dict

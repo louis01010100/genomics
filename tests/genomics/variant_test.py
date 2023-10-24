@@ -1,4 +1,4 @@
-from genomics.variant import is_vcf, Variant, sync_prefix, sync_suffix
+from genomics.variant import is_vcf, Variant, sync_prefix, sync_suffix, _load_allele2idx, _load_idx2allele, _transcode_gt
 from genomics.gregion import GenomicRegion
 
 
@@ -31,6 +31,13 @@ def test_region():
         'T',
         'TG',
     ).region == GenomicRegion('chr1', 100, 100)
+
+    assert Variant(
+        'chr13',
+        32332376,
+        'GTA',
+        'GTAG,GTG,TT',
+    ).region == GenomicRegion('chr13', 32332376, 32332378)
 
 
 def test_is_vcf():
@@ -77,6 +84,7 @@ def test_sync_prefix():
 
 
 def test_sync_suffix():
+
     # 100-102 AAA CCC
     # 100-101 AA AC
     ref1, alts1, ref2, alts2 = sync_suffix(
@@ -122,35 +130,128 @@ def test_sync_suffix():
     assert alts2 == ['AT,C']
 
 
-def test_merge__identical():
+def test_sync_alleles__identical():
     v1 = Variant('chr1', 100, 'A', 'C')
     v2 = Variant('chr1', 100, 'A', 'C')
 
-    result = v1.merge(v2)
+    result = v1.sync_alleles(v2)
     assert result == Variant('chr1', 100, 'A', 'C')
 
 
-def test_merge__diff_alt():
+def test_sync_alleles__diff_alt():
     v1 = Variant('chr1', 100, 'A', 'C')
     v2 = Variant('chr1', 100, 'A', 'G')
     v3 = Variant('chr1', 100, 'A', 'AT,G')
 
-    assert v1.merge(v2) == Variant('chr1', 100, 'A', 'C,G')
-    assert v1.merge(v2).merge(v3) == Variant('chr1', 100, 'A', 'AT,C,G')
+    assert v1.sync_alleles(
+        v2,
+        site_only=True,
+    ) == Variant('chr1', 100, 'A', 'C,G')
 
-
-def test_merge__diff_pos():
-    v1 = Variant('chr1', 100, 'AC', 'A')
-    v2 = Variant('chr1', 101, 'C', 'G')
-
-    assert v1.merge(v2) == Variant('chr1', 100, 'AC', 'A,AG')
+    assert v1.sync_alleles(v2, site_only=True).sync_alleles(
+        v3, site_only=True) == Variant('chr1', 100, 'A', 'AT,C,G')
 
     v1 = Variant('chr15', 48474581, 'C', 'T')
     v2 = Variant('chr15', 48474581, 'CTT', 'C')
 
-    assert v1.merge(v2) == Variant('chr15', 48474581, 'CTT', 'C,TTT')
+    assert v1.sync_alleles(
+        v2,
+        site_only=True,
+    ) == Variant('chr15', 48474581, 'CTT', 'C,TTT')
 
     v1 = Variant('chr3', 37008823, 'C', 'A')
     v2 = Variant('chr3', 37008823, 'CT', 'AT,C')
 
-    assert v1.merge(v2) == Variant('chr3', 37008823, 'CT', 'AT,C')
+    assert v1.sync_alleles(
+        v2,
+        site_only=True,
+    ) == Variant('chr3', 37008823, 'CT', 'AT,C')
+
+
+def test_sync_alleles__diff_pos():
+    v1 = Variant('chr1', 100, 'AC', 'A')
+    v2 = Variant('chr1', 101, 'C', 'G')
+
+    assert v1.sync_alleles(
+        v2,
+        site_only=True,
+    ) == Variant('chr1', 100, 'AC', 'A,AG')
+
+
+def test_sync_alleles__with_gt():
+    v1 = Variant('chr1', 100, 'AC', 'A')
+    v2 = Variant(
+        chrom='chr1',
+        pos=101,
+        id_='rs123',
+        ref='C',
+        alt='G',
+        format_='GT',
+        calls='\t'.join(['0/0', '0/1', '1|1', '0', '1', '.']),
+    )
+
+    assert v1.sync_alleles(v2) == Variant(
+        chrom='chr1',
+        pos=100,
+        id_='rs123',
+        ref='AC',
+        alt='A,AG',
+        format_='GT',
+        calls='\t'.join(['0/0', '0/2', '2|2', '0', '2', '.']),
+    )
+
+
+def test__load_allele2idx():
+    assert _load_allele2idx('A', 'C') == {'A': '0', 'C': '1', '.': '.'}
+    assert _load_allele2idx('C', 'CT,G') == {
+        'C': '0',
+        'CT': '1',
+        'G': '2',
+        '.': '.'
+    }
+
+
+def test__load_idx2allele():
+    assert _load_idx2allele('A', 'C') == {'0': 'A', '1': 'C', '.': '.'}
+    assert _load_idx2allele('C', 'CT,G') == {
+        '0': 'C',
+        '1': 'CT',
+        '2': 'G',
+        '.': '.'
+    }
+
+
+def test__transcode_gt():
+
+    idx2allele = {'0': 'A', '1': 'G', '.': '.'}
+    allele2idx = {'A': '0', 'C': '1', 'G': '2', '.': '.'}
+
+    assert _transcode_gt('0/0', idx2allele, allele2idx) == '0/0'
+    assert _transcode_gt('0/1', idx2allele, allele2idx) == '0/2'
+    assert _transcode_gt('.', idx2allele, allele2idx) == '.'
+    assert _transcode_gt('0', idx2allele, allele2idx) == '0'
+    assert _transcode_gt('./0', idx2allele, allele2idx) == '0/.'
+    assert _transcode_gt('0/.', idx2allele, allele2idx) == '0/.'
+
+
+def test___str__():
+
+    expected = '\t'.join([
+        'chr1', '100', 'rs123', 'AC', 'A,AG', '.', '.', '.', 'GT', '0/0',
+        '0/2', '2|2', '0', '2', '.'
+    ])
+    actual = str(
+        Variant(
+            chrom='chr1',
+            pos=100,
+            id_='rs123',
+            ref='AC',
+            alt='A,AG',
+            qual='.',
+            filter_='.',
+            info='.',
+            format_='GT',
+            calls='\t'.join(['0/0', '0/2', '2|2', '0', '2', '.']),
+        ))
+
+    assert expected == actual

@@ -5,8 +5,7 @@ import pandas as pd
 import pytest
 from genomics.gregion import GenomicRegion
 from genomics.variant import Variant
-from genomics.vcf import (Vcf, filter_variants, split_rtrim, sync_alleles,
-                          _load_allele2idx, _load_idx2allele, _transcode_gt)
+from genomics.vcf import (Vcf, filter_variants, split_rtrim)
 
 
 def test_meta(tmp_path):
@@ -558,15 +557,15 @@ def test_filter_variants():
 
     snvs = [
         Variant(chrom='chr1', pos=100, id_='rs100', ref='A', alt='C'),
-        Variant(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG'),
+        Variant(chrom='chr1', pos=200, id_='rs101', ref='C', alt='G'),
     ]
 
-    ref_snv = Variant(chrom='chr1', pos=201, id_='AX-100', ref='C', alt='G')
-
-    expected = Variant(chrom='chr1', pos=200, id_='rs101', ref='TC', alt='GG')
+    ref_snv = Variant(chrom='chr1', pos=200, id_='AX-100', ref='C', alt='A')
 
     actual = filter_variants(ref_snv, snvs)
     assert 0 == len(actual)
+
+    expected = Variant(chrom='chr1', pos=200, id_='rs101', ref='C', alt='A,G')
 
     actual = filter_variants(ref_snv, snvs, fuzzy=True)
     assert 1 == len(actual)
@@ -589,36 +588,3 @@ def test_split_rtrim():
     result = split_rtrim(snv)
 
     assert len(result)
-
-
-def test__load_allele2idx():
-    assert _load_allele2idx('A', 'C') == {'A': '0', 'C': '1', '.': '.'}
-    assert _load_allele2idx('C', 'CT,G') == {
-        'C': '0',
-        'CT': '1',
-        'G': '2',
-        '.': '.'
-    }
-
-
-def test__load_idx2allele():
-    assert _load_idx2allele('A', 'C') == {'0': 'A', '1': 'C', '.': '.'}
-    assert _load_idx2allele('C', 'CT,G') == {
-        '0': 'C',
-        '1': 'CT',
-        '2': 'G',
-        '.': '.'
-    }
-
-
-def test__transcode_gt():
-
-    idx2allele = {'0': 'A', '1': 'G', '.': '.'}
-    allele2idx = {'A': '0', 'C': '1', 'G': '2', '.': '.'}
-
-    assert _transcode_gt('0/0', idx2allele, allele2idx) == '0/0'
-    assert _transcode_gt('0/1', idx2allele, allele2idx) == '0/2'
-    assert _transcode_gt('.', idx2allele, allele2idx) == '.'
-    assert _transcode_gt('0', idx2allele, allele2idx) == '0'
-    assert _transcode_gt('./0', idx2allele, allele2idx) == '0/.'
-    assert _transcode_gt('0/.', idx2allele, allele2idx) == '0/.'

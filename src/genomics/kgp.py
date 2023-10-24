@@ -11,6 +11,7 @@ from pathos.multiprocessing import ProcessPool
 from .utils import load, save
 from .variant import Variant
 from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples
+from .coordinates import export_coordinates
 
 MIN_READ_DEPTH = 10
 
@@ -19,6 +20,7 @@ TMP_DEPTH_FILENAME = 'depth.gz'
 KGP_TRUTH_VCF_FILENAME = 'kgp_truth.vcf.bgz'
 VCF_DIRNAME = 'vcf'
 CRAM_DIRNAME = 'cram'
+COORDINATES_FILENAME = 'coordinates.vcf.bgz'
 
 
 def export_snv_truth(
@@ -33,7 +35,7 @@ def export_snv_truth(
     n_cram_samples: int = 10,
 ):
 
-    # shutil.rmtree(output_dir, ignore_errors=True)
+    shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(exist_ok=True)
 
@@ -43,26 +45,29 @@ def export_snv_truth(
     kgp_vcf_tmp_dir.mkdir(exist_ok=True)
     kgp_cram_tmp_dir.mkdir(exist_ok=True)
 
-    coordinates = mung_coordinates(
+    export_coordinates(
         coordinates_vcf_file,
-        output_dir,
-        n_threads,
+        output_dir / COORDINATES_FILENAME,
     )
 
-    print(coordinates['chrom'].value_counts())
+    coordinates = pl.read_csv(
+        output_dir / COORDINATES_FILENAME,
+        has_header=True,
+        separator='\t',
+    )
 
-    coordinates = coordinates.filter(pl.col('chrom') == 'chr21')
+    assert False
 
-    # depths = extract_depth(
-    #     cram_dir,
-    #     genome_file,
-    #     coordinates,
-    #     kgp_cram_tmp_dir,
-    #     n_threads,
-    #     n_samples=n_cram_samples,
-    # )
-    #
-    # save(depths, output_dir / TMP_DEPTH_FILENAME)
+    depths = extract_depth(
+        cram_dir,
+        genome_file,
+        coordinates,
+        kgp_cram_tmp_dir,
+        n_threads,
+        n_samples=n_cram_samples,
+    )
+
+    save(depths, output_dir / TMP_DEPTH_FILENAME)
 
     depths = load(output_dir / TMP_DEPTH_FILENAME)
 
@@ -75,12 +80,12 @@ def export_snv_truth(
             separator='\t',
         )['sample_id'])
 
-    # vcf_file = subset_samples(
-    #     vcf_dir,
-    #     kgp_vcf_tmp_dir,
-    #     samples,
-    #     n_threads,
-    # )
+    vcf_file = subset_samples(
+        vcf_dir,
+        kgp_vcf_tmp_dir,
+        samples,
+        n_threads,
+    )
 
     vcf_file = kgp_vcf_tmp_dir / 'kgp-samples.vcf.bgz'
 
@@ -95,8 +100,10 @@ def export_snv_truth(
     kgp_truth_vcf = result_vcf.move_to(output_dir / 'kgp_truth.vcf.bgz')
 
 
-def mung_coordinates(coordinates_vcf_file, output_dir,
-                     n_threads) -> pl.DataFrame:
+def mung_coordinates(
+    coordinates_vcf_file,
+    output_dir,
+) -> pl.DataFrame:
 
     coordinates = pl.read_csv(
         coordinates_vcf_file,
@@ -158,9 +165,39 @@ def subset_snvs(
 
         refsnv = Variant(chrom, pos, ref, alt)
 
-        snvs = fetch_variants(refsnv.chrom, refsnv.pos, vcf_file)
+        snvs = fetch_variants(
+            refsnv.chrom,
+            refsnv.pos,
+            vcf_file,
+            regions_overlap=0,
+        )
 
         snvs = filter_variants(refsnv, snvs, fuzzy=True)
+
+        if len(snvs) == 0:
+            snvs_round2 = fetch_variants(
+                refsnv.chrom,
+                refsnv.pos,
+                vcf_file,
+                regions_overlap=1,
+            )
+
+            if len(snvs_round2) > 0:
+                note = 'complex'
+            else:
+                note = 'missing'
+        elif len(snvs) == 1:
+            if '*' in snvs[0].alts:
+                note = 'complex'
+                print(snvs[0])
+            else:
+                note = 'done'
+        else:
+            print(refsnv)
+
+            for snv in snvs:
+                print(snv)
+            assert False
 
         return {
             'snvs': snvs,
@@ -168,6 +205,7 @@ def subset_snvs(
             'pos': pos,
             'ref': ref,
             'alt': alt,
+            'note': note
         }
 
     n_samples = len(list_samples(vcf_file))
@@ -191,38 +229,40 @@ def subset_snvs(
                 n_done += 1
                 print(f'{n_done / n_total}', end='\r')
                 snvs = result['snvs']
-
-                if len(snvs) == 1:
-                    snv = snvs[0]
-                    fh.write(f'{snv.data}\n')
-                    continue
-
-                if len(snvs) > 1:
-                    logging.warning(f'{snvs}')
-                    snv = snvs[0]
-                    fh.write(f'{snv.data}\n')
-                    continue
-
+                note = result['note']
                 chrom = result['chrom']
                 pos = str(result['pos'])
                 ref = result['ref']
                 alt = result['alt']
 
-                key = (chrom, pos)
-
-                if key not in depths:
+                if note == 'done':
+                    snv = snvs[0]
+                    fh.write(f'{snv.data}\n')
+                elif note == 'complex':
                     gt = '\t'.join(['./.' for i in range(0, n_samples)])
-                else:
-                    depth = depths[key]
+                    fh.write(
+                        f'{chrom}\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{gt}\n'
+                    )
+                elif note == 'missing':
+                    key = (chrom, pos)
 
-                    if depth > MIN_READ_DEPTH:
-                        gt = '\t'.join(['0/0' for i in range(0, n_samples)])
-                    else:
-                        print(key)
+                    if key not in depths:
                         gt = '\t'.join(['./.' for i in range(0, n_samples)])
+                    else:
+                        depth = depths[key]
 
-                fh.write(
-                    f'{chrom}\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{gt}\n')
+                        if depth > MIN_READ_DEPTH:
+                            gt = '\t'.join(
+                                ['0/0' for i in range(0, n_samples)])
+                        else:
+                            print(key)
+                            gt = '\t'.join(
+                                ['./.' for i in range(0, n_samples)])
+                    fh.write(
+                        f'{chrom}\t{pos}\t.\t{ref}\t{alt}\t.\t.\t.\tGT\t{gt}\n'
+                    )
+                else:
+                    raise Exception(note)
 
     # output_file = 'workspace/vcf/kgp-samples-snv.vcf'
     return Vcf(output_file, output_dir, n_threads).bgzip().sort().index()
@@ -247,6 +287,7 @@ def subset_samples(vcf_dir, output_dir, samples, n_threads):
                 .drop_info() \
                 .drop_format(fields = ['AB','AD', 'DP', 'GQ', 'PGT', 'PID','PL'], ) \
                 .trim_alts() \
+                .exclude('ALT="."') \
                 .index() \
                 .filepath
 

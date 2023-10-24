@@ -270,7 +270,7 @@ class Vcf():
 
         cmd = (''
                f'bcftools view'
-               f'      -e {criteria}'
+               f'      -e \'{criteria}\''
                f'      -O z'
                f'      -o {output_file}'
                f'      {input_filepath}'
@@ -1165,25 +1165,34 @@ def _new_info(
     return ';'.join(bag)
 
 
-def sync_alleles(coordinate_vcf_file: Path, vcf_file: Path,
-                 output_dir: Path) -> Path:
-    coordinate = Vcf(
-        coordinate_vcf_file,
-        output_dir,
-    ).to_df(site_only=True).select(pl.col(['chrom', 'pos', 'ref', 'alt']))
+def sync_alleles(
+    coordinates: pl.DataFrame,
+    vcf_file: Path,
+    output_dir: Path,
+    key: str = 'coordinate',
+) -> Path:
+
+    coordinates = coordinates.select(
+        pl.col(['chrom', 'pos', 'id', 'ref', 'alt']))
 
     data = Vcf(vcf_file, output_dir).to_df().rename({
+        'chrom': 'gt_chrom',
+        'pos': 'gt_pos',
+        'id': 'gt_id',
         'ref': 'gt_ref',
         'alt': 'gt_alt'
     })
 
-    data = coordinate.join(data, on=['chrom', 'pos'], how='left')
+    if key == 'coordinate':
+        data = coordinates.join(data, on=['chrom', 'pos'], how='left')
+    elif key == 'id':
+        data = coordinates.join(data, on='id', how='left')
 
-    output_vcf_filename = vcf_file.name.replace('.vcf.bgz',
-                                                '-sync_allele.vcf.bgz')
+    output_vcf_filename = vcf_file.name.replace(
+        '.vcf.bgz',
+        '-sync_allele.vcf.bgz',
+    )
     output_vcf_file = output_dir / output_vcf_filename
-
-    columns = None
 
     with vcf_file.open('rt') as ifh, output_vcf_file.open('wt') as ofh:
         for line in ifh:
@@ -1191,147 +1200,33 @@ def sync_alleles(coordinate_vcf_file: Path, vcf_file: Path,
                 ofh.write(line)
                 continue
             ofh.write(line)
-            columns = line.strip().split('\t')
             break
 
         for record in data.to_dicts():
-            result = _sync_alleles(columns, record)
-            ofh.write(f'{result}\n')
+            coordinate = Variant(
+                chrom=record['chrom'],
+                pos=record['pos'],
+                id_=record['id'],
+                ref=record['ref'],
+                alt=record[
+                    'alt',
+                ],
+            )
 
+            v = Variant(
+                chrom=record['gt_chrom'],
+                pos=record['gt_pos'],
+                id_=record['gt_id'],
+                ref=record['gt_ref'],
+                alt=record[
+                    'gt_alt',
+                ],
+            )
 
-def _sync_alleles(columns, record):
+            result = coordiate.sync_alleles(v)
+            ofh.write(f'{result.data}\n')
 
-    ref = record['ref']
-    alt = record['alt']
-
-    gt_ref = record['gt_ref']
-    gt_alt = record['gt_alt']
-
-    allele2idx = _load_allele2idx(ref, alt)
-    idx2allele = _load_idx2allele(gt_ref, gt_alt)
-
-    bag = list()
-
-    for column in columns:
-
-        if k in [
-                'CHROM', 'POS', 'ID', 'REF', 'QUAL', 'FILTER', 'INFO',
-                'FORMAT'
-        ]:
-            bag.append(record[k.lower()])
-            continue
-
-        gt = record[k]
-
-        new_gt = _transcode_gt(gt, allele2idx, idx2allele)
-        bag.append(new_gt)
-
-    return '\t'.join(bag)
-
-
-def _transcode_gt(gt, idx2allele, allele2idx):
-    bag = list()
-
-    if '/' in gt:
-        for allele in gt.split('/'):
-            bag.append(allele2idx[idx2allele[allele]])
-        if '.' in bag:
-            bag.remove('.')
-            bag = sorted(bag)
-            bag.append('.')
-            return '/'.join(bag)
-        else:
-            return '/'.join(sorted(bag))
-    elif '|' in gt:
-        for allele in gt.split('|'):
-            bag.append(allele2idx[idx2allele[allele]])
-        if '.' in bag:
-            bag.remove('.')
-            bag = sorted(bag)
-            bag.append('.')
-            return '|'.join(bag)
-        else:
-            return '|'.join(sorted(bag))
-    elif gt == '.':
-        return '.'
-    elif gt.isnumeric():
-        allele = gt
-        return allele2idx[idx2allele[allele]]
-    else:
-        raise Exception(gt)
-
-
-def _load_allele2idx(ref: str, alt: str):
-
-    allele_dict = {
-        allele: str(index + 1)
-        for index, allele in enumerate(
-            [allele for allele in alt.split(',') if allele != '.'])
-    }
-    allele_dict[ref] = '0'
-    allele_dict['.'] = '.'
-
-    return allele_dict
-
-
-def _load_idx2allele(ref: str, alt: str):
-    allele_dict = {
-        str(index + 1): allele
-        for index, allele in enumerate(
-            [allele for allele in alt.split(',') if allele != '.'])
-    }
-
-    allele_dict['0'] = ref
-    allele_dict['.'] = '.'
-
-    return allele_dict
-
-
-# def sync_alleles_bkp(vcf_file_x: Path, vcf_file_y: Path, output_dir) -> tuple:
-#     output_dir.mkdir(parents=True, exist_ok=True)
-#
-#     vcf_file_x = Vcf(vcf_file_x, output_dir).bgzip().filepath
-#     vcf_file_y = Vcf(vcf_file_y, output_dir).bgzip().filepath
-#
-#     modification = vcf2dict(vcf_file_x, vcf_file_y)
-#
-#     vcf_file_x_modified = output_dir / vcf_file_x.name.replace(
-#         '.vcf.bgz', '-sync.vcf')
-#
-#     vcf_file_y_modified = output_dir / vcf_file_y.name.replace(
-#         '.vcf.bgz', '-sync.vcf')
-#
-#     _update_vcf_file(vcf_file_x, modification, vcf_file_x_modified)
-#     _update_vcf_file(vcf_file_y, modification, vcf_file_y_modified)
-#
-#     vcf_file_x = Vcf(vcf_file_x_modified, output_dir).bgzip().index().filepath
-#     vcf_file_y = Vcf(vcf_file_y_modified, output_dir).bgzip().index().filepath
-#
-#     return vcf_file_x, vcf_file_y
-
-
-def _update_vcf_file(input_vcf_file, modification, output_vcf_file):
-
-    with gzip.open(input_vcf_file,
-                   'rt') as ifh, output_vcf_file.open('wt') as ofh:
-        for line in ifh:
-            if line.startswith('#'):
-                ofh.write(line)
-                continue
-
-            chrom, pos, id_, ref, alt, rest = line.strip().split('\t', 5)
-            if (chrom, pos) not in modification:
-                ofh.write(line)
-                continue
-
-            updated_allele_pair = modification[(chrom,
-                                                pos)].get_updated_allele_pair(
-                                                    ref, alt)
-            new_ref = updated_allele_pair['ref']
-            new_alt = updated_allele_pair['alt']
-
-            ofh.write('\t'.join([chrom, pos, id_, new_ref, new_alt, rest]))
-            ofh.write('\n')
+    return output_vcf_file
 
 
 def merge(vcf_files: list,
@@ -1432,11 +1327,17 @@ def concat(
     return result
 
 
-def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
+def fetch_variants(
+    chrom: str,
+    pos: int,
+    vcf_file: Path,
+    regions_overlap: int = 1,
+) -> list:
     cmd = (''
            f'bcftools view'
            f'      -H'
            f'      -r {chrom}:{pos}'
+           f'      --regions-overlap {regions_overlap}'
            f'      {vcf_file}'
            '')
     records = execute(cmd, debug=False, pipe=True)
@@ -1460,42 +1361,20 @@ def fetch_variants(chrom: str, pos: int, vcf_file: Path) -> list:
     return bag
 
 
-def filter_variants(ref_snv: Variant, snvs: list[Variant], fuzzy=False):
+def filter_variants(
+    ref_snv: Variant,
+    snvs: list[Variant],
+    fuzzy: bool = False,
+):
 
     target = set()
     for snv in snvs:
         if ref_snv.pos == snv.pos and ref_snv.ref == snv.ref:
             if fuzzy:
                 target.add(snv)
-
-            if ref_snv.alts == snv.alts:
-                target.add(snv)
-
-    ref_pairs = split_rtrim(ref_snv)
-
-    for snv in snvs:
-
-        pairs = split_rtrim(snv)
-
-        for ref_pair in ref_pairs:
-            for pair in pairs:
-                if ref_pair[0] != pair[0]:
-                    continue
-
-                if fuzzy:
+            else:
+                if ref_snv.alts == snv.alts:
                     target.add(snv)
-
-    for snv in snvs:
-        if not snv.is_mnv:
-            continue
-
-        offset = ref_snv.pos - snv.pos
-        ref = snv.ref[offset:offset + len(ref_snv.ref)]
-        alts = {alt[offset:offset + len(ref_snv.ref)] for alt in snv.alts}
-
-        if ref == ref_snv.ref:    # and (ref_snv.alts & alts):
-            if fuzzy:
-                target.add(snv)
 
     return list(target)
 
