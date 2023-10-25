@@ -21,30 +21,14 @@ def export_coordinates(
         ],
         separator='\t',
     )
+    target = coordinates.filter(pl.col('pos') == 784860)
 
     bag = list()
-    for coordinate, data in coordinates.groupby(['chrom', 'pos']):
+    for coordinate, data in target.groupby(['chrom', 'pos']):
         chrom = coordinate[0]
         pos = coordinate[1]
 
-        result = None
-        for record in data.to_dicts():
-
-            if target_ids and record['id'] not in target_ids:
-                continue
-
-            variant = Variant(
-                chrom=chrom,
-                pos=pos,
-                id_=record['id'],
-                ref=record['ref'],
-                alt=record['alt'],
-            )
-
-            if not result:
-                result = variant
-            else:
-                result = result.sync_alleles(variant, site_only=True)
+        result = merge(data.to_dicts(), target_ids)
 
         if result:
             bag.append(str(result))
@@ -56,12 +40,36 @@ def export_coordinates(
             if line.startswith('#'):
                 ofh.write(line)
                 continue
-            ofh.write(line)
             break
         for record in bag:
             ofh.write(f'{record}\n')
 
-    Vcf(tmp_file,
-        tmp_file.parents[0]).bgzip().sort().index().move_to(output_vcf_file)
+    Vcf(
+        tmp_file,
+        tmp_file.parents[0],
+    ).bgzip().sort().index().move_to(output_vcf_file)
 
     return output_vcf_file
+
+
+def merge(records: list, target_ids: set = None):
+
+    result = None
+    for record in records:
+
+        if target_ids and record['id'] not in target_ids:
+            continue
+
+        variant = Variant(
+            chrom=record['chrom'],
+            pos=record['pos'],
+            id_=record['id'],
+            ref=record['ref'],
+            alt=record['alt'],
+        )
+
+        if not result:
+            result = variant
+        else:
+            result = result.sync_alleles(variant, site_only=True)
+    return result

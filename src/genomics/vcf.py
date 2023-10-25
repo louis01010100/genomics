@@ -1,4 +1,5 @@
 import gzip
+import logging
 import hashlib
 import random
 import shutil
@@ -934,10 +935,12 @@ class Vcf():
 
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
-    def to_df(self,
-              format_: str = None,
-              site_only: bool = False,
-              delete_src=False) -> pl.DataFrame:
+    def to_df(
+        self,
+        format_: str = None,
+        site_only: bool = False,
+        delete_src=False,
+    ) -> pl.DataFrame:
         if not format_:
             if site_only:
                 format_ = '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO\n'
@@ -1166,14 +1169,19 @@ def _new_info(
 
 
 def sync_alleles(
-    coordinates: pl.DataFrame,
+    coordinates_vcf_file: Path,
     vcf_file: Path,
     output_dir: Path,
     key: str = 'coordinate',
 ) -> Path:
 
-    coordinates = coordinates.select(
+    logging.info(vcf_file)
+    coordinates = Vcf(
+        coordinates_vcf_file,
+        output_dir,
+    ).to_df(site_only=True).select(
         pl.col(['chrom', 'pos', 'id', 'ref', 'alt']))
+    logging.info(f'{vcf_file} coordinates done')
 
     data = Vcf(vcf_file, output_dir).to_df().rename({
         'chrom': 'gt_chrom',
@@ -1184,9 +1192,21 @@ def sync_alleles(
     })
 
     if key == 'coordinate':
-        data = coordinates.join(data, on=['chrom', 'pos'], how='left')
+        data = coordinates.join(
+            data,
+            left_on=['chrom', 'pos'],
+            right_on=['gt_chrom', 'gt_pos'],
+            how='left',
+        )
     elif key == 'id':
-        data = coordinates.join(data, on='id', how='left')
+        data = coordinates.join(
+            data,
+            left_on='id',
+            right_on='gt_id',
+            how='left',
+        )
+    else:
+        raise Exception(key)
 
     output_vcf_filename = vcf_file.name.replace(
         '.vcf.bgz',
@@ -1194,7 +1214,7 @@ def sync_alleles(
     )
     output_vcf_file = output_dir / output_vcf_filename
 
-    with vcf_file.open('rt') as ifh, output_vcf_file.open('wt') as ofh:
+    with gzip.open(vcf_file, 'rt') as ifh, output_vcf_file.open('wt') as ofh:
         for line in ifh:
             if line.startswith('#'):
                 ofh.write(line)
@@ -1226,7 +1246,7 @@ def sync_alleles(
             result = coordiate.sync_alleles(v)
             ofh.write(f'{result}\n')
 
-    return output_vcf_file
+    return Vcf(output_vcf_file, output_dir).bgzip().sort().index()
 
 
 def merge(vcf_files: list,

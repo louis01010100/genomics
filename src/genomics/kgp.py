@@ -45,13 +45,17 @@ def export_snv_truth(
     kgp_vcf_tmp_dir.mkdir(exist_ok=True)
     kgp_cram_tmp_dir.mkdir(exist_ok=True)
 
-    # export_coordinates(
-    #     coordinates_vcf_file,
-    #     output_dir / COORDINATES_FILENAME,
-    # )
+    export_coordinates(
+        coordinates_vcf_file,
+        output_dir / COORDINATES_FILENAME,
+    )
 
     coordinates = Vcf(output_dir / COORDINATES_FILENAME,
                       output_dir).to_df(site_only=True)
+
+    print(coordinates.filter(pl.col('pos') == '784860'))
+
+    assert False
 
     # depths = extract_depth(
     #     cram_dir,
@@ -232,7 +236,7 @@ def subset_snvs(
 
                 if note == 'done':
                     snv = snvs[0]
-                    fh.write(f'{snv.data}\n')
+                    fh.write(f'{snv}\n')
                 elif note == 'complex':
                     gt = '\t'.join(['./.' for i in range(0, n_samples)])
                     fh.write(
