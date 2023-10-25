@@ -63,7 +63,7 @@ class Vcf():
         records = dict()
         with gzip.open(self.bgzip().filepath, 'rt') as fh:
             for line in fh:
-                if line.startswith('#'):
+                if line.startswith('##'):
                     continue
                 break
 
@@ -71,42 +71,43 @@ class Vcf():
                 items = line.strip().split('\t', 9)
 
                 if key == 'coordinate':
-                    k = (items[0], int(items[1]))
+                    keys = [(items[0], int(items[1]))]
                 elif key == 'id':
-                    k = items[2]
+                    keys = items[2].split(',')
                 else:
                     raise Exception(key)
 
-                if k not in records:
-                    records[k] = list()
+                for k in keys:
+                    if k not in records:
+                        records[k] = list()
 
-                if len(items) == 8:
-                    records[k].append(
-                        Variant(
-                            chrom=items[0],
-                            pos=int(items[1]),
-                            id_=items[2],
-                            ref=items[3],
-                            alt=items[4],
-                            qual=items[5],
-                            filter_=items[6],
-                            info=items[7],
-                        ))
-                else:
-                    assert len(items) == 10, items
-                    records[k].append(
-                        Variant(
-                            chrom=items[0],
-                            pos=int(items[1]),
-                            id_=items[2],
-                            ref=items[3],
-                            alt=items[4],
-                            qual=items[5],
-                            filter_=items[6],
-                            info=items[7],
-                            format_=items[8],
-                            calls=items[9],
-                        ))
+                    if len(items) == 8:
+                        records[k].append(
+                            Variant(
+                                chrom=items[0],
+                                pos=int(items[1]),
+                                id_=items[2],
+                                ref=items[3],
+                                alt=items[4],
+                                qual=items[5],
+                                filter_=items[6],
+                                info=items[7],
+                            ))
+                    else:
+                        assert len(items) == 10, items
+                        records[k].append(
+                            Variant(
+                                chrom=items[0],
+                                pos=int(items[1]),
+                                id_=items[2],
+                                ref=items[3],
+                                alt=items[4],
+                                qual=items[5],
+                                filter_=items[6],
+                                info=items[7],
+                                format_=items[8],
+                                calls=items[9],
+                            ))
 
         return records
 
@@ -1231,7 +1232,7 @@ def sync_alleles(
     coordinates = Vcf(
         coordinates_vcf_file,
         output_dir,
-    ).to_variants()
+    ).to_variants(key)
 
     records = Vcf(vcf_file, output_dir).to_variants(key)
 
@@ -1254,8 +1255,10 @@ def sync_alleles(
                 continue
 
             for record in records[k]:
+
                 if target_ids and record.id not in target_ids:
                     continue
+
                 result = coordinate[0].sync_alleles(record)
                 ofh.write(f'{result}\n')
 

@@ -26,8 +26,8 @@ class Variant():
         self._chrom = chrom
         self._pos = pos
         self._id = id_
-        self._ref = ref
-        self._alt = alt
+        self._ref = ref.upper()
+        self._alt = alt.upper()
         self._qual = qual
         self._filter = filter_
         self._info = info
