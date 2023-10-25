@@ -630,6 +630,7 @@ def _load_allele2allele(old: list, new: list) -> dict:
     bag = dict()
     for x, y in zip(old, new):
         bag[x] = y
+    bag['.'] = '.'
 
     return bag
 

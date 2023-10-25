@@ -58,6 +58,58 @@ class Vcf():
             self._header = _load_header(self.filepath)
         return self._header
 
+    def to_variants(self, key='coordinate'):
+
+        records = dict()
+        with gzip.open(self.bgzip().filepath, 'rt') as fh:
+            for line in fh:
+                if line.startswith('#'):
+                    continue
+                break
+
+            for line in fh:
+                items = line.strip().split('\t', 9)
+
+                if key == 'coordinate':
+                    k = (items[0], int(items[1]))
+                elif key == 'id':
+                    k = items[2]
+                else:
+                    raise Exception(key)
+
+                if k not in records:
+                    records[k] = list()
+
+                if len(items) == 8:
+                    records[k].append(
+                        Variant(
+                            chrom=items[0],
+                            pos=int(items[1]),
+                            id_=items[2],
+                            ref=items[3],
+                            alt=items[4],
+                            qual=items[5],
+                            filter_=items[6],
+                            info=items[7],
+                        ))
+                else:
+                    assert len(items) == 10, items
+                    records[k].append(
+                        Variant(
+                            chrom=items[0],
+                            pos=int(items[1]),
+                            id_=items[2],
+                            ref=items[3],
+                            alt=items[4],
+                            qual=items[5],
+                            filter_=items[6],
+                            info=items[7],
+                            format_=items[8],
+                            calls=items[9],
+                        ))
+
+        return records
+
     def delete(self):
         filepath = self.filepath
         log_filepath = self.tmp_dir / f'{filepath}.log'
@@ -1172,45 +1224,20 @@ def sync_alleles(
     coordinates_vcf_file: Path,
     vcf_file: Path,
     output_dir: Path,
+    target_ids: set = None,
     key: str = 'coordinate',
 ) -> Path:
 
-    logging.info(vcf_file)
     coordinates = Vcf(
         coordinates_vcf_file,
         output_dir,
-    ).to_df(site_only=True).select(
-        pl.col(['chrom', 'pos', 'id', 'ref', 'alt']))
-    logging.info(f'{vcf_file} coordinates done')
+    ).to_variants()
 
-    data = Vcf(vcf_file, output_dir).to_df().rename({
-        'chrom': 'gt_chrom',
-        'pos': 'gt_pos',
-        'id': 'gt_id',
-        'ref': 'gt_ref',
-        'alt': 'gt_alt'
-    })
-
-    if key == 'coordinate':
-        data = coordinates.join(
-            data,
-            left_on=['chrom', 'pos'],
-            right_on=['gt_chrom', 'gt_pos'],
-            how='left',
-        )
-    elif key == 'id':
-        data = coordinates.join(
-            data,
-            left_on='id',
-            right_on='gt_id',
-            how='left',
-        )
-    else:
-        raise Exception(key)
+    records = Vcf(vcf_file, output_dir).to_variants(key)
 
     output_vcf_filename = vcf_file.name.replace(
         '.vcf.bgz',
-        '-sync_allele.vcf.bgz',
+        '-sync_allele.vcf',
     )
     output_vcf_file = output_dir / output_vcf_filename
 
@@ -1219,41 +1246,29 @@ def sync_alleles(
             if line.startswith('#'):
                 ofh.write(line)
                 continue
-            ofh.write(line)
             break
 
-        for record in data.to_dicts():
-            coordinate = Variant(
-                chrom=record['chrom'],
-                pos=record['pos'],
-                id_=record['id'],
-                ref=record['ref'],
-                alt=record[
-                    'alt',
-                ],
-            )
+        for k, coordinate in coordinates.items():
+            assert len(coordinate) == 1, k
+            if k not in records:
+                continue
 
-            v = Variant(
-                chrom=record['gt_chrom'],
-                pos=record['gt_pos'],
-                id_=record['gt_id'],
-                ref=record['gt_ref'],
-                alt=record[
-                    'gt_alt',
-                ],
-            )
-
-            result = coordiate.sync_alleles(v)
-            ofh.write(f'{result}\n')
+            for record in records[k]:
+                if target_ids and record.id not in target_ids:
+                    continue
+                result = coordinate[0].sync_alleles(record)
+                ofh.write(f'{result}\n')
 
     return Vcf(output_vcf_file, output_dir).bgzip().sort().index()
 
 
-def merge(vcf_files: list,
-          output_file: Path,
-          tmp_dir: Path,
-          flag: str = 'none',
-          n_threads: int = 1) -> Vcf:
+def merge(
+    vcf_files: list,
+    output_file: Path,
+    tmp_dir: Path,
+    flag: str = 'none',
+    n_threads: int = 1,
+) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     vcfs_file = tmp_dir / ''.join(random.choices(string.ascii_letters, k=10))

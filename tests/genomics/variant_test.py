@@ -167,6 +167,34 @@ def test_sync_alleles__diff_alt():
         site_only=True,
     ) == Variant('chr3', 37008823, 'CT', 'AT,C')
 
+    v1 = Variant('chr13', 48037782, 'A', 'AGGAGTC', id_='AX-593989106')
+    v2 = Variant('chr13', 48037782, 'A', 'AGGAGTC', id_='AX-593989107')
+    v3 = Variant('chr13', 48037782, 'AGGAGTC', 'A', id_='AX-314679669')
+    v4 = Variant('chr13', 48037782, 'AGGAGTC', 'A', id_='AX-593989108')
+    v5 = Variant('chr13',
+                 48037782,
+                 'AGGAGTC',
+                 'A,AGGAGTCGGAGTC',
+                 id_='AX-593989104')
+    v6 = Variant('chr13',
+                 48037782,
+                 'AGGAGTC',
+                 'A,AGGAGTCGGAGTC',
+                 id_='AX-593989105')
+
+    result = v1
+    for v in [v2, v3, v4, v5, v6]:
+        result = result.sync_alleles(v)
+
+    assert result == Variant(
+        'chr13',
+        48037782,
+        'AGGAGTC',
+        'A,AGGAGTCGGAGTC',
+        id_=
+        'AX-314679669,AX-593989106,AX-593989107,AX-593989108,AX-593989104,AX-593989105',
+    )
+
 
 def test_sync_alleles__diff_pos():
     v1 = Variant('chr1', 100, 'AC', 'A')

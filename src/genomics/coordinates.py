@@ -23,9 +23,7 @@ def export_coordinates(
     )
 
     bag = list()
-    for coordinate, data in target.groupby(['chrom', 'pos']):
-        chrom = coordinate[0]
-        pos = coordinate[1]
+    for _, data in coordinates.groupby(['chrom', 'pos']):
 
         result = merge(data.to_dicts(), target_ids)
 
