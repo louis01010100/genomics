@@ -39,6 +39,13 @@ def test_region():
         'GTAG,GTG,TT',
     ).region == GenomicRegion('chr13', 32332376, 32332378)
 
+    assert Variant(
+        'chr13',
+        48037782,
+        'AGGAGTC',
+        'AGGAGTCGGAGTC',
+    ).region == GenomicRegion('chr13', 48037782, 48037788)
+
 
 def test_is_vcf():
     assert is_vcf(100, 100, 'A', 'C')

@@ -176,6 +176,9 @@ class Variant():
 
         sregion = self.region
         oregion = other.region
+        if self.pos == 48037782:
+            print(self, sregion)
+            print(other, oregion)
 
         pos, s_ref, s_alts, o_ref, o_alts = sync_prefix(
             start1=sregion.start,
@@ -185,6 +188,8 @@ class Variant():
             ref2=other.ref,
             alts2=other.alts,
         )
+        if self.pos == 48037782:
+            print(s_ref, o_ref)
 
         s_ref, s_alts, o_ref, o_alts = sync_suffix(
             end1=sregion.end,
@@ -194,6 +199,8 @@ class Variant():
             ref2=o_ref,
             alts2=o_alts,
         )
+        if self.pos == 48037782:
+            print(s_ref, o_ref)
 
         assert s_ref == o_ref, f'{s_ref} != {o_ref};{self};{other}'
 
@@ -336,10 +343,15 @@ class Variant():
 
 
 def get_region(chrom, pos, ref, alt):
+
     if is_snv(ref, alt):
         return GenomicRegion(chrom, pos, pos)
     if is_ins(ref, alt):
-        return GenomicRegion(chrom, pos, pos)
+        if len(ref) == 1:
+            end = pos
+        else:
+            end = pos + len(ref) - 1
+        return GenomicRegion(chrom, pos, end)
     if is_del(ref, alt):
         return GenomicRegion(chrom, pos, pos + len(ref) - 1)
     if is_ma(ref, alt):

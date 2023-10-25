@@ -1234,7 +1234,10 @@ def sync_alleles(
         output_dir,
     ).to_variants(key)
 
+    print(list(coordinates.keys())[0:10])
+
     records = Vcf(vcf_file, output_dir).to_variants(key)
+    print(list(records.keys())[0:10])
 
     output_vcf_filename = vcf_file.name.replace(
         '.vcf.bgz',
@@ -1251,12 +1254,13 @@ def sync_alleles(
 
         for k, coordinate in coordinates.items():
             assert len(coordinate) == 1, k
+
             if k not in records:
                 continue
 
             for record in records[k]:
 
-                if target_ids and record.id not in target_ids:
+                if key == 'id' and target_ids and record.id not in target_ids:
                     continue
 
                 result = coordinate[0].sync_alleles(record)
