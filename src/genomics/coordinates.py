@@ -21,7 +21,6 @@ def export_coordinates(
         ],
         separator='\t',
     )
-    target = coordinates.filter(pl.col('pos') == 784860)
 
     bag = list()
     for coordinate, data in target.groupby(['chrom', 'pos']):
