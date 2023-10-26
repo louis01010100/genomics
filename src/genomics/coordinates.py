@@ -9,7 +9,6 @@ from icecream import ic
 def export_coordinates(
     input_vcf_file: Path,
     output_vcf_file: Path,
-    target_ids: set = None,
 ):
 
     coordinates = pl.read_csv(
@@ -25,7 +24,7 @@ def export_coordinates(
     bag = list()
     for _, data in coordinates.groupby(['chrom', 'pos']):
 
-        result = merge(data.to_dicts(), target_ids)
+        result = merge(data.to_dicts())
 
         if result:
             bag.append(str(result))
@@ -49,13 +48,10 @@ def export_coordinates(
     return output_vcf_file
 
 
-def merge(records: list, target_ids: set = None):
+def merge(records: list):
 
     result = None
     for record in records:
-
-        if target_ids and record['id'] not in target_ids:
-            continue
 
         variant = Variant(
             chrom=record['chrom'],

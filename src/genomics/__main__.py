@@ -4,7 +4,7 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-from . import acmg, clinvar, dbsnp, kgp, vcf
+from . import acmg, clinvar, dbsnp, truth, vcf
 
 __VERSION__ = '0.2.0'
 
@@ -36,15 +36,14 @@ def main():
             input_file=Path(args.input_file),
             output_file=Path(args.output_file),
         )
-    elif args.subcommand == 'kgp':
-        kgp.export_snv_truth(
-            vcf_dir=Path(args.vcf_dir),
-            cram_dir=Path(args.cram_dir),
+    elif args.subcommand == 'snv-truth':
+        truth.export_snv_truth(
+            vcfs_file=Path(args.vcfs_file),
+            crams_file=Path(args.crams_file),
             genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
             samples_file=Path(args.samples_file),
             coordinates_vcf_file=Path(args.coordinates_vcf_file),
-            n_cram_samples=args.n_cram_samples,
             min_read_depth=args.min_read_depth,
             n_threads=args.n_threads,
         )
@@ -70,7 +69,7 @@ def config_parsers():
     _config_clinvar_parser(parsers.add_parser('clinvar'))
     _config_dbsnp_parser(parsers.add_parser('dbsnp'))
     _config_acmg_parser(parsers.add_parser('acmg'))
-    _config_kgp_parser(parsers.add_parser('kgp'))
+    _config_snv_truth_parser(parsers.add_parser('snv-truth'))
 
     return parser
 
@@ -96,9 +95,9 @@ def _config_acmg_parser(parser):
     parser.add_argument('--output-file', required=True)
 
 
-def _config_kgp_parser(parser):
-    parser.add_argument('--vcf-dir', required=True)
-    parser.add_argument('--cram-dir', required=True)
+def _config_snv_truth_parser(parser):
+    parser.add_argument('--vcfs-file', required=False)
+    parser.add_argument('--crams-file', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--samples-file', required=True)

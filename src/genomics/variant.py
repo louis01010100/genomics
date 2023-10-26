@@ -58,6 +58,10 @@ class Variant():
     def id(self):
         return self._id
 
+    @id.setter
+    def id(self, id_):
+        self._id = id_
+
     @property
     def ref(self):
         return self._ref
@@ -82,9 +86,17 @@ class Variant():
     def format(self):
         return self._format
 
+    @format.setter
+    def format(self, format_):
+        self._format = format_
+
     @property
     def calls(self):
         return self._calls
+
+    @calls.setter
+    def calls(self, calls):
+        self._calls = calls
 
     @property
     def region(self):
@@ -176,9 +188,6 @@ class Variant():
 
         sregion = self.region
         oregion = other.region
-        if self.pos == 48037782:
-            print(self, sregion)
-            print(other, oregion)
 
         pos, s_ref, s_alts, o_ref, o_alts = sync_prefix(
             start1=sregion.start,
@@ -188,8 +197,6 @@ class Variant():
             ref2=other.ref,
             alts2=other.alts,
         )
-        if self.pos == 48037782:
-            print(s_ref, o_ref)
 
         s_ref, s_alts, o_ref, o_alts = sync_suffix(
             end1=sregion.end,
@@ -199,15 +206,12 @@ class Variant():
             ref2=o_ref,
             alts2=o_alts,
         )
-        if self.pos == 48037782:
-            print(s_ref, o_ref)
 
         assert s_ref == o_ref, f'{s_ref} != {o_ref};{self};{other}'
 
         new_pos = pos
         new_ref = s_ref
-        new_alts = sorted(list(set([*s_alts, *o_alts])))
-        new_alt = ','.join(new_alts)
+        new_alt = merge_alts([*s_alts, *o_alts])
         new_id_ = merge_variant_id(self.id, other.id)
 
         if site_only or other.calls is None:
@@ -538,8 +542,18 @@ def sync_prefix(
     return pos, ref1, alts1, ref2, alts2
 
 
+def merge_alts(*alts):
+    alts = set(*alts)
+    alts.discard('.')
+    if len(alts) == 0:
+        return '.'
+    alt = sorted(list(alts))
+
+    return ','.join(alt)
+
+
 def merge_variant_id(*ids):
-    id_ = sorted([id_ for id_ in ids if id_ is not None])
+    id_ = sorted([id_ for id_ in ids if (id_ is not None and id_ != '.')])
 
     if len(id_) == 0:
         return None

@@ -445,6 +445,50 @@ class Vcf():
             self.delete()
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
+    def drop_filter(self, delete_src=False):
+        input_filepath = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-filter.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
+
+        cmd = (''
+               f'bcftools annotate'
+               f'      -x FILTER'
+               f'      -O z'
+               f'      -o {output_file}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
+
+    def drop_qual(self, delete_src=False):
+        input_filepath = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-qual.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
+
+        cmd = (''
+               f'bcftools annotate'
+               f'      -x QUAL'
+               f'      -O z'
+               f'      -o {output_file}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
+
     def trim_alts(self, delete_src=False):
         input_filepath = self.filepath
         output_file = self.tmp_dir / self.filepath.name.replace(
@@ -630,21 +674,40 @@ class Vcf():
 
         for record in records:
 
-            items = record.strip().split('\t')
+            items = record.strip().split('\t', 9)
             chrom = items[0]
             pos_fetched = int(items[1])
             id_ = items[2]
             ref = items[3]
             alt = items[4]
 
-            bag.append({
-                'chrom': chrom,
-                'pos': pos_fetched,
-                'id': id_,
-                'ref': ref,
-                'alt': alt,
-                'match': pos_fetched == pos,
-            })
+            if len(items) == 8:
+                record = {
+                    'chrom': items[0],
+                    'pos': pos_fetched,
+                    'id': items[2],
+                    'ref': items[3],
+                    'alt': items[4],
+                    'qual': items[5],
+                    'filter': items[6],
+                    'info': items[7],
+                    'match': pos_fetched == pos,
+                }
+            else:
+                assert len(items) == 10
+                record = {
+                    'chrom': items[0],
+                    'pos': pos_fetched,
+                    'id': items[2],
+                    'ref': items[3],
+                    'alt': items[4],
+                    'qual': items[5],
+                    'filter': items[6],
+                    'info': items[7],
+                    'format': items[8],
+                    'calls': items[9],
+                    'match': pos_fetched == pos,
+                }
 
         return bag
 
@@ -1388,14 +1451,15 @@ def fetch_variants(
 
     for line in records:
         line = line.strip()
-        items = line.split('\t')
+        items = line.split('\t', 9)
 
-        if len(items) > 8:
-            format_ = items[8]
-            calls = '\t'.join(items[9:])
-        else:
+        if len(items) == 8:
             format_ = None
             calls = None
+        else:
+            assert len(items) == 10
+            format_ = items[8]
+            calls = items[9]
 
         bag.append(
             Variant(
