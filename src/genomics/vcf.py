@@ -823,11 +823,13 @@ class Vcf():
 
         return vcf
 
-    def normalize(self,
-                  genome_file: Path,
-                  atomize=False,
-                  split_multiallelics=False,
-                  delete_src=False):
+    def normalize(
+        self,
+        genome_file: Path,
+        atomize=False,
+        split_multiallelics=False,
+        delete_src=False,
+    ):
 
         input_filepath = self.filepath
         output_file = self.tmp_dir / self.filepath.name.replace(
@@ -1284,23 +1286,17 @@ def _new_info(
     return ';'.join(bag)
 
 
+# key: id|coordinate
 def sync_alleles(
-    coordinates_vcf_file: Path,
+    coordinates_file: Path,
     vcf_file: Path,
     output_dir: Path,
-    target_ids: set = None,
     key: str = 'coordinate',
 ) -> Path:
 
-    coordinates = Vcf(
-        coordinates_vcf_file,
-        output_dir,
-    ).to_variants(key)
-
-    print(list(coordinates.keys())[0:10])
+    coordinates = Vcf(coordinates_file, output_dir).to_variants(key)
 
     records = Vcf(vcf_file, output_dir).to_variants(key)
-    print(list(records.keys())[0:10])
 
     output_vcf_filename = vcf_file.name.replace(
         '.vcf.bgz',
@@ -1322,10 +1318,6 @@ def sync_alleles(
                 continue
 
             for record in records[k]:
-
-                if key == 'id' and target_ids and record.id not in target_ids:
-                    continue
-
                 result = coordinate[0].sync_alleles(record)
                 ofh.write(f'{result}\n')
 

@@ -553,7 +553,9 @@ def merge_alts(*alts):
 
 
 def merge_variant_id(*ids):
-    id_ = sorted([id_ for id_ in ids if (id_ is not None and id_ != '.')])
+    id_ = sorted(
+        list({id_
+              for id_ in ids if (id_ is not None and id_ != '.')}))
 
     if len(id_) == 0:
         return None
