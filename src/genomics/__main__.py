@@ -42,7 +42,6 @@ def main():
             input_vcf_file=Path(args.input_vcf_file),
             genome_file=Path(args.genome_file),
             genome_index_file=Path(args.genome_index_file),
-            explode=args.explode,
             output_dir=Path(args.output_dir),
         )
     elif args.subcommand == 'cram-depth':
@@ -132,7 +131,6 @@ def _config_coordinates_parser(parser):
     parser.add_argument('--input-vcf-file', required=True)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--genome-index-file', required=True)
-    parser.add_argument('--explode', action='store_true', default=False)
     parser.add_argument('--output-dir', required=True)
 
 
@@ -180,4 +178,5 @@ def _load_files(manifest_file, files):
 
 
 if __name__ == '__main__':
+
     main()

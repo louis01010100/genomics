@@ -4,6 +4,7 @@ from .variant import Variant
 from .vcf import Vcf
 import gzip
 from icecream import ic
+import shutil
 
 
 def export_coordinates(
@@ -11,8 +12,13 @@ def export_coordinates(
     genome_file: Path,
     genome_index_file: Path,
     output_dir: Path,
-    explode: bool,
+    prod: bool = True,
 ):
+
+    if prod:
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+    output_dir.mkdir(exist_ok=True)
 
     coordinates = preprocess(
         input_vcf_file,
@@ -23,9 +29,8 @@ def export_coordinates(
 
     bag = list()
     for _, data in coordinates.groupby(['chrom', 'pos']):
-        records = merge(data.to_dicts(), explode)
-        for record in records:
-            bag.append(str(record))
+        record = merge(data.to_dicts())
+        bag.append(str(record))
 
     tmp_coordinates_file = output_dir / 'coordinates.vcf'
 
@@ -59,7 +64,7 @@ def copy_header(input_file, output_file):
             break
 
 
-def merge(records: list, explode: bool):
+def merge(records: list):
 
     tmp = None
     for record in records:
@@ -76,25 +81,7 @@ def merge(records: list, explode: bool):
             tmp = variant
         else:
             tmp = tmp.sync_alleles(variant, site_only=True)
-
-    result = list()
-    if explode:
-        for id_ in tmp.id.split(','):
-            result.append(
-                Variant(
-                    chrom=tmp.chrom,
-                    pos=tmp.pos,
-                    id_=id_,
-                    ref=tmp.ref,
-                    alt=tmp.alt,
-                    qual=tmp.qual,
-                    filter_=tmp.filter,
-                    info=tmp.info,
-                ))
-    else:
-        result.append(tmp)
-
-    return result
+    return tmp
 
 
 def preprocess(input_vcf_file, output_dir, genome_file, genome_index_file):
