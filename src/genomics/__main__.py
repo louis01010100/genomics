@@ -44,7 +44,7 @@ def main():
             genome_index_file=Path(args.genome_index_file),
             output_dir=Path(args.output_dir),
         )
-    elif args.subcommand == 'cram-depths':
+    elif args.subcommand == 'cram-depth':
 
         cram_files = _load_files(args.crams_file, args.cram_files)
 
@@ -56,7 +56,7 @@ def main():
             n_threads=args.n_threads,
         )
 
-    elif args.subcommand == 'gvcf-depths':
+    elif args.subcommand == 'gvcf-depth':
         gvcf_files = _load_files(args.gvcfs_file, args.gvcf_files)
         depth.export_gvcf_depths(
             gvcf_files=gvcf_files,
@@ -99,8 +99,8 @@ def config_parsers():
     _config_dbsnp_parser(parsers.add_parser('dbsnp'))
     _config_acmg_parser(parsers.add_parser('acmg'))
     _config_coordinate_parser(parsers.add_parser('coordinate'))
-    _config_cram_depths_parser(parsers.add_parser('cram-depths'))
-    _config_gvcf_depths_parser(parsers.add_parser('gvcf-depths'))
+    _config_cram_depth_parser(parsers.add_parser('cram-depth'))
+    _config_gvcf_depth_parser(parsers.add_parser('gvcf-depth'))
     _config_snv_truth_parser(parsers.add_parser('snv-truth'))
 
     return parser
@@ -143,7 +143,7 @@ def _config_cram_depth_parser(parser):
     parser.add_argument('cram_files', nargs='*')
 
 
-def _config_gvcf_depths_parser(parser):
+def _config_gvcf_depth_parser(parser):
     parser.add_argument('--gvcfs-file')
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--coordinates-vcf-file', required=True)
