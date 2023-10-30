@@ -2,6 +2,7 @@ import gzip
 import pickle
 import shutil
 from pathlib import Path
+import polars as pl
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
 
@@ -130,6 +131,11 @@ def bgzip(filepath: Path, index=True, n_threads=1):
 
     if index:
         index(filepath.with_suffix('.vcf.bgz'))
+
+
+def df2tsv(df: pl.DataFrame, file_, has_header=True, separator='\t'):
+    with gzip.open(fil_, 'wt') as fh:
+        df.write_csv(fh, has_header=has_header, separator=separator)
 
 
 def execute(cmd, debug=False, pipe=False):

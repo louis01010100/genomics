@@ -5,6 +5,7 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 import logging
 from icecream import ic
+from .utils import df2tsv
 
 import numpy as np
 import polars as pl
@@ -17,7 +18,7 @@ ctx._force_start_method('spawn')
 COORDINATES_FILENAME = 'coordinates.tsv'
 
 
-def export_gvcf_depth(
+def export_gvcf_depths(
     gvcf_files: list[Path],
     coordinates_vcf_file: Path,
     output_dir: Path,
@@ -55,7 +56,7 @@ def export_gvcf_depth(
             depth_df.write_csv(output_file, has_header=True, separator='\t')
 
     output_filename = coordinates_vcf_file.name.split('.')[0] + '-depth.tsv'
-    depth = summarize_depth(depth_dir)
+    depth = summarize_depths(depth_dir)
     depth.write_csv(
         output_dir / f'{output_filename}',
         has_header=True,
@@ -63,7 +64,7 @@ def export_gvcf_depth(
     )
 
 
-def export_cram_depth(
+def export_cram_depths(
     cram_files: list[Path],
     genome_file: Path,
     coordinates_vcf_file: Path,
@@ -104,14 +105,14 @@ def export_cram_depth(
 
     depths = summarize_depths(depths_dir)
 
-    output_filename = coordinates_vcf_file.name.split('.')[0] + '-depth.tsv'
+    output_filename = f'{coordinates_vcf_file.name.split(".")[0]}-depth.tsv.gz'
+
     coordinates = Vcf(coordinates_vcf_file, output_dir).to_df(site_only=True)
     depths = coordinates.join(depths, on=['chrom', 'pos'])
-    depths.write_csv(
-        output_dir / f'{output_filename}',
-        has_header=True,
-        separator='\t',
-    )
+    # depths = depths.with_columns(
+    #     pl.col('id').str.split(',').alias('probeset_id')).explode(
+    #         'probeset_id')
+    df2tsv(depths, output_dir / 'f{output_filename}')
 
 
 def summarize_depths(depth_dir):
