@@ -134,7 +134,7 @@ def _config_coordinate_parser(parser):
     parser.add_argument('--output-dir', required=True)
 
 
-def _config_crams_depth_parser(parser):
+def _config_cram_depth_parser(parser):
     parser.add_argument('--crams-file')
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--genome-file', required=True)
