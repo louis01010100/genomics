@@ -133,9 +133,19 @@ def bgzip(filepath: Path, index=True, n_threads=1):
         index(filepath.with_suffix('.vcf.bgz'))
 
 
-def df2tsv(df: pl.DataFrame, file_, has_header=True, separator='\t'):
-    with gzip.open(fil_, 'wt') as fh:
-        df.write_csv(fh, has_header=has_header, separator=separator)
+def df2tsv(df, file_, has_header=True, separator='\t'):
+
+    with gzip.open(file_, 'wt') as fh:
+        if isintance(df, pl.DataFrame):
+            df.write_csv(fh, has_header=has_header, separator=separator)
+        elif isinstance(df, pd.DataFrame):
+            df.to_csv(
+                fh,
+                header=header,
+                index=index,
+                sep=sep,
+                na_rep=na_rep,
+            )
 
 
 def execute(cmd, debug=False, pipe=False):
@@ -156,35 +166,6 @@ def execute(cmd, debug=False, pipe=False):
             raise Exception(cmd)
 
     return bag
-
-
-def df2tsv(df: pd.DataFrame,
-           output_file: Path,
-           header: bool = True,
-           index: bool = False,
-           na_rep: str = '',
-           sep='\t',
-           compress=False) -> None:
-    if compress:
-        if not output_file.name.endswith('.gz'):
-            output_file = output_file.parents[0] / f'{output_file.name}.gz'
-        with gzip.open(output_file, 'wt') as fh:
-            df.to_csv(
-                fh,
-                header=header,
-                index=index,
-                sep=sep,
-                na_rep=na_rep,
-            )
-
-    else:
-        df.to_csv(
-            output_file,
-            header=header,
-            index=index,
-            sep=sep,
-            na_rep=na_rep,
-        )
 
 
 def tsv2df(input_file: Path,

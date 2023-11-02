@@ -14,10 +14,14 @@ import pandas as pd
 import polars as pl
 from Bio import bgzf
 from icecream import ic
+import re
 
 from .gregion import GenomicRegion
 from .utils import df2tsv, execute, is_gzipped
 from .variant import Variant
+
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+FORMAT_PTN = re.compile(r'##FORMAT=<ID=([a-zA-Z]+),.+">')
 
 COLUMN_IDX_MAP = {
     'CHROM': 0,
@@ -356,6 +360,32 @@ class Vcf():
             self.delete()
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
+    def keep_format(self, fields, delete_src=False):
+        format_keys = get_format_keys(self.filepath)
+        format_keys = format_keys - set(fields)
+
+        expression = ','.join([f'FORMAT/{x}' for x in format_keys])
+        input_filepath = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-format.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
+
+        cmd = (''
+               f'bcftools annotate'
+               f'      -x {expression}'
+               f'      -O z'
+               f'      -o {output_file}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
+
     def drop_format(self, fields, delete_src=False):
         expression = ','.join([f'FORMAT/{x}' for x in fields])
         input_filepath = self.filepath
@@ -668,7 +698,7 @@ class Vcf():
                f'      {self.filepath}'
                '')
 
-        records = execute(cmd, debug=True, pipe=True)
+        records = execute(cmd, pipe=True)
 
         bag = []
 
@@ -910,6 +940,36 @@ class Vcf():
         if delete_src:
             self.delete()
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
+
+    def explode(self):
+        input_file = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-explode.vcf',
+        )
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
+
+        with gzip.open(input_file,
+                       'rt') as ifh, output_file.open('wt') as ofh:
+            for line in ifh:
+                if line.startswith('#'):
+                    ofh.write(line)
+                    continue
+
+                ofh.write(line)
+                break
+
+            for line in ifh:
+                items = line.strip().split('\t', 3)
+                chrom = items[0]
+                pos = items[1]
+                ids_ = items[2]
+                rest = items[3]
+
+                for id_ in ids_.split(','):
+                    ofh.write(f'\t'.join([chrom, pos, id_, rest]) + '\n')
+
+        return Vcf(output_file, self.tmp_dir, self.n_threads).bgzip()
 
     def sort(self, delete_src=False):
         input_filepath = self.filepath
@@ -1338,7 +1398,6 @@ def merge(
     with vcfs_file.open('wt') as fd:
         for vcf_file in vcf_files:
             vcf_file = Vcf(vcf_file, tmp_dir).bgzip().sort().index().filepath
-            print(vcf_file)
             fd.write(str(vcf_file) + '\n')
     print(vcfs_file)
 
@@ -1578,3 +1637,21 @@ def list_samples(vcf_file):
         raise e
 
     return output
+
+
+def get_format_keys(vcf_file):
+    cmd = f'bcftools view -h {vcf_file}'
+
+    bag = set()
+
+    stdout = execute(cmd, pipe=True)
+
+    for line in stdout:
+        match = FORMAT_PTN.match(line)
+        if not match:
+            continue
+
+        tag = match.group(1)
+        bag.add(tag)
+
+    return bag
