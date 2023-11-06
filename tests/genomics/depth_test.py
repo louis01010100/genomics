@@ -1,13 +1,14 @@
 from genomics.depth import merge
+import polars as pl
 
 
 def test_merge():
     chrom2coordinate = dict()
     chrom2coordinate['chr1'] = list()
-    chrom2coordinate['chr1'].append({'chrom': 'chr1', 'pos': 99})
-    chrom2coordinate['chr1'].append({'chrom': 'chr1', 'pos': 100})
-    chrom2coordinate['chr1'].append({'chrom': 'chr1', 'pos': 110})
-    chrom2coordinate['chr1'].append({'chrom': 'chr1', 'pos': 200})
+    chrom2coordinate['chr1'].append(99)
+    chrom2coordinate['chr1'].append(100)
+    chrom2coordinate['chr1'].append(110)
+    chrom2coordinate['chr1'].append(200)
 
     chrom2depth = dict()
     chrom2depth['chr1'] = list()
@@ -24,7 +25,7 @@ def test_merge():
         'depth': 20
     })
 
-    result = pl.from_pandasd(merge(chrom2coordinate, chrom2depth))
+    result = pl.from_pandas(merge(chrom2coordinate, chrom2depth))
 
     assert len(result) == 3
 

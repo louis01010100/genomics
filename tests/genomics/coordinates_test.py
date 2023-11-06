@@ -1,4 +1,4 @@
-from genomics.coordinates import merge
+from genomics.coordinate import merge
 from genomics.variant import Variant
 
 
