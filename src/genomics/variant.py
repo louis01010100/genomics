@@ -168,7 +168,12 @@ class Variant():
 
     # self: site vcf
     # other: regular vcf
-    def sync_alleles(self, other, site_only: bool = False):
+    def sync_alleles(
+        self,
+        other,
+        site_only: bool = False,
+        merge: bool = True,
+    ):
 
         if not self.is_overlapping(other):
             raise Exception(self, other)
@@ -211,8 +216,12 @@ class Variant():
 
         new_pos = pos
         new_ref = s_ref
-        new_alt = merge_alts([*s_alts, *o_alts])
-        new_id_ = merge_variant_id(self.id, other.id)
+        if merge:
+            new_alt = merge_alts([*s_alts, *o_alts])
+            new_id_ = merge_variant_id(self.id, other.id)
+        else:
+            new_alt = ','.join(s_alts)
+            new_id_ = self.id
 
         if site_only or other.calls is None:
             return Variant(

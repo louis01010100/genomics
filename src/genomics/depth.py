@@ -55,7 +55,7 @@ def export_gvcf_depths(
             output_file = depth_dir / f'{sample_name}.tsv'
             depth_df.write_csv(output_file, has_header=True, separator='\t')
 
-    output_filename = coordinates_vcf_file.name.split('.')[0] + '-depth.tsv'
+    output_filename = coordinates_vcf_file.name.split('.')[0] + '-depths.tsv'
     depth = summarize_depths(depth_dir)
     depth.write_csv(
         output_dir / f'{output_filename}',

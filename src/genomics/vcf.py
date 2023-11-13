@@ -372,15 +372,25 @@ class Vcf():
         )
         log_filepath = self.tmp_dir / f'{output_file.name}.log'
 
-        cmd = (''
-               f'bcftools annotate'
-               f'      -x {expression}'
-               f'      -O z'
-               f'      -o {output_file}'
-               f'      --threads {self.n_threads}'
-               f'      {input_filepath}'
-               f'      &> {log_filepath}'
-               '')
+        if not expression:
+            cmd = (''
+                   f'bcftools annotate'
+                   f'      -O z'
+                   f'      -o {output_file}'
+                   f'      --threads {self.n_threads}'
+                   f'      {input_filepath}'
+                   f'      &> {log_filepath}'
+                   '')
+        else:
+            cmd = (''
+                   f'bcftools annotate'
+                   f'      -x {expression}'
+                   f'      -O z'
+                   f'      -o {output_file}'
+                   f'      --threads {self.n_threads}'
+                   f'      {input_filepath}'
+                   f'      &> {log_filepath}'
+                   '')
         execute(cmd)
         if delete_src:
             self.delete()
@@ -415,21 +425,7 @@ class Vcf():
         return self.filepath.with_suffix('.bgz.csi')
 
     def list_contig_names(self):
-        self.index()
-        cmd = (''
-               f'bcftools index'
-               f'       --stats {self.index_file}'
-               '')
-
-        stdout = execute(cmd, pipe=True)
-        data = StringIO(''.join(stdout))
-
-        df = pd.read_csv(
-            data,
-            names=['contig_name', 'contig_size', 'n_records'],
-            sep='\t',
-        )
-        return sorted(list(set(df['contig_name'])))
+        return self.contigs()
 
     def rename_chroms(self, chrom_map_file, delete_src=False):
         input_filepath = self.filepath
@@ -1441,6 +1437,7 @@ def concat(
     output_file: Path,
     tmp_dir: Path,
     n_threads: int = 1,
+    preprocess: bool = True,
 ) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1448,7 +1445,11 @@ def concat(
 
     with vcfs_file.open('wt') as fd:
         for vcf_file in vcf_files:
-            Vcf(vcf_file, tmp_dir).bgzip().index(force=True)
+            if preprocess:
+                vcf_file = Vcf(vcf_file, tmp_dir) \
+                        .bgzip() \
+                        .index(force=True) \
+                        .filepath
             fd.write(f'{vcf_file}\n')
 
     output_file = Path(output_file)
@@ -1639,6 +1640,27 @@ def list_samples(vcf_file):
     return output
 
 
+def list_contigs(vcf_file: Path) -> list[str]:
+
+    cmd = (''
+           f'bcftools index --stats {vcf_file}'
+           '')
+    try:
+        stdout = execute(cmd, pipe=True)
+    except Exception as e:
+        raise e
+
+    data = StringIO('\n'.join(stdout))
+
+    df = pd.read_csv(
+        data,
+        names=['contig_name', 'contig_size', 'n_records'],
+        sep='\t',
+    )
+
+    return sorted(list(set(df['contig_name'])))
+
+
 def get_format_keys(vcf_file):
     cmd = f'bcftools view -h {vcf_file}'
 
@@ -1655,3 +1677,15 @@ def get_format_keys(vcf_file):
         bag.add(tag)
 
     return bag
+
+
+def standardize(vcf_file, tmp_dir, n_threads=1):
+    return Vcf(vcf_file, tmp_dir, n_threads) \
+            .bgzip()\
+            .drop_qual()\
+            .drop_filter() \
+            .drop_info() \
+            .fill_tags() \
+            .sort() \
+            .index() \
+            .filepath
