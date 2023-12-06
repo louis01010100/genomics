@@ -57,12 +57,13 @@ def process(
     )
 
     Vcf(output_dir / 'clinvar.vcf.bgz', output_dir).to_df(
-        '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/CLNSIG\t%INFO/CLNREVSTAT\t%INFO/CLNSIGCONF\t%INFO/CLNDN\n'
+        '%CHROM\t%POS\t%ID\t%REF\t%ALT\t%INFO/CLNSIG\t%INFO/CLNREVSTAT\t%INFO/CLNSIGCONF\t%INFO/CLNDN\n',
+        null_values=['.'],
     ).rename({
-        'info/clnsig': 'clnsig',
-        'info/clnsigconf': 'clnsigconf',
-        'info/clnrevstat': 'clnrevstat',
-        'info/clndn': 'clndn',
+        'info_clnsig': 'clnsig',
+        'info_clnsigconf': 'clnsigconf',
+        'info_clnrevstat': 'clnrevstat',
+        'info_clndn': 'clndn',
     }).write_csv(
         output_dir / 'clinvar.tsv',
         has_header=True,

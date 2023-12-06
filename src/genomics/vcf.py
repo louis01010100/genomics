@@ -1110,10 +1110,11 @@ class Vcf():
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def to_df(
-        self,
-        format_: str = None,
-        site_only: bool = False,
-        delete_src=False,
+            self,
+            format_: str = None,
+            site_only: bool = False,
+            null_values=list(),
+            delete_src=False,
     ) -> pl.DataFrame:
         if not format_:
             if site_only:
@@ -1130,6 +1131,7 @@ class Vcf():
             output_file,
             has_header=True,
             separator='\t',
+            null_values=null_values,
             infer_schema_length=0,
         )
 

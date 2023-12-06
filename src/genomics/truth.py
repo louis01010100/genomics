@@ -18,6 +18,7 @@ COORDINATES_FILENAME = 'coordinates.tsv'
 VCF_DIRNAME = 'vcf'
 
 
+## Use male samples as the reference for read depth, as females are expected to have 0 depth on chrY.
 # 10 hrs
 def export_snv_truth(
     vcf_files: list,
@@ -60,21 +61,6 @@ def export_snv_truth(
     )
 
     print(vcf_files)
-
-    # vcf_files = [
-    #     Path(
-    #         'workspace/vcf/86a922b0bf9292521c2c6ee93d8ebf73/1594_deepvariant_chrm-format-info-trim_alt-norm-uppercase-ex.vcf.bgz'
-    #     ),
-    #     Path(
-    #         'workspace/vcf/9a30d791de7fd96ead5a873f5d250a7a/1594_deepvariant_chry_male-format-info-trim_alt-norm-uppercase-ex.vcf.bgz'
-    #     ),
-    #     Path(
-    #         'workspace/vcf/a6457f55fc0b8eac836ae56f1586e90d/1594_deepvariant_chrx_female-format-info-trim_alt-norm-uppercase-ex.vcf.bgz'
-    #     ),
-    #     Path(
-    #         'workspace/vcf/d40a3279ad4bdfe54293bdd00066ce06/1594_deepvariant_auto-format-info-trim_alt-norm-uppercase-ex.vcf.bgz'
-    #     )
-    # ]
 
     print('fetch snvs')
     vcf_files = subset_snvs(
@@ -126,11 +112,11 @@ def subset_snvs(
                         )):
 
                     snv = fill_homrefs(
-                            snv=result['snv'],
-                            note=result['note'],
-                            depths=depths,
-                            n_samples=n_samples,
-                            min_depth=min_depth,
+                        snv=result['snv'],
+                        note=result['note'],
+                        depths=depths,
+                        n_samples=n_samples,
+                        min_depth=min_depth,
                     )
 
                     fh.write(f'{snv}\n')

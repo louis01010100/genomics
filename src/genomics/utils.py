@@ -136,7 +136,7 @@ def bgzip(filepath: Path, index=True, n_threads=1):
 def df2tsv(df, file_, has_header=True, separator='\t'):
 
     with gzip.open(file_, 'wt') as fh:
-        if isintance(df, pl.DataFrame):
+        if isinstance(df, pl.DataFrame):
             df.write_csv(fh, has_header=has_header, separator=separator)
         elif isinstance(df, pd.DataFrame):
             df.to_csv(

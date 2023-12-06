@@ -109,10 +109,7 @@ def export_cram_depths(
 
     coordinates = Vcf(coordinates_vcf_file, output_dir).to_df(site_only=True)
     depths = coordinates.join(depths, on=['chrom', 'pos'])
-    # depths = depths.with_columns(
-    #     pl.col('id').str.split(',').alias('probeset_id')).explode(
-    #         'probeset_id')
-    df2tsv(depths, output_dir / 'f{output_filename}')
+    df2tsv(depths, output_dir / f'{output_filename}')
 
 
 def summarize_depths(depth_dir):
