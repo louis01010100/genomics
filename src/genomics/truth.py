@@ -324,7 +324,7 @@ def load_depths(depths_file):
     if not depths_file:
         return bag
 
-    with depths_file.open('rt') as fh:
+    with gzip.open(depths_file, 'rt') as fh:
         col2idx = {
             column: idx
             for idx, column in enumerate((next(fh)).strip().split('\t'))
