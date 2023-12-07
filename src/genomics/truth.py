@@ -29,8 +29,9 @@ def export_snv_truth(
     output_dir: Path,
     n_threads: int = 1,
     min_depth: int = 4,
-    debug: bool = False,
+    prod: bool = True,
 ):
+
     if not debug:
         shutil.rmtree(output_dir, ignore_errors=True)
 
@@ -60,8 +61,6 @@ def export_snv_truth(
         n_threads=n_threads,
     )
 
-    print(vcf_files)
-
     print('fetch snvs')
     vcf_files = subset_snvs(
         vcf_files=vcf_files,
@@ -72,11 +71,14 @@ def export_snv_truth(
         n_threads=n_threads,
     )
 
-    print(len(vcf_files))
-
-    for vcf_file in vcf_files:
-        shutil.copy2(vcf_file, output_dir / vcf_file.name)
-        print(vcf_file)
+    one_vcf = concat(
+        vcf_files=vcf_files,
+        output_file=output_dir / 'truth.vcf.bgz',
+        tmp_dir=vcf_tmp_dir,
+        n_threads=n_threads,
+        preprocess=False,
+    )
+    print(one_vcf.filepath)
 
     print('done')
 
