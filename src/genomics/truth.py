@@ -32,7 +32,7 @@ def export_snv_truth(
     prod: bool = True,
 ):
 
-    if not debug:
+    if prod:
         shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(exist_ok=True)
@@ -60,6 +60,8 @@ def export_snv_truth(
         trim_alts=len(depths) > 0,
         n_threads=n_threads,
     )
+
+    print(vcf_files)
 
     print('fetch snvs')
     vcf_files = subset_snvs(
@@ -318,6 +320,7 @@ def load_samples(file_):
             has_header=True,
             separator='\t',
         )['sample_id'])
+    return samples
 
 
 def load_depths(depths_file):
