@@ -166,105 +166,6 @@ class Variant():
             data=self.data,
         )
 
-    # self: site vcf
-    # other: regular vcf
-    def sync_alleles(
-        self,
-        other,
-        site_only: bool = False,
-        merge: bool = True,
-    ):
-
-        if not self.is_overlapping(other):
-            raise Exception(self, other)
-
-        if self == other:
-            return Variant(
-                chrom=self.chrom,
-                pos=self.pos,
-                id_=self.id,
-                ref=self.ref,
-                alt=self.alt,
-                qual=self.qual,
-                filter_=self.filter,
-                info=self.info,
-                calls=self.calls,
-            )
-
-        sregion = self.region
-        oregion = other.region
-
-        pos, s_ref, s_alts, o_ref, o_alts = sync_prefix(
-            start1=sregion.start,
-            ref1=self.ref,
-            alts1=self.alts,
-            start2=oregion.start,
-            ref2=other.ref,
-            alts2=other.alts,
-        )
-
-        s_ref, s_alts, o_ref, o_alts = sync_suffix(
-            end1=sregion.end,
-            ref1=s_ref,
-            alts1=s_alts,
-            end2=oregion.end,
-            ref2=o_ref,
-            alts2=o_alts,
-        )
-
-        assert s_ref == o_ref, f'{s_ref} != {o_ref};{self};{other}'
-
-        new_pos = pos
-        new_ref = s_ref
-        if merge:
-            new_alt = merge_alts([*s_alts, *o_alts])
-            new_id_ = merge_variant_id(self.id, other.id)
-        else:
-            new_alt = ','.join(s_alts)
-            new_id_ = self.id
-
-        if site_only or other.calls is None:
-            return Variant(
-                chrom=self.chrom,
-                pos=new_pos,
-                id_=new_id_,
-                ref=new_ref,
-                alt=new_alt,
-                qual=other.qual,
-                filter_=other.filter,
-                info=other.info,
-            )
-
-        idx2allele = _load_idx2allele(other.ref, other.alt)
-        allele2idx = _load_allele2idx(new_ref, new_alt)
-
-        allele2allele = _load_allele2allele([other.ref, *other.alts],
-                                            [new_ref, *o_alts])
-
-        calls = other.calls.split('\t')
-        bag = list()
-        for call in other.calls.split('\t'):
-            bag.append(
-                _transcode_gt(
-                    gt=call,
-                    idx2allele=idx2allele,
-                    allele2idx=allele2idx,
-                    allele2allele=allele2allele,
-                ))
-
-        return Variant(
-            chrom=other.chrom,
-            pos=new_pos,
-            id_=new_id_,
-            ref=new_ref,
-            alt=new_alt,
-            qual=other.qual,
-            filter_=other.filter,
-            info=other.info,
-            format_=other.format,
-            calls='\t'.join(bag),
-        )
-
     @property
     def is_snv(self):
         return is_snv(self.ref, self.alt)
@@ -556,9 +457,7 @@ def merge_alts(*alts):
     alts.discard('.')
     if len(alts) == 0:
         return '.'
-    alt = sorted(list(alts))
-
-    return ','.join(alt)
+    return sorted(list(alts))
 
 
 def merge_variant_id(*ids):
@@ -598,65 +497,72 @@ def sync_suffix(
     return ref1, alts1, ref2, alts2
 
 
+def transcode_gt(
+    idx2allele: dict,
+    allele2idx: dict,
+    allele2allele: dict,
+    calls: str,
+):
+    if not calls:
+        return None
+
+    calls = calls.split('\t')
+    bag = list()
+    for call in calls:
+        bag.append(
+            _transcode_gt(
+                gt=call,
+                idx2allele=idx2allele,
+                allele2idx=allele2idx,
+                allele2allele=allele2allele,
+            ))
+
+    return '\t'.join(bag)
+
+
 def _transcode_gt(
     gt: str,
     idx2allele: dict,
+    allele2allele: dict,
     allele2idx: dict,
-    allele2allele: dict = None,
 ):
     bag = list()
 
+    delimiter = None
     if '/' in gt:
-        for idx in gt.split('/'):
-
-            allele = idx2allele[idx]
-
-            if allele2allele:
-                allele = allele2allele[allele]
-            else:
-                allele = allele
-
-            idx = allele2idx[allele]
-
-            bag.append(idx)
-        if '.' in bag:
-            bag.remove('.')
-            bag = sorted(bag)
-            bag.append('.')
-            return '/'.join(bag)
-        else:
-            return '/'.join(sorted(bag))
+        delimiter = '/'
     elif '|' in gt:
-        for idx in gt.split('|'):
+        delimiter = '|'
+    else:
+        pass
+
+    if delimiter:
+        for idx in gt.split(delimiter):
+
             allele = idx2allele[idx]
 
-            if allele2allele:
-                allele = allele2allele[allele]
-            else:
-                allele = allele
+            new_allele = allele2allele[allele]
 
-            idx = allele2idx[allele]
+            new_idx = allele2idx[new_allele]
 
-            bag.append(idx)
+            bag.append(new_idx)
 
         if '.' in bag:
             bag.remove('.')
             bag = sorted(bag)
             bag.append('.')
-            return '|'.join(bag)
+            new_gt = delimiter.join(bag)
         else:
-            return '|'.join(sorted(bag))
+            new_gt = delimiter.join(bag)
+
+        return new_gt
     elif gt == '.':
         return '.'
     elif gt.isnumeric():
         idx = gt
         allele = idx2allele[idx]
 
-        if allele2allele:
-            allele = allele2allele[allele]
-        else:
-            allele = allele
-
+        allele = allele2allele[allele]
         idx = allele2idx[allele]
         return idx
     else:
@@ -683,6 +589,122 @@ def _load_allele2idx(ref: str, alt: str):
     allele_dict['.'] = '.'
 
     return allele_dict
+
+
+def sync_alleles(
+    v1: Variant,
+    v2: Variant,
+    merge_id: bool = False,
+    merge_alt: bool = False,
+):
+    if not v1.is_overlapping(v2):
+        return v1, v2
+
+    if v1 == v2:
+        v = Variant(
+            chrom=v1.chrom,
+            pos=v1.pos,
+            id_=v1.id,
+            ref=v1.ref,
+            alt=v1.alt,
+            qual=v1.qual,
+            filter_=v1.filter,
+            info=v1.info,
+            calls=v1.calls,
+        )
+
+        return v, v
+
+    sregion = v1.region
+    oregion = v2.region
+
+    new_pos, new_v1_ref, new_v1_alts, new_v2_ref, new_v2_alts = sync_prefix(
+        start1=sregion.start,
+        ref1=v1.ref,
+        alts1=v1.alts,
+        start2=oregion.start,
+        ref2=v2.ref,
+        alts2=v2.alts,
+    )
+
+    new_v1_ref, new_v1_alts, new_v2_ref, new_v2_alts = sync_suffix(
+        end1=sregion.end,
+        ref1=new_v1_ref,
+        alts1=new_v1_alts,
+        end2=oregion.end,
+        ref2=new_v2_ref,
+        alts2=new_v2_alts,
+    )
+
+    assert new_v1_ref == new_v2_ref, f'{new_v1_ref} != {new_v2_ref};{v1};{v2}'
+
+    new_v1_pos = new_pos
+    new_v2_pos = new_pos
+
+    if merge_id:
+        new_v1_id = merge_variant_id(v1.id, v2.id)
+        new_v2_id = new_v1_id
+    else:
+        new_v1_id = v1.id
+        new_v2_id = v2.id
+
+    if merge_alt:
+        new_v1_alt = ','.join(merge_alts([*new_v1_alts, *new_v2_alts]))
+        new_v2_alt = new_v1_alt
+    else:
+        new_v1_alt = ','.join(new_v1_alts)
+        new_v2_alt = ','.join(new_v2_alts)
+
+    new_v1_format = v1.format
+    new_v2_format = v2.format
+
+    new_v1_calls = transcode_gt(
+        idx2allele=_load_idx2allele(v1.ref, v1.alt),
+        allele2idx=_load_allele2idx(new_v1_ref, new_v1_alt),
+        allele2allele=_load_allele2allele(
+            [v1.ref, *v1.alts],
+            [new_v1_ref, *new_v1_alts],
+        ),
+        calls=v1.calls,
+    )
+
+    new_v2_calls = transcode_gt(
+        idx2allele=_load_idx2allele(v2.ref, v2.alt),
+        allele2idx=_load_allele2idx(new_v2_ref, new_v2_alt),
+        allele2allele=_load_allele2allele(
+            [v2.ref, *v2.alts],
+            [new_v2_ref, *new_v2_alts],
+        ),
+        calls=v2.calls,
+    )
+
+    new_v1 = Variant(
+        chrom=v1.chrom,
+        pos=new_v1_pos,
+        id_=new_v1_id,
+        ref=new_v1_ref,
+        alt=new_v1_alt,
+        qual=v1.qual,
+        filter_=v1.filter,
+        info=v1.info,
+        format_=new_v1_format,
+        calls=new_v1_calls,
+    )
+
+    new_v2 = Variant(
+        chrom=v2.chrom,
+        pos=new_v2_pos,
+        id_=new_v2_id,
+        ref=new_v2_ref,
+        alt=new_v2_alt,
+        qual=v2.qual,
+        filter_=v2.filter,
+        info=v2.info,
+        format_=new_v2_format,
+        calls=new_v2_calls,
+    )
+
+    return new_v1, new_v2
 
 
 def _load_idx2allele(ref: str, alt: str):

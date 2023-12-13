@@ -424,9 +424,6 @@ class Vcf():
         self.index()
         return self.filepath.with_suffix('.bgz.csi')
 
-    def list_contig_names(self):
-        return self.contigs()
-
     def rename_chroms(self, chrom_map_file, delete_src=False):
         input_filepath = self.filepath
         output_file = self.tmp_dir / self.filepath.name.replace(
@@ -653,7 +650,7 @@ class Vcf():
 
         bag = []
 
-        for sample in samples:
+        for sample in sorted(list(samples)):
             bag.append({'sample_name': sample})
 
         samples_file = self.tmp_dir / 'samples.tsv'

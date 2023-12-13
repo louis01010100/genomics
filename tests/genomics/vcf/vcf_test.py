@@ -19,13 +19,13 @@ def test_meta(tmp_path):
     assert expected == vcf.meta
 
 
-def test_list_contig_names(tmp_path):
+def test_contigs(tmp_path):
     vcf_file = Path(__file__).parents[0] / 'fixture/sample.vcf'
-    vcf = Vcf(vcf_file, tmp_path).bgzip()
+    vcf = Vcf(vcf_file, tmp_path).bgzip().index()
 
-    contig_names = vcf.list_contig_names()
+    contig_names = vcf.contigs
 
-    assert ['chr21'] == contig_names
+    assert {'chr21'} == contig_names
 
 
 def test_header(tmp_path):
