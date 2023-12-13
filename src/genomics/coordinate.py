@@ -1,6 +1,6 @@
 from pathlib import Path
 import polars as pl
-from .variant import Variant
+from .variant import Variant, sync_alleles
 from .vcf import Vcf
 import gzip
 from icecream import ic
@@ -80,7 +80,7 @@ def merge(records: list):
         if not tmp:
             tmp = variant
         else:
-            tmp = tmp.sync_alleles(variant, site_only=True)
+            tmp, _ = sync_alleles(tmp, variant, merge_id=True, merge_alt=True)
     return tmp
 
 

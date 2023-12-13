@@ -103,8 +103,8 @@ class Variant():
         return self._region
 
     @property
-    def alts(self):
-        return self.alt.split(',')
+    def alts(self) -> set:
+        return set(self.alt.split(','))
 
     def is_overlapping(self, other):
         return self.region.is_overlapping(other.region)
@@ -652,8 +652,8 @@ def sync_alleles(
         new_v1_alt = ','.join(merge_alts([*new_v1_alts, *new_v2_alts]))
         new_v2_alt = new_v1_alt
     else:
-        new_v1_alt = ','.join(new_v1_alts)
-        new_v2_alt = ','.join(new_v2_alts)
+        new_v1_alt = ','.join(sorted(new_v1_alts))
+        new_v2_alt = ','.join(sorted(new_v2_alts))
 
     new_v1_format = v1.format
     new_v2_format = v2.format

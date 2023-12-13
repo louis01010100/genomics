@@ -1342,7 +1342,7 @@ def _new_info(
 
 
 # key: id|coordinate
-def sync_alleles(
+def vcf_sync_alleles(
     coordinates_file: Path,
     vcf_file: Path,
     output_dir: Path,
@@ -1373,7 +1373,7 @@ def sync_alleles(
                 continue
 
             for record in records[k]:
-                result = coordinate[0].sync_alleles(record)
+                _, result = sync_alleles(coordinate[0], record)
                 ofh.write(f'{result}\n')
 
     return Vcf(output_vcf_file, output_dir).bgzip().sort().index()
