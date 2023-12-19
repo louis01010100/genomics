@@ -7,7 +7,7 @@ import polars as pl
 
 from . import acmg, clinvar, dbsnp, truth, vcf, coordinate, depth
 
-__VERSION__ = '0.4.0'
+__VERSION__ = '0.5.1'
 
 
 def main():
@@ -73,6 +73,8 @@ def main():
             genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
             min_depth=args.min_depth,
+            force_chrm_missing_as_homref=args.force_chrm_missing_as_homref,
+            merge_vcf=args.merge_vcf,
             n_threads=args.n_threads,
         )
     else:
@@ -159,6 +161,10 @@ def _config_snv_truth_parser(parser):
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--min-depth', type=int, default=2)
     parser.add_argument('--n-threads', type=int, default=1)
+    parser.add_argument('--force-chrm-missing-as-homref',
+                        action='store_true',
+                        default=False)
+    parser.add_argument('--merge-vcf', action='store_true', default=False)
     parser.add_argument('vcf_files', nargs='*')
 
 

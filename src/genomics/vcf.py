@@ -18,7 +18,7 @@ import re
 
 from .gregion import GenomicRegion
 from .utils import df2tsv, execute, is_gzipped
-from .variant import Variant
+from .variant import Variant, sync_alleles
 
 ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
 FORMAT_PTN = re.compile(r'##FORMAT=<ID=([a-zA-Z]+),.+">')
@@ -601,7 +601,7 @@ class Vcf():
 
                 id_ = line.split('\t', 4)[2]
 
-                if id_ in ids:
+                if set(id_.split(',')) & ids:
                     ofd.write(line)
 
         if delete_src:

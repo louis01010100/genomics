@@ -281,6 +281,8 @@ def parse_gvcf_depth(line):
     dp = items[4]
     min_dp = items[5]
 
+    if 'm' in chrom.lower():
+        depth = 30
     if dp.isnumeric():
         depth = dp
     elif min_dp.isnumeric():

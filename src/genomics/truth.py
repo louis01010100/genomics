@@ -10,7 +10,7 @@ import polars as pl
 from pathos.multiprocessing import ProcessPool
 
 from .utils import load, save
-from .variant import Variant
+from .variant import Variant, sync_alleles
 from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, list_contigs, standardize
 
 COORDINATES_FILENAME = 'coordinates.tsv'
@@ -29,6 +29,8 @@ def export_snv_truth(
     output_dir: Path,
     n_threads: int = 1,
     min_depth: int = 4,
+    force_chrm_missing_as_homref: bool = False,
+    merge_vcf: bool = False,
     prod: bool = True,
 ):
 
@@ -64,23 +66,29 @@ def export_snv_truth(
     print(vcf_files)
 
     print('fetch snvs')
+
     vcf_files = subset_snvs(
         vcf_files=vcf_files,
         coordinates=coordinates,
         depths=depths,
         min_depth=min_depth,
         output_dir=vcf_tmp_dir,
+        force_chrm_missing_as_homref=force_chrm_missing_as_homref,
         n_threads=n_threads,
     )
 
-    one_vcf = concat(
-        vcf_files=vcf_files,
-        output_file=output_dir / 'truth.vcf.bgz',
-        tmp_dir=vcf_tmp_dir,
-        n_threads=n_threads,
-        preprocess=False,
-    )
-    print(one_vcf.filepath)
+    if merge_vcf:
+        one_vcf = concat(
+            vcf_files=vcf_files,
+            output_file=output_dir / 'truth.vcf.bgz',
+            tmp_dir=vcf_tmp_dir,
+            n_threads=n_threads,
+            preprocess=False,
+        )
+        print(one_vcf.filepath)
+    else:
+        for vcf_file in vcf_files:
+            Vcf(vcf_file, vcf_tmp_dir).index().move_to(output_dir)
 
     print('done')
 
@@ -91,6 +99,7 @@ def subset_snvs(
     depths: dict,
     min_depth: int,
     output_dir: Path,
+    force_chrm_missing_as_homref: bool,
     n_threads: int,
 ):
 
@@ -121,6 +130,8 @@ def subset_snvs(
                         depths=depths,
                         n_samples=n_samples,
                         min_depth=min_depth,
+                        force_chrm_missing_as_homref=
+                        force_chrm_missing_as_homref,
                     )
 
                     fh.write(f'{snv}\n')
@@ -185,7 +196,7 @@ def _subset_snvs(job):
             note = 'complex'
         else:
             note = 'done'
-            result = refsnv.sync_alleles(snvs[0])
+            _, result = sync_alleles(refsnv, snvs[0], merge_alt=True)
     else:
         target = None
         for snv in snvs:
@@ -194,7 +205,7 @@ def _subset_snvs(job):
             if snv.pos == refsnv.pos:
                 target = snv
         if target:
-            result = refsnv.sync_alleles(target)
+            _, result = sync_alleles(refsnv, target, merge_alt=True)
             note = 'done'
         else:
             result = refsnv
@@ -219,8 +230,14 @@ def standardize_vcf_jobs(vcf_files, output_dir):
         }
 
 
-def fill_homrefs(snv: Variant, note: str, depths: dict, n_samples: int,
-                 min_depth: int):
+def fill_homrefs(
+        snv: Variant,
+        note: str,
+        depths: dict,
+        n_samples: int,
+        min_depth: int,
+        force_chrm_missing_as_homref: bool,    #chrM always has high coverage
+):
 
     if note == 'done':
         pass
@@ -233,6 +250,8 @@ def fill_homrefs(snv: Variant, note: str, depths: dict, n_samples: int,
 
         if not depths:
             snv.calls = '\t'.join(['./.' for i in range(0, n_samples)])
+        elif force_chrm_missing_as_homref and 'm' in snv.chrom.lower():
+            snv.calls = '\t'.join(['0/0' for i in range(0, n_samples)])
         elif key not in depths:
             snv.calls = '\t'.join(['./.' for i in range(0, n_samples)])
         else:

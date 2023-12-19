@@ -24,7 +24,7 @@ class Variant():
     ):
 
         self._chrom = chrom
-        self._pos = pos
+        self._pos = int(pos)
         self._id = id_
         self._ref = ref.upper()
         self._alt = alt.upper()
@@ -553,7 +553,7 @@ def _transcode_gt(
             bag.append('.')
             new_gt = delimiter.join(bag)
         else:
-            new_gt = delimiter.join(bag)
+            new_gt = delimiter.join(sorted(bag))
 
         return new_gt
     elif gt == '.':
