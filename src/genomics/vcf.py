@@ -1547,7 +1547,7 @@ def filter_variants(
     return list(target)
 
 
-def fix_axiom_vcf_file(
+def fix_vcf_file(
     vcf_file: Path,
     output_dir: Path,
     genome_index_file: Path,
@@ -1559,7 +1559,7 @@ def fix_axiom_vcf_file(
     def create_chrom_map():
         chrom_map = []
 
-        for i in range(1, 22):
+        for i in range(1, 23):
             chrom_map.append({
                 'old_name': str(i),
                 'new_name': f'chr{i}',

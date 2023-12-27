@@ -7,7 +7,7 @@ import polars as pl
 
 from . import acmg, clinvar, dbsnp, truth, vcf, coordinate, depth
 
-__VERSION__ = '0.5.1'
+__VERSION__ = '0.5.2'
 
 
 def main():
