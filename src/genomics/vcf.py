@@ -258,6 +258,10 @@ class Vcf():
 
         return set(stdout)
 
+    @property
+    def n_samples(self):
+        return len(self.samples)
+
     def view(self, chrom, start, stop=None):
 
         if not stop:

@@ -46,6 +46,20 @@ class Variant():
             self._alt,
         )
 
+    def clone(self):
+        return Variant(
+            self.chrom,
+            self.pos,
+            self.ref,
+            self.alt,
+            self.id,
+            self.qual,
+            self.filter,
+            self.info,
+            self.format,
+            self.calls,
+        )
+
     @property
     def chrom(self):
         return self._chrom

@@ -594,12 +594,12 @@ def test_to_variants(tmp_path):
     vcf_file = Path(__file__).parents[0] / 'fixture/sample_id.vcf.bgz'
 
     variants = Vcf(vcf_file, tmp_path).to_variants(key='id')
-    assert 'AX-000000' in variants.keys()
-    assert 'AX-100000' in variants.keys()
-    assert 'AX-000001' in variants.keys()
-    assert 'AX-100001' in variants.keys()
-    assert 'AX-000002' in variants.keys()
-    assert len(variants.keys()) == 993
+    assert 'AX-100' in variants.keys()
+    assert 'AX-101' in variants.keys()
+    assert 'AX-200' in variants.keys()
+    assert 'AX-201' in variants.keys()
+    assert 'AX-300' in variants.keys()
+    assert len(variants.keys()) == 5
 
     variants = Vcf(vcf_file, tmp_path).to_variants(key='coordinate')
-    assert len(variants.keys()) == 945
+    assert len(variants.keys()) == 3
