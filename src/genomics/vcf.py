@@ -1551,7 +1551,7 @@ def filter_variants(
     return list(target)
 
 
-def fix_vcf_file(
+def fix(
     vcf_file: Path,
     output_dir: Path,
     genome_index_file: Path,
