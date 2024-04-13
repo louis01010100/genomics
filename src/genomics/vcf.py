@@ -8,6 +8,7 @@ from io import StringIO
 from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
+from pathos.multiprocessing import ProcessPool
 
 import numpy as np
 import pandas as pd
@@ -311,13 +312,13 @@ class Vcf():
 
         cmd = (''
                f'bcftools view'
-               f'      -i {criteria}'
+               f'      -i \'{criteria}\''
                f'      -O z'
                f'      -o {output_file}'
                f'      {input_filepath}'
                f'      &> {log_filepath}'
                '')
-        execute(cmd)
+        execute(cmd, debug=True)
         if delete_src:
             self.delete()
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
@@ -1390,14 +1391,32 @@ def merge(
     flag: str = 'none',
     n_threads: int = 1,
 ) -> Vcf:
+
+    def jobs(vcf_files, tmp_dir):
+        for vcf_file in vcf_files:
+            yield {
+                'vcf_file': vcf_file,
+                'tmp_dir': tmp_dir,
+            }
+
+    def process(job):
+        vcf_file = job['vcf_file']
+        tmp_dir = job['tmp_dir']
+        return Vcf(vcf_file, tmp_dir).bgzip().sort().index().filepath
+
     tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    bag = list()
+    with ProcessPool(n_threads) as pool:
+        for file_ in pool.uimap(process, jobs(vcf_files, tmp_dir)):
+            bag.append(file_)
 
     vcfs_file = tmp_dir / ''.join(random.choices(string.ascii_letters, k=10))
 
     with vcfs_file.open('wt') as fd:
-        for vcf_file in vcf_files:
-            vcf_file = Vcf(vcf_file, tmp_dir).bgzip().sort().index().filepath
-            fd.write(str(vcf_file) + '\n')
+        for file_ in bag:
+            fd.write(str(file_) + '\n')
+
     print(vcfs_file)
 
     output_file = Path(output_file)
@@ -1421,7 +1440,7 @@ def merge(
            f'      &> {log_filepath}'
            '')
 
-    execute(cmd)
+    execute(cmd, debug=True)
     result = Vcf(
         tmp_filepath,
         tmp_dir,
