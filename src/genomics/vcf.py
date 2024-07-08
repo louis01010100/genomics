@@ -1389,6 +1389,7 @@ def merge(
     output_file: Path,
     tmp_dir: Path,
     flag: str = 'none',
+    force_sample=False,
     n_threads: int = 1,
 ) -> Vcf:
 
@@ -1437,10 +1438,14 @@ def merge(
            f'      -O z'
            f'      -o {tmp_filepath}'
            f'      --threads {n_threads}'
-           f'      &> {log_filepath}'
            '')
+    if force_sample:
+        cmd += f'      --force-sample'
+
+    cmd += f'      &> {log_filepath}'
 
     execute(cmd, debug=True)
+
     result = Vcf(
         tmp_filepath,
         tmp_dir,
