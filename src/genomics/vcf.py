@@ -641,8 +641,12 @@ class Vcf():
 
                 id_ = line.split('\t', 4)[2]
 
-                if set(id_.split(',')) & ids:
+                if not ids:
                     ofd.write(line)
+                elif set(id_.split(',')) & ids:
+                    ofd.write(line)
+                else:
+                    pass
 
         if delete_src:
             self.delete()
