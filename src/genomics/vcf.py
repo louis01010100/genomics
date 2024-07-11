@@ -249,6 +249,9 @@ class Vcf():
     @property
     def samples(self) -> set[str]:
 
+        return set(self._load_samples())
+
+    def _load_samples(self) -> list[str]:
         cmd = (''
                f'bcftools query -l {self.filepath}'
                '')
@@ -257,7 +260,7 @@ class Vcf():
         except Exception as e:
             raise e
 
-        return set(stdout)
+        return list(stdout)
 
     @property
     def n_samples(self):
@@ -428,6 +431,38 @@ class Vcf():
     def index_file(self):
         self.index()
         return self.filepath.with_suffix('.bgz.csi')
+
+    def rename_samples(self, suffix='new', delete_src=False):
+        input_filepath = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-rename_samples.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
+
+        samples = self._load_samples()
+
+        bag = list()
+
+        for sample in samples:
+            bag.append({'old_name': sample, 'new_name': f'{sample}_{suffix}'})
+        sample_map_file = self.tmp_dir / 'sample_map.tsv'
+        pl.from_dicts(bag).write_csv(sample_map_file,
+                                     include_header=True,
+                                     separator='\t')
+
+        cmd = (''
+               f'bcftools reheader'
+               f'      -s {sample_map_file}'
+               f'      -o {output_file}'
+               f'      --threads {self.n_threads}'
+               f'      {input_filepath}'
+               f'      &> {log_filepath}'
+               '')
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
     def rename_chroms(self, chrom_map_file, delete_src=False):
         input_filepath = self.filepath
@@ -890,6 +925,7 @@ class Vcf():
 
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
+    # tags=['AC', 'AN', 'AF', 'NS', 'HWE', 'F_MISSING'],
     def fill_tags(self, tags=['AC', 'AN', 'AF', 'NS'], delete_src=False):
 
         input_filepath = self.filepath
