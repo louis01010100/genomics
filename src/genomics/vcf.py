@@ -1750,5 +1750,4 @@ def standardize(vcf_file, tmp_dir, n_threads=1):
             .drop_info() \
             .fill_tags() \
             .sort() \
-            .index() \
-            .filepath
+            .index()
