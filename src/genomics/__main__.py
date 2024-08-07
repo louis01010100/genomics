@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 import polars as pl
 
-from . import acmg, clinvar, dbsnp, truth, vcf, coordinate, depth
+from . import acmg, clinvar, dbsnp, vcf, coordinate, depth
 
 __VERSION__ = '0.5.2'
 
@@ -62,19 +62,6 @@ def main():
             gvcf_files=gvcf_files,
             output_dir=Path(args.output_dir),
             coordinates_vcf_file=Path(args.coordinates_vcf_file),
-            n_threads=args.n_threads,
-        )
-    elif args.subcommand == 'snv-truth':
-        truth.export_snv_truth(
-            vcf_files=_load_files(args.vcfs_file, args.vcf_files),
-            samples_file=_new_path(args.samples_file),
-            coordinates_vcf_file=Path(args.coordinates_vcf_file),
-            depths_file=_new_path(args.depths_file),
-            genome_file=Path(args.genome_file),
-            output_dir=Path(args.output_dir),
-            min_depth=args.min_depth,
-            force_chrm_missing_as_homref=args.force_chrm_missing_as_homref,
-            merge_vcf=args.merge_vcf,
             n_threads=args.n_threads,
         )
     else:

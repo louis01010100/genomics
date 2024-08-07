@@ -1,6 +1,8 @@
 from .gregion import GenomicRegion
 import re
 from pathlib import Path
+from .utils import is_gzipped
+import gzip
 
 # HG38_X_PAR_1 = GenomicRegion('chrX', 10000, 2781479)
 # HG38_X_PAR_2 = GenomicRegion('chrX', 2781479, 156030895)
@@ -15,25 +17,15 @@ from pathlib import Path
 
 class Genome():
 
-    def __init__(self, genome_fh):
-        chroms = dict()
-        id_ = None
-        seq = None
+    def __init__(self, genome_file):
 
-        for line in genome_fh:
-            line = line.strip()
-            if line.startswith('>'):
-                if id_:
-                    chroms[id_] = seq
-                match = re.match(r'>([^ ]+)(:? .+)?$', line)
-                id_ = match.group(1)
-                seq = ''
-            else:
-                seq += line.upper()
-        if id_:
-            chroms[id_] = seq
+        if is_gzipped(genome_file):
+            with gzip.open(genome_file, 'rt')  as fh:
+                self._chroms = load_chroms(fh)
+        else:
+            with genome_file.open('rt') as fh:
+                self._chroms = load_chroms(fh)
 
-        self._chroms = chroms
 
     @property
     def chroms(self):
@@ -80,3 +72,23 @@ class Genome():
 
     # def ploidy(self, chrom, pos):
     #     v = GenomicRegion(chrom.upper, pos, pos)
+
+def load_chroms(fh):
+    chroms = dict()
+    id_ = None
+    seq = None
+
+    for line in fh:
+        line = line.strip()
+        if line.startswith('>'):
+            if id_:
+                chroms[id_] = seq
+            match = re.match(r'>([^ ]+)(:? .+)?$', line)
+            id_ = match.group(1)
+            seq = ''
+        else:
+            seq += line.upper()
+    if id_:
+        chroms[id_] = seq
+
+    return chroms
