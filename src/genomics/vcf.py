@@ -19,7 +19,7 @@ import re
 
 from .gregion import GenomicRegion
 from .utils import df2tsv, execute, is_gzipped
-from .variant import Variant, sync_alleles
+from .variant import Variant
 
 ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
 FORMAT_PTN = re.compile(r'##FORMAT=<ID=([a-zA-Z]+),.+">')
@@ -1386,43 +1386,6 @@ def _new_info(
     return ';'.join(bag)
 
 
-# key: id|coordinate
-def vcf_sync_alleles(
-    coordinates_file: Path,
-    vcf_file: Path,
-    output_dir: Path,
-    key: str = 'coordinate',
-) -> Path:
-
-    coordinates = Vcf(coordinates_file, output_dir).to_variants(key)
-
-    records = Vcf(vcf_file, output_dir).to_variants(key)
-
-    output_vcf_filename = vcf_file.name.replace(
-        '.vcf.bgz',
-        '-sync_allele.vcf',
-    )
-    output_vcf_file = output_dir / output_vcf_filename
-
-    with gzip.open(vcf_file, 'rt') as ifh, output_vcf_file.open('wt') as ofh:
-        for line in ifh:
-            if line.startswith('#'):
-                ofh.write(line)
-                continue
-            break
-
-        for k, coordinate in coordinates.items():
-            assert len(coordinate) == 1, k
-
-            if k not in records:
-                continue
-
-            for record in records[k]:
-                _, result = sync_alleles(coordinate[0], record)
-                ofh.write(f'{result}\n')
-
-    return Vcf(output_vcf_file, output_dir).bgzip().sort().index()
-
 
 def merge(
     vcf_files: list,
@@ -1555,12 +1518,19 @@ def fetch_variants(
     chrom: str,
     pos: int,
     vcf_file: Path,
+    end: int = None,
     regions_overlap: int = 1,
 ) -> list:
+
+    if not end:
+        region = f'{chrom}:{pos}'
+    else:
+        region = f'{chrom}:{pos}-{end}'
+
     cmd = (''
            f'bcftools view'
            f'      -H'
-           f'      -r {chrom}:{pos}'
+           f'      -r {region}'
            f'      --regions-overlap {regions_overlap}'
            f'      {vcf_file}'
            '')

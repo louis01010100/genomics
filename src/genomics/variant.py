@@ -105,11 +105,11 @@ class Variant():
         self._format = format_
 
     @property
-    def calls(self):
+    def calls(self) -> str:
         return self._calls
 
     @calls.setter
-    def calls(self, calls):
+    def calls(self, calls: str):
         self._calls = calls
 
     @property
@@ -117,8 +117,8 @@ class Variant():
         return self._region
 
     @property
-    def alts(self) -> set:
-        return set(self.alt.split(','))
+    def alts(self) -> list:
+        return self.alt.split(',')
 
     def is_overlapping(self, other):
         return self.region.is_overlapping(other.region)
@@ -140,45 +140,71 @@ class Variant():
             data=self.data,
         )
 
-    def norm(self, genome, left_justified=True):
-        g_ref = genome.slice(
-            self.chrom,
-            self.pos - 1,
-            self.pos - 1 + len(self.ref),
-        )
-        if g_ref != self.ref:
-            print(f'[WARN]\tInconsistent REF: {self.ref}/{g_ref}')
+    def align(self, ref_variant, genome):
 
-        self.ref = g_ref
-
-        if left_justified:
-            return self._norm_left(genome)
-        return self._norm_right(genome)
-
-    def _norm_right(self, genome):
-        alts = [alt for alt in self.alt.split(',')]
-        pos, ref, alts = trim_right_bases(
-            self.chrom,
-            self.pos,
-            self.ref,
-            alts,
-            genome,
+        result = align(
+                self.chrom, 
+                self.pos, 
+                self.ref, 
+                self.alts, 
+                ref_variant.pos, 
+                ref_variant.ref, 
+                ref_variant.alts,
+                genome,
         )
 
-        pos, ref, alts = trim_left_bases(
-            pos,
-            ref,
-            alts,
+        if result['status'] == 'FAIL':
+            raise Exception()
+
+        assert result['status'] == 'PASS'
+
+        new_chrom = result['chrom']
+        new_pos = result['pos']
+        new_ref = result['ref']
+        new_alts = result['alts']
+        merged_alts = merge_alts(ref_variant.alts, new_alts)
+
+        new_calls = transcode_gt(
+            idx2allele=_load_idx2allele(self.ref, self.alts),
+            allele2allele=_load_allele2allele(
+                [self.ref, *self.alts],
+                [new_ref, *new_alts],
+            ),
+            allele2idx=_load_allele2idx(new_ref, merged_alts),
+            calls=self.calls,
         )
 
         return Variant(
-            chrom=self.chrom,
-            pos=pos,
-            id=self.id,
-            ref=ref,
-            alt=','.join(alts),
-            data=self.data,
+            chrom = new_chrom,
+            pos = new_pos,
+            ref = new_ref,
+            alt = ','.join(merged_alts),
+            id_ = self.id,
+            qual = self.qual,
+            filter_ = self.filter,
+            info = self.info,
+            format_ = self.format,
+            calls = new_calls
         )
+
+
+
+    def normalize(self, genome):
+        result = normalize(self.chrom, self.pos, self.ref, self.alts, genome)
+
+        return Variant(
+            chrom = result['chrom'],
+            pos = result['pos'],
+            ref = result['ref'],
+            alt = ','.join(result['alts']),
+            id_ = self.id,
+            qual = self.qual,
+            filter_ = self.filter,
+            info = self.info,
+            format_ = self.format,
+            calls = self.calls,
+        )
+
 
     @property
     def is_snv(self):
@@ -200,30 +226,22 @@ class Variant():
     def is_mnv(self):
         return is_mnv(self.ref, self.alt)
 
-    def _norm_left(self, genome):
-        alts = [alt for alt in self.alt.split(',')]
-        pos, ref, alts = trim_right_bases(
-            self.chrom,
-            self.pos,
-            self.ref,
-            alts,
-            genome,
-        )
+    def same_coordinate(self, other):
 
-        pos, ref, alts = trim_left_bases(
-            pos,
-            ref,
-            alts,
-        )
+        return (self.chrom == other.chrom 
+                and self.pos == other.pos 
+                and self.ref == other.ref)
 
-        return Variant(
-            chrom=self.chrom,
-            pos=pos,
-            id=self.id,
-            ref=ref,
-            alt=','.join(alts),
-            data=self.data,
-        )
+    def same_site(self, other, check_id = True):
+
+        if check_id and self.id != other.id:
+            return False
+
+        return (self.chrom == other.chrom 
+                and self.pos == other.pos 
+                and self.ref == other.ref 
+                and self.alt == other.alt)
+
 
     def __eq__(self, other):
         if self is other:
@@ -335,81 +353,6 @@ def is_mnv(ref, alt):
     return True
 
 
-def trim_right_bases(chrom, pos, ref, alts, genome):
-    if len(ref) == 0:
-        pos -= 1
-        base = genome.slice(chrom, pos - 1, pos)
-        ref = base
-        alts = [base + x for x in alts]
-
-        return trim_right_bases(
-            chrom,
-            pos,
-            ref,
-            alts,
-            genome,
-        )
-
-    if any([len(x) == 0 for x in alts]):
-        pos -= 1
-        base = genome.slice(chrom, pos - 1, pos)
-        ref = base + ref
-        alts = [base + x for x in alts]
-
-        return trim_right_bases(
-            chrom,
-            pos,
-            ref,
-            alts,
-            genome,
-        )
-
-    ref_end_base = ref[-1]
-
-    trim_base = True
-
-    for alt in alts:
-        if alt[-1] != ref_end_base:
-            trim_base = False
-
-    if trim_base:
-        ref = ref[0:-1]
-        alts = [x[0:-1] for x in alts]
-        return trim_right_bases(
-            chrom,
-            pos,
-            ref,
-            alts,
-            genome,
-        )
-    return pos, ref, alts
-
-
-def trim_left_bases(pos, ref, alts):
-
-    if len(ref) == 1:
-        return pos, ref, alts
-
-    if any([len(x) == 1 for x in alts]):
-        return pos, ref, alts
-
-    base = ref[0]
-
-    trim = True
-
-    for alt in alts:
-        if alt[0] != base:
-            trim = False
-
-    if trim:
-        ref = ref[1:]
-        alts = [x[1:] for x in alts]
-        pos += 1
-
-        return trim_left_bases(pos, ref, alts)
-    else:
-        return pos, ref, alts
-
 
 def is_vcf(pos_start, pos_stop, ref_allele, alt_allele):
     if ref_allele == '-':
@@ -439,77 +382,6 @@ def is_vcf(pos_start, pos_stop, ref_allele, alt_allele):
     # return False
 
 
-def sync_prefix(
-    start1: int,
-    ref1: str,
-    alts1: list,
-    start2: int,
-    ref2: str,
-    alts2: list,
-):
-    if start1 == start2:
-        pos = start1
-    elif start1 < start2:
-        prefix = ref1[0:(start2 - start1)]
-        ref2 = prefix + ref2
-        alts2 = [prefix + x for x in alts2]
-        pos = start1
-
-    elif start1 > start2:
-        prefix = ref2[0:(start1 - start2)]
-        ref1 = prefix + ref1
-        alts1 = [prefix + x for x in alts1]
-        pos = start2
-    else:
-        raise Exception(start1, start2)
-
-    return pos, ref1, alts1, ref2, alts2
-
-
-def merge_alts(*alts):
-    alts = set(*alts)
-    alts.discard('.')
-    if len(alts) == 0:
-        return '.'
-    return sorted(list(alts))
-
-
-def merge_variant_id(*ids):
-    id_ = sorted(
-        list({id_
-              for id_ in ids if (id_ is not None and id_ != '.')}))
-
-    if len(id_) == 0:
-        return None
-    return ','.join(id_)
-
-
-def sync_suffix(
-    end1: int,
-    ref1: str,
-    alts1: list,
-    end2: int,
-    ref2: str,
-    alts2: list,
-):
-
-    if end1 == end2:
-        pass
-    elif end1 < end2:
-        # -----
-        # ---
-        suffix = ref2[-(end2 - end1):]
-        ref1 = ref1 + suffix
-        alts1 = [x + suffix for x in alts1]
-    elif end1 > end2:
-        suffix = ref1[-(end1 - end2):]
-        ref2 = ref2 + suffix
-        alts2 = [x + suffix for x in alts2]
-    else:
-        raise Exception(end1, end2)
-
-    return ref1, alts1, ref2, alts2
-
 
 def transcode_gt(
     idx2allele: dict,
@@ -517,6 +389,9 @@ def transcode_gt(
     allele2allele: dict,
     calls: str,
 ):
+
+    print(idx2allele)
+    print(allele2idx)
     if not calls:
         return None
 
@@ -592,12 +467,12 @@ def _load_allele2allele(old: list, new: list) -> dict:
     return bag
 
 
-def _load_allele2idx(ref: str, alt: str):
+def _load_allele2idx(ref: str, alts: list):
 
     allele_dict = {
         allele: str(index + 1)
         for index, allele in enumerate(
-            [allele for allele in alt.split(',') if allele != '.'])
+            [allele for allele in alts if allele != '.'])
     }
     allele_dict[ref] = '0'
     allele_dict['.'] = '.'
@@ -605,127 +480,74 @@ def _load_allele2idx(ref: str, alt: str):
     return allele_dict
 
 
-def sync_alleles(
-    v1: Variant,
-    v2: Variant,
-    merge_id: bool = False,
-    merge_alt: bool = False,
-):
-    if not v1.is_overlapping(v2):
-        return v1, v2
+def align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome):
+    if pos == ref_pos and ref == ref_ref:
+        return {'chrom': chrom, 'pos': pos, 'ref': ref, 'alts': alts, 'status': 'PASS'}
 
-    if v1 == v2:
-        v = Variant(
-            chrom=v1.chrom,
-            pos=v1.pos,
-            id_=v1.id,
-            ref=v1.ref,
-            alt=v1.alt,
-            qual=v1.qual,
-            filter_=v1.filter,
-            info=v1.info,
-            calls=v1.calls,
-        )
+    if pos >= ref_pos:
+        return {'chrom': chrom, 'pos': pos, 'ref': ref, 'alts': alts, 'status': 'FAIL'}
 
-        return v, v
+    pos += 1
+    base = genome.slice(chrom, pos -1, pos)
+    ref = ref + base
+    alts = [alt + base for alt in alts]
 
-    sregion = v1.region
-    oregion = v2.region
+    if all([alt[0] == ref[0] for alt in alts]):
+        ref = ref[1:]
+        alts = [alt[1:] for alt in alts]
 
-    new_pos, new_v1_ref, new_v1_alts, new_v2_ref, new_v2_alts = sync_prefix(
-        start1=sregion.start,
-        ref1=v1.ref,
-        alts1=v1.alts,
-        start2=oregion.start,
-        ref2=v2.ref,
-        alts2=v2.alts,
-    )
+    return align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome)
 
-    new_v1_ref, new_v1_alts, new_v2_ref, new_v2_alts = sync_suffix(
-        end1=sregion.end,
-        ref1=new_v1_ref,
-        alts1=new_v1_alts,
-        end2=oregion.end,
-        ref2=new_v2_ref,
-        alts2=new_v2_alts,
-    )
+def normalize(chrom, pos, ref, alts, genome):
 
-    assert new_v1_ref == new_v2_ref, f'{new_v1_ref} != {new_v2_ref};{v1};{v2}'
+    # trim right
+    if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
+        pos -= 1
+        base = genome.slice(chrom, pos -1, pos)
+        ref = base + ref
+        alts = [base + alt for alt in alts]
+        return normalize(chrom, pos, ref, alts, genome)
 
-    new_v1_pos = new_pos
-    new_v2_pos = new_pos
+    if all([alt[-1] == ref[-1] for alt in alts]):
+        ref = ref[0:-1]
+        alts = [alt[0:-1] for alt in alts]
 
-    if merge_id:
-        new_v1_id = merge_variant_id(v1.id, v2.id)
-        new_v2_id = new_v1_id
-    else:
-        new_v1_id = v1.id
-        new_v2_id = v2.id
+        return normalize(chrom, pos, ref, alts, genome)
 
-    if merge_alt:
-        new_v1_alt = ','.join(merge_alts([*new_v1_alts, *new_v2_alts]))
-        new_v2_alt = new_v1_alt
-    else:
-        new_v1_alt = ','.join(sorted(new_v1_alts))
-        new_v2_alt = ','.join(sorted(new_v2_alts))
+    
+    # trim left
+    if any([alt[0] != ref[0] for alt in alts]):
 
-    new_v1_format = v1.format
-    new_v2_format = v2.format
+        return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
 
-    new_v1_calls = transcode_gt(
-        idx2allele=_load_idx2allele(v1.ref, v1.alt),
-        allele2idx=_load_allele2idx(new_v1_ref, new_v1_alt),
-        allele2allele=_load_allele2allele(
-            [v1.ref, *v1.alts],
-            [new_v1_ref, *new_v1_alts],
-        ),
-        calls=v1.calls,
-    )
+    if len(ref) == 1 or any([len(alt) == 1 for alt in alts]):
+        return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
 
-    new_v2_calls = transcode_gt(
-        idx2allele=_load_idx2allele(v2.ref, v2.alt),
-        allele2idx=_load_allele2idx(new_v2_ref, new_v2_alt),
-        allele2allele=_load_allele2allele(
-            [v2.ref, *v2.alts],
-            [new_v2_ref, *new_v2_alts],
-        ),
-        calls=v2.calls,
-    )
+    ref = ref[1:]
+    alts = [alt[1:] for alt in alts]
+    pos += 1
 
-    new_v1 = Variant(
-        chrom=v1.chrom,
-        pos=new_v1_pos,
-        id_=new_v1_id,
-        ref=new_v1_ref,
-        alt=new_v1_alt,
-        qual=v1.qual,
-        filter_=v1.filter,
-        info=v1.info,
-        format_=new_v1_format,
-        calls=new_v1_calls,
-    )
-
-    new_v2 = Variant(
-        chrom=v2.chrom,
-        pos=new_v2_pos,
-        id_=new_v2_id,
-        ref=new_v2_ref,
-        alt=new_v2_alt,
-        qual=v2.qual,
-        filter_=v2.filter,
-        info=v2.info,
-        format_=new_v2_format,
-        calls=new_v2_calls,
-    )
-
-    return new_v1, new_v2
+    return normalize(chrom, pos, ref, alts, genome)
 
 
-def _load_idx2allele(ref: str, alt: str):
+
+def merge_alts(ref_alts:list, alts:list) -> list:
+
+
+    values = [*ref_alts]
+
+    for alt in alts:
+        if alt not in values:
+            values.append(alt)
+    return values
+
+
+
+def _load_idx2allele(ref: str, alts: list):
     allele_dict = {
         str(index + 1): allele
         for index, allele in enumerate(
-            [allele for allele in alt.split(',') if allele != '.'])
+            [allele for allele in alts if allele != '.'])
     }
 
     allele_dict['0'] = ref
