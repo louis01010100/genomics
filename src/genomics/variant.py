@@ -533,7 +533,6 @@ def align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome):
             return None
 
 def denormalize(chrom, pos, ref, alts, genome):
-
     # trim_left
     if all([alt[0] == ref[0] for alt in alts]):
 
@@ -547,34 +546,25 @@ def denormalize(chrom, pos, ref, alts, genome):
             alts = [alt + base for alt in alts]
 
         if any([len(alt) == 0 for alt in alts]):
-            pos += 1
-            base = genome.slice(chrom, pos -1, pos)
+            base = genome.slice(chrom, pos, pos + 1)
             ref = ref + base
             alts = [alt + base for alt in alts]
 
         return denormalize(chrom, pos, ref, alts, genome)
 
     # trim right
-    
     if all([alt[-1] == ref[-1] for alt in alts]):
 
-        pos -= 1
         ref = ref[0:-1]
         alts = [alt[0:-1] for alt in alts]
 
-        if len(ref) == 0:
-            base = genome.slice(chrom, pos -1, pos)
-            ref = base
-            alts = [base + alt for alt in alts]
-            return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
-
-        if any([len(alt) == 0 for alt in alts]):
+        if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
             pos -= 1
             base = genome.slice(chrom, pos -1, pos)
             ref = base + ref
             alts = [base + alt for alt in alts]
-
             return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
+
         return denormalize(chrom, pos, ref, alts, genome)
 
     return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }

@@ -263,6 +263,19 @@ def test_denormalize(tmp_path):
     assert 'AA,AAA' == result.alt
 
 
+    # 12345
+    # GTTGG
+    # GT
+    # G
+    #  TT
+    #  T
+    result = Variant('chr3', 1, 'GT', 'G').denormalize(genome)
+    assert 'chr3' == result.chrom
+    assert  2== result.pos
+    assert 'TT' == result.ref
+    assert 'T' == result.alt
+
+
 def test_normalize(tmp_path):
     genome_file = Path(__file__).parents[0] / 'seq.fa'
     genome = Genome(genome_file)
