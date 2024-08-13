@@ -17,67 +17,22 @@ ctx._force_start_method('spawn')
 
 COORDINATES_FILENAME = 'coordinates.tsv'
 
-
-def export_gvcf_depths(
-    gvcf_files: list[Path],
-    coordinates_vcf_file: Path,
-    output_dir: Path,
-    n_threads: int,
-    prod: bool = True,
-):
-
-    def jobs(gvcf_files, coordinates_file, depth_dir):
-        for gvcf_file in gvcf_files:
-            yield {
-                'gvcf_file': gvcf_file,
-                'output_dir': depth_dir / gvcf_file.name.split('.')[0],
-                'coordinates_file': coordinates_file,
-            }
-
-    if prod:
-        shutil.rmtree(output_dir, ignore_errors=True)
-
-    output_dir.mkdir(exist_ok=True)
-
-    coordinates_file = export_coordinates(coordinates_vcf_file, output_dir)
-
-    depth_dir = output_dir / 'depth'
-    depth_dir.mkdir(exist_ok=True)
-
-    with ProcessPool(n_threads) as pool:
-        for future in pool.uimap(
-                parse_gvcf,
-                jobs(gvcf_files, coordinates_file, depth_dir),
-        ):
-            sample_name = future[0]
-            depth_df = pl.from_pandas(future[1])
-
-            output_file = depth_dir / f'{sample_name}.tsv'
-            depth_df.write_csv(output_file, has_header=True, separator='\t')
-
-    output_filename = coordinates_vcf_file.name.split('.')[0] + '-depths.tsv'
-    depth = summarize_depths(depth_dir)
-    depth.write_csv(
-        output_dir / f'{output_filename}',
-        has_header=True,
-        separator='\t',
-    )
-
-
 def export_cram_depths(
-    cram_files: list[Path],
+    crams_file: Path,
     genome_file: Path,
-    coordinates_vcf_file: Path,
+    coordinates_file: Path,
     output_dir: Path,
     n_threads: int,
-    prod: bool = True,
+    prod: bool = False,
 ):
 
-    def jobs(cram_files, genome_file, coordinates_file):
-        for cram_file in cram_files:
+    def jobs(crams, genome_file, atomized_coordinates_file):
+        for cram in crams:
             yield {
-                'cram_file': cram_file,
-                'coordinates_file': coordinates_file,
+                'cram_file': cram['cram_path'],
+                'sample': cram['sample'],
+                'gender': cram['gender'],
+                'atomized_coordinates_file': atomized_coordinates_file,
                 'genome_file': genome_file,
             }
 
@@ -86,69 +41,171 @@ def export_cram_depths(
 
     output_dir.mkdir(exist_ok=True)
 
-    coordinates_file = export_coordinates(coordinates_vcf_file, output_dir)
+    crams = pl.read_csv(crams_file, has_header = True, separator = '\t').to_dicts()
+
+    coordinates = atomize_coordinates(coordinates_file)
+    coordinates.write_csv(output_dir / 'atomized_coordinates_full.tsv', include_header = True, separator = '\t')
+    coordinates\
+            .select(['chrom', 'pos'])\
+            .write_csv(output_dir / 'atomized_coordinates.tsv', include_header = False, separator = '\t')
 
     depths_dir = output_dir / 'depths'
     depths_dir.mkdir(exist_ok=True)
 
-    with ProcessPool(n_threads) as pool:
-        for future in pool.uimap(
-                parse_cram,
-                jobs(cram_files, genome_file, coordinates_file),
-        ):
-            sample_name = future[0]
-            depth_df = future[1]
-
-            output_file = depths_dir / f'{sample_name}.tsv'
-            depth_df.write_csv(output_file, has_header=True, separator='\t')
-            # depth_df.to_csv(output_file, header=True, index=False, sep='\t')
+    # with ProcessPool(n_threads) as pool:
+    #     for future in pool.uimap(
+    #             parse_cram,
+    #             jobs(crams, genome_file, output_dir / 'atomized_coordinates.tsv'),
+    #     ):
+    #         sample_name = future[0]
+    #         gender = future[1]
+    #         depth_df = pl.from_pandas(future[2])
+    #         # depth_df = future[1]
+    #
+    #
+    #         depth_df = coordinates\
+    #                 .join(depth_df, on = ['chrom', 'pos'], how = 'left')\
+    #                 .with_columns(
+    #                         pl.col('depth').fill_null(0), 
+    #                         pl.lit(sample_name).alias('sample'), 
+    #                         pl.lit(gender).alias('gender')
+    #                 )
+    #
+    #
+    #         output_file = depths_dir / f'{sample_name}.tsv'
+    #         depth_df.write_csv(output_file, include_header=True, separator='\t')
 
     depths = summarize_depths(depths_dir)
 
-    output_filename = f'{coordinates_vcf_file.name.split(".")[0]}-depth.tsv.gz'
+    output_filename = f'{coordinates_file.name.split(".")[0]}-depth.tsv'
 
-    coordinates = Vcf(coordinates_vcf_file, output_dir).to_df(site_only=True)
-    depths = coordinates.join(depths, on=['chrom', 'pos'])
-    df2tsv(depths, output_dir / f'{output_filename}')
+    result = pl.read_csv(coordinates_file, has_header = True, separator = '\t')
+    print(result)
+    print(depths)
+    result = result.join(depths, on=['chrom', 'start', 'end'], how = 'left')
 
+    df2tsv(result, output_dir / f'{output_filename}')
+
+# def export_gvcf_depths(
+#     gvcf_files: list[Path],
+#     coordinates_file: Path,
+#     output_dir: Path,
+#     n_threads: int,
+#     prod: bool = True,
+# ):
+#
+#     def jobs(gvcf_files, coordinates_file, depth_dir):
+#         for gvcf_file in gvcf_files:
+#             yield {
+#                 'gvcf_file': gvcf_file,
+#                 'output_dir': depth_dir / gvcf_file.name.split('.')[0],
+#                 'coordinates_file': coordinates_file,
+#             }
+#
+#     if prod:
+#         shutil.rmtree(output_dir, ignore_errors=True)
+#
+#     output_dir.mkdir(exist_ok=True)
+#
+#     coordinates_file = export_coordinates(coordinates_file, output_dir)
+#
+#     depth_dir = output_dir / 'depth'
+#     depth_dir.mkdir(exist_ok=True)
+#
+#     with ProcessPool(n_threads) as pool:
+#         for future in pool.uimap(
+#                 parse_gvcf,
+#                 jobs(gvcf_files, coordinates_file, depth_dir),
+#         ):
+#             sample_name = future[0]
+#             depth_df = pl.from_pandas(future[1])
+#
+#             output_file = depth_dir / f'{sample_name}.tsv'
+#             depth_df.write_csv(output_file, has_header=True, separator='\t')
+#
+#     output_filename = coordinates_file.name.split('.')[0] + '-depths.tsv'
+#     depth = summarize_depths(depth_dir)
+#     depth.write_csv(
+#         output_dir / f'{output_filename}',
+#         has_header=True,
+#         separator='\t',
+#     )
 
 def summarize_depths(depth_dir):
-    bag = []
+
+    bag = dict()
     for f in depth_dir.glob('*.tsv'):
-        d = pl.read_csv(
-            f,
-            has_header=True,
-            separator='\t',
-            infer_schema_length=0,
-        ).with_columns(pl.col('depth').cast(pl.Float64))
-        bag.append(d)
 
-    data = pl.concat(bag)
+        with f.open('rt') as fh:
+            col2idx = {col: idx for idx, col in enumerate(next(fh).strip().split('\t'))}
 
-    result = dict()
+            n_fields = len(col2idx)
 
-    bag = list()
-    for key, df in data.groupby(['chrom', 'pos']):
-        bag.append({
+            for line in fh:
+                record = line.strip().split('\t')
+
+                record = pad(record, n_fields)
+                chrom = record[col2idx['chrom']]
+                pos = str2int(record[col2idx['pos']])
+                ref = record[col2idx['ref']]
+                start = str2int(record[col2idx['start']])
+                end = str2int(record[col2idx['end']])
+                depth = str2int(record[col2idx['depth']])
+                gender = record[col2idx['gender']]
+
+                key = (chrom, start, end)
+
+                if key not in bag:
+                    bag[key] = list()
+
+                if gender == 'male' and chrom == 'chrX':
+                    continue
+                if gender == 'female' and chrom == 'chrY':
+                    continue
+
+                bag[key].append(depth)
+
+    result = list()
+
+    for key, depths in bag.items():
+        print(depths)
+        result.append({
             'chrom': key[0],
-            'pos': key[1],
-            'depth': np.median(df['depth'])
+            'start': key[1],
+            'end': key[2],
+            'depth_median': int(np.median(depths)),
+            'depth_max': np.max(depths),
+            'depth_min': np.min(depths),
+            'n_zero_depth': len([x for x in depths if x == 0]),
+            'n_depths': len(depths),
         })
 
-    return pl.from_dicts(bag)
+    return pl.from_dicts(result)
 
+def str2int(v):
+    if v is None:
+        return 0
+    return int(v)
+
+def pad(record: list, n_fields: int, padding = None):
+    if len(record) == n_fields:
+        return record
+
+    record.extend([None] * (n_fields - len(record)))
+
+    return record
 
 def parse_gvcf(args):
     gvcf_file = args['gvcf_file']
     print(gvcf_file)
-    coordinates_file = args['coordinates_file']
+    unique_coordinates_file = args['unique_coordinates_file']
     output_dir = args['output_dir']
     output_dir.mkdir(exist_ok=True)
 
     cmd = (
         ''
         f'bcftools view '
-        f'    -R {coordinates_file}'
+        f'    -R {unique_coordinates_file}'
         f'    {gvcf_file}'
         f"    | bcftools query -f '[%CHROM\t%POS\t%END\t%REF\t%DP\t%MIN_DP\n]'"
         '')
@@ -171,13 +228,13 @@ def parse_gvcf(args):
         sep='\t',
     )
 
-    chrom2coordinate = load_chrom2coordinate(coordinates_file)
+    chrom2coordinate = load_chrom2coordinate(unique_coordinates_file)
     chrom2depth = load_chrom2depth(output_dir / 'raw_depths.tsv')
 
     depths = merge(chrom2coordinate, chrom2depth)
 
     coordinates = pd.read_csv(
-        coordinates_file,
+        unique_coordinates_file,
         header=None,
         names=['chrom', 'pos'],
         sep='\t',
@@ -302,11 +359,13 @@ def parse_gvcf_depth(line):
 def parse_cram(args):
     cram_file = args['cram_file']
     genome_file = args['genome_file']
-    coordinates_file = args['coordinates_file']
+    sample = args['sample']
+    gender = args['gender']
+    atomized_coordinates_file = args['atomized_coordinates_file']
 
     cmd = (''
            f'samtools mpileup'
-           f'    -l {coordinates_file}'
+           f'    -l {atomized_coordinates_file}'
            f'    -f {genome_file}'
            f'    {cram_file}'
            '')
@@ -317,9 +376,9 @@ def parse_cram(args):
             items = line.strip().split('\t', 4)
             record = {
                 'chrom': items[0],
-                'pos': items[1],
+                'pos': int(items[1]),
                 'ref': items[2],
-                'depth': items[3],
+                'depth': int(items[3]),
             }
 
             bag.append(record)
@@ -339,34 +398,51 @@ def parse_cram(args):
     # depths = pd.DataFrame.from_records(bag)
     # depths = coordinates.merge(depths, on=['chrom', 'pos'], how='left')
 
-    coordinates = pl.read_csv(
-        coordinates_file,
-        has_header=False,
-        new_columns=['chrom', 'pos'],
-        separator='\t',
-        infer_schema_length=0,
-    )
-    depths = pl.from_dicts(bag)
-    depths = coordinates.join(depths, on=['chrom', 'pos'], how='left')
+    # coordinates = pl.read_csv(
+    #     unique_coordinates_file,
+    #     has_header=False,
+    #     new_columns=['chrom', 'start', 'end'],
+    #     separator='\t',
+    #     infer_schema_length=0,
+    # )
 
-    sample_name = cram_file.name.split('.')[0]
-    return sample_name, depths
+    # depths = pl.from_dicts(bag)
+
+    depths = pd.DataFrame.from_records(bag)
+
+    return sample, gender, depths
+
+def atomize_coordinates(input_file):
+    bag = list()
+    with open(input_file, 'rt') as fh:
+        header = next(fh)
+        col2idx = {col: idx for idx, col in enumerate(header.strip().split('\t'))}
+
+        for line in fh:
+            record = line.strip().split('\t')
+
+            chrom = record[col2idx['chrom']]
+            start = str2int(record[col2idx['start']])
+            end = str2int(record[col2idx['end']])
+
+            for i in range(0, end - start + 1):
+                bag.append({'chrom': chrom, 'pos': start + i, 'start': start, 'end': end})
+
+    return pl.from_dicts(bag)
 
 
-def export_coordinates(input_file, output_dir):
+
+def export_unique_coordinates(input_file, output_dir):
     output_file = output_dir / COORDINATES_FILENAME
-    coordinates = Vcf(
-        input_file,
-        output_dir,
-    ).to_df(site_only=True).select([
-        'chrom',
-        'pos',
-    ]).unique()
-
-    coordinates.write_csv(
-        output_file,
-        has_header=False,
-        separator='\t',
+    data = pl.read_csv(input_file, has_header = True, separator = '\t')
+    data = data.with_columns(pl.col('start') -1)
+    data.select([ 'chrom', 'start' , 'end']) \
+        .unique()\
+        .sort(['chrom', 'start', 'end']) \
+        .write_csv(
+            output_file,
+            include_header=False,
+            separator='\t',
     )
 
     return output_file

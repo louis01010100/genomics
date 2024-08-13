@@ -144,7 +144,7 @@ def test_transcode_gt():
     assert calls == '0/0\t0/2\t2|2\t0\t2\t.'
 
 def test_align():
-    genome_file = Path(__file__).parents[0] / 'seq.fa.bgz'
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
     genome = Genome(genome_file)
 
     v = align(
@@ -171,22 +171,51 @@ def test_align():
     assert 'AA' == v['ref']
     assert ['A','AAA'] == v['alts']
 
+    v = align(
+        chrom = 'chr2', 
+        pos = 12, 
+        ref = 'T', 
+        alts = ['A'], 
+        ref_pos = 10, 
+        ref_ref = 'TTTCA', 
+        ref_alts = ['GAATGATC','TTACA','TTTA','TTTTA'],
+        genome = genome,
+    )
 
-    try:
-        v = align(
-            chrom = 'chr1', 
-            pos = 4, ref = 'TA', alts = 'AG', 
-            ref_pos = 6, ref_ref = 'AA', ref_alts = 'A,AAA', 
-            genome = genome
-        )
-        assert False
-    except Exception as e:
-        assert True
+    assert 'chr2' == v['chrom']
+    assert 10 == v['pos']
+    assert 'TTTCA' == v['ref']
+    assert ['TTACA']  == v['alts']
 
+
+    v = align(
+        chrom = 'chr1', 
+        pos = 4, ref = 'TA', alts = 'AG', 
+        ref_pos = 6, ref_ref = 'AA', ref_alts = 'A,AAA', 
+        genome = genome
+    )
+    assert None == v
+
+
+# def test_shift_right(tmp_path):
+#     genome_file = Path(__file__).parents[0] / 'seq.fa'
+#     genome = Genome(genome_file)
+#
+#     result = Variant(chrom = 'chr1', pos = 1, ref = 'A', alt = 'AT').shift_right(genome)
+#     assert 'chr1' == result.chrom
+#     assert 1 == result.pos
+#     assert 'A' == result.ref
+#     assert 'AT' == result.alt
+#
+#     result = Variant(chrom = 'chr1', pos = 4, ref = 'T', alt = 'TA').shift_right(genome)
+#     assert 'chr1' == result.chrom
+#     assert 11 == result.pos
+#     assert 'A' == result.ref
+#     assert 'AA' == result.alt
 
 
 def test_normalize(tmp_path):
-    genome_file = Path(__file__).parents[0] / 'seq.fa.bgz'
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
     genome = Genome(genome_file)
 
 
@@ -227,7 +256,7 @@ def test_normalize(tmp_path):
 
 def test_variant_align():
 
-    genome_file = Path(__file__).parents[0] / 'seq.fa.bgz'
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
     genome = Genome(genome_file)
 
     ref_variant = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'A,AAA')
@@ -240,3 +269,15 @@ def test_variant_align():
     assert 'A,AAA' == v1.alt
     assert '0/0\t0/2\t2/2' == v1.calls
 
+# chr13   32394895        AX-599399085    TTTCA   GAATGATC,TTACA,TTTA,TTTTA
+    ref_variant = Variant(chrom = 'chr2', pos = 10, ref = 'TTTCA', alt = 'GAATGATC,TTACA,TTTA,TTTTA')
+
+    v = Variant(chrom = 'chr2', pos = 12, ref = 'T', alt = 'A', format_ = 'GT', calls = '1/1\t0/1\t0/0')
+
+    v1 = v.align(ref_variant, genome)
+
+    assert 'chr2' == v1.chrom 
+    assert 10 == v1.pos 
+    assert 'TTTCA' == v1.ref 
+    assert 'GAATGATC,TTACA,TTTA,TTTTA' == v1.alt
+    assert '2/2\t0/2\t0/0' == v1.calls

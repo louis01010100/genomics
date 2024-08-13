@@ -133,19 +133,19 @@ def bgzip(filepath: Path, index=True, n_threads=1):
         index(filepath.with_suffix('.vcf.bgz'))
 
 
-def df2tsv(df, file_, has_header=True, separator='\t'):
+def df2tsv(df, file_, header=True, separator='\t'):
+    if isinstance(df, pl.DataFrame):
+        df.write_csv(file_, include_header=header, separator=separator)
+    elif isinstance(df, pd.DataFrame):
+        df.to_csv(
+            file_,
+            header=header,
+            index=index,
+            sep=sep,
+            na_rep=na_rep,
+        )
 
-    with gzip.open(file_, 'wt') as fh:
-        if isinstance(df, pl.DataFrame):
-            df.write_csv(fh, has_header=has_header, separator=separator)
-        elif isinstance(df, pd.DataFrame):
-            df.to_csv(
-                fh,
-                header=header,
-                index=index,
-                sep=sep,
-                na_rep=na_rep,
-            )
+
 
 
 def execute(cmd, debug=False, pipe=False):

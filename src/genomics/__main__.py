@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 import polars as pl
 
-from . import acmg, clinvar, dbsnp, vcf, coordinate, depth
+from . import acmg, clinvar, dbsnp, vcf, depth
 
 __VERSION__ = '0.5.2'
 
@@ -45,25 +45,22 @@ def main():
             output_dir=Path(args.output_dir),
         )
     elif args.subcommand == 'cram-depth':
-
-        cram_files = _load_files(args.crams_file, args.cram_files)
-
         depth.export_cram_depths(
-            cram_files=cram_files,
+            crams_file=Path(args.crams_file),
             genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
-            coordinates_vcf_file=Path(args.coordinates_vcf_file),
+            coordinates_file=Path(args.coordinates_file),
             n_threads=args.n_threads,
         )
 
-    elif args.subcommand == 'gvcf-depth':
-        gvcf_files = _load_files(args.gvcfs_file, args.gvcf_files)
-        depth.export_gvcf_depths(
-            gvcf_files=gvcf_files,
-            output_dir=Path(args.output_dir),
-            coordinates_vcf_file=Path(args.coordinates_vcf_file),
-            n_threads=args.n_threads,
-        )
+    # elif args.subcommand == 'gvcf-depth':
+    #     gvcf_files = _load_files(args.gvcfs_file, args.gvcf_files)
+    #     depth.export_gvcf_depths(
+    #         gvcf_files=gvcf_files,
+    #         output_dir=Path(args.output_dir),
+    #         coordinates_file=Path(args.coordinates_file),
+    #         n_threads=args.n_threads,
+    #     )
     else:
         parser.print_help()
         sys.exit(1)
@@ -126,15 +123,14 @@ def _config_cram_depth_parser(parser):
     parser.add_argument('--crams-file')
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--genome-file', required=True)
-    parser.add_argument('--coordinates-vcf-file', required=True)
+    parser.add_argument('--coordinates-file', required=True)
     parser.add_argument('--n-threads', type=int, default=1)
-    parser.add_argument('cram_files', nargs='*')
 
 
 def _config_gvcf_depth_parser(parser):
     parser.add_argument('--gvcfs-file')
     parser.add_argument('--output-dir', required=True)
-    parser.add_argument('--coordinates-vcf-file', required=True)
+    parser.add_argument('--coordinates-file', required=True)
     parser.add_argument('--n-threads', type=int, default=1)
     parser.add_argument('gvcf_files', nargs='*')
 

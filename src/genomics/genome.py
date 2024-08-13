@@ -48,7 +48,9 @@ class Genome():
     def version(self):
         return self._version
 
-    def slice(self, chrom, start, stop):
+    def slice(self, chrom, start, stop = None):
+        if not stop:
+            stop = start + 1
         return self._chroms[chrom][start:stop]
 
     def length(self, chrom):

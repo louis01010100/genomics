@@ -153,10 +153,8 @@ class Variant():
                 genome,
         )
 
-        if result['status'] == 'FAIL':
-            raise Exception()
-
-        assert result['status'] == 'PASS'
+        if result is None:
+            return result
 
         new_chrom = result['chrom']
         new_pos = result['pos']
@@ -390,8 +388,6 @@ def transcode_gt(
     calls: str,
 ):
 
-    print(idx2allele)
-    print(allele2idx)
     if not calls:
         return None
 
@@ -481,22 +477,49 @@ def _load_allele2idx(ref: str, alts: list):
 
 
 def align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome):
-    if pos == ref_pos and ref == ref_ref:
-        return {'chrom': chrom, 'pos': pos, 'ref': ref, 'alts': alts, 'status': 'PASS'}
 
-    if pos >= ref_pos:
-        return {'chrom': chrom, 'pos': pos, 'ref': ref, 'alts': alts, 'status': 'FAIL'}
+    if pos >= ref_pos + len(ref_ref):
+        return None
 
-    pos += 1
-    base = genome.slice(chrom, pos -1, pos)
-    ref = ref + base
-    alts = [alt + base for alt in alts]
+    if pos > ref_pos:
+        pos -= 1
+        base = genome.slice(chrom, pos -1, pos)
+        ref = base + ref
+        alts = [base + alt for alt in alts]
 
-    if all([alt[0] == ref[0] for alt in alts]):
-        ref = ref[1:]
-        alts = [alt[1:] for alt in alts]
+        return align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome)
 
-    return align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome)
+    elif pos < ref_pos:
+
+        if all([alt[0] == ref[0] for alt in alts]):
+            ref = ref[1:]
+            alts = [alt[1:] for alt in alts]
+        else:
+            return None
+
+        pos += 1
+        base = genome.slice(chrom, pos -1, pos)
+        ref = ref + base
+        alts = [alt + base for alt in alts]
+        return align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome)
+    else:
+        assert pos == ref_pos
+
+        if ref == ref_ref:
+            return {'chrom': chrom, 'pos': pos, 'ref': ref, 'alts': alts, 'status': 'PASS'}
+
+        elif len(ref) < len(ref_ref):
+            suffix = ref_ref[len(ref):]
+            ref = ref + suffix
+            alts = [alt + suffix for alt in alts]
+            return align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome)
+        else:
+            return None
+
+def shift_right(chrom, pos, ref, alts, genomes):
+    pass
+
+    
 
 def normalize(chrom, pos, ref, alts, genome):
 
