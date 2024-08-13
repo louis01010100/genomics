@@ -207,6 +207,12 @@ def test_rshift(tmp_path):
     assert 'A' == result['ref']
     assert ['T'] == result['alts']
 
+    result = rshift('chr1', 4, 'TA', ['T'], genome)
+    assert 'chr1' == result['chrom']
+    assert 10 == result['pos']
+    assert 'AA' == result['ref']
+    assert ['A'] == result['alts']
+
     # result = Variant(chrom = 'chr1', pos = 4, ref = 'T', alt = 'TA').shift_right(genome)
     # assert 'chr1' == result.chrom
     # assert 11 == result.pos
