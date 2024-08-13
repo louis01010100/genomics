@@ -542,7 +542,7 @@ def denormalize(chrom, pos, ref, alts, genome):
 
         if len(ref) == 0:
             base = genome.slice(chrom, pos -1, pos)
-            ref = base
+            ref = ref + base
             alts = [alt + base for alt in alts]
 
         if any([len(alt) == 0 for alt in alts]):
