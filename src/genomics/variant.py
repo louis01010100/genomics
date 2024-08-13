@@ -516,24 +516,62 @@ def align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome):
         else:
             return None
 
-def shift_right(chrom, pos, ref, alts, genomes):
-    pass
+def rshift(chrom, pos, ref, alts, genome):
+
+    # trim_left
+    if all([alt[0] == ref[0] for alt in alts]):
+
+        ref = ref[1:]
+        alts = [alt[1:] for alt in alts]
+        pos += 1
+
+        if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
+            base = genome.slice(chrom, pos -1, pos)
+
+            if len(ref) == 0:
+                ref = base
+
+            bag = list()
+            for alt in alts:
+                if len(alt) == 0:
+                    bag.append(base)
+                else:
+                    bag.append(alt)
+
+
+        return rshift(chrom, pos, ref, alts, genome)
+
+    # trim right
+    
+    if all([alt[-1] == ref[-1] for alt in alts]):
+
+        pos += 1
+        end = pos + len(ref)
+        base = genome.slice(chrom, end -1, end)
+
+        ref = ref[1:] + base
+        alts = [alt[1:] + base for alt in alts]
+
+
+    return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
+
+
 
     
 
 def normalize(chrom, pos, ref, alts, genome):
 
     # trim right
-    if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
-        pos -= 1
-        base = genome.slice(chrom, pos -1, pos)
-        ref = base + ref
-        alts = [base + alt for alt in alts]
-        return normalize(chrom, pos, ref, alts, genome)
-
     if all([alt[-1] == ref[-1] for alt in alts]):
+
         ref = ref[0:-1]
         alts = [alt[0:-1] for alt in alts]
+
+        if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
+            pos -= 1
+            base = genome.slice(chrom, pos -1, pos)
+            ref = base + ref
+            alts = [base + alt for alt in alts]
 
         return normalize(chrom, pos, ref, alts, genome)
 
