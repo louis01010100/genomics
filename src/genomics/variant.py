@@ -185,6 +185,22 @@ class Variant():
             calls = new_calls
         )
 
+    def denormalize(self, genome):
+        result = denormalize(self.chrom, self.pos, self.ref, self.alts, genome)
+
+        return Variant(
+            chrom = result['chrom'],
+            pos = result['pos'],
+            ref = result['ref'],
+            alt = ','.join(result['alts']),
+            id_ = self.id,
+            qual = self.qual,
+            filter_ = self.filter,
+            info = self.info,
+            format_ = self.format,
+            calls = self.calls,
+        )
+
 
 
     def normalize(self, genome):

@@ -205,21 +205,21 @@ def test_denormalize(tmp_path):
     # ACGTAAAAAAAT
     # A
     # T
-    result = denormalize('chr1', 1, 'A', ['T'], genome)
-    assert 'chr1' == result['chrom']
-    assert 1 == result['pos']
-    assert 'A' == result['ref']
-    assert ['T'] == result['alts']
+    result = Variant('chr1', 1, 'A', 'T').denormalize(genome)
+    assert 'chr1' == result.chrom
+    assert 1 == result.pos
+    assert 'A' == result.ref
+    assert 'T' == result.alt
 
     # 123456789012
     # ACGTAAAAAAAT
     # A
     # T
-    result = denormalize('chr1', 1, 'AC', ['TG'], genome)
-    assert 'chr1' == result['chrom']
-    assert 1 == result['pos']
-    assert 'AC' == result['ref']
-    assert ['TG'] == result['alts']
+    result = Variant('chr1', 1, 'AC', 'TG').denormalize(genome)
+    assert 'chr1' == result.chrom
+    assert 1 == result.pos
+    assert 'AC' == result.ref
+    assert 'TG' == result.alt
 
     # 123456789012
     # ACGTAAAAAAAT
@@ -228,11 +228,11 @@ def test_denormalize(tmp_path):
     #          AA 
     #          A
 
-    result = denormalize('chr1', 4, 'TA', ['T'], genome)
-    assert 'chr1' == result['chrom']
-    assert 10 == result['pos']
-    assert 'AA' == result['ref']
-    assert ['A'] == result['alts']
+    result = Variant('chr1', 4, 'TA', 'T').denormalize(genome)
+    assert 'chr1' == result.chrom
+    assert 10 == result.pos
+    assert 'AA' == result.ref
+    assert 'A' == result.alt
 
     # 123456789012
     # ACGTAAAAAAAT
@@ -240,27 +240,27 @@ def test_denormalize(tmp_path):
     #    TA
     #           A 
     #           AA
-    result = denormalize('chr1', 4, 'T', ['TA'], genome)
-    assert 'chr1' == result['chrom']
-    assert 11 == result['pos']
-    assert 'A' == result['ref']
-    assert ['AA'] == result['alts']
+    result = Variant('chr1', 4, 'T', 'TA').denormalize(genome)
+    assert 'chr1' == result.chrom
+    assert 11 == result.pos
+    assert 'A' == result.ref
+    assert 'AA' == result.alt
 
     # 123456789012
     # ACGTAAAAAAAT
     #    T 
     #    TA
-    #    TAAAAAAAT
+    #    TAA
     #
-    #     A
-    #     AA
-    #     AAAAAAAT
+    #           A
+    #           AA
+    #           AAA
 
-    result = denormalize('chr1', 4, 'T', ['TA','TAA'], genome)
-    assert 'chr1' == result['chrom']
-    assert 11 == result['pos']
-    assert 'A' == result['ref']
-    assert ['AA', 'AAA'] == result['alts']
+    result = Variant('chr1', 4, 'T', 'TA,TAA').denormalize(genome)
+    assert 'chr1' == result.chrom
+    assert 11 == result.pos
+    assert 'A' == result.ref
+    assert 'AA,AAA' == result.alt
 
 
 def test_normalize(tmp_path):
