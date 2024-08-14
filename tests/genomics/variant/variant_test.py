@@ -274,6 +274,20 @@ def test_denormalize(tmp_path):
     assert  2== result.pos
     assert 'TT' == result.ref
     assert 'T' == result.alt
+            
+
+    # 1234567890
+    # ATTCTTCTCG
+    # ATTC
+    # A
+    #     TTCT
+    #     T
+
+    result = Variant('chr4', 1, 'ATTC', 'A').denormalize(genome)
+    assert 'chr4' == result.chrom
+    assert 'TTCT' == result.ref
+    assert 'T' == result.alt
+    assert  5== result.pos
 
 
 def test_normalize(tmp_path):
