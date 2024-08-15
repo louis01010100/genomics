@@ -533,7 +533,6 @@ def align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome):
             return None
 
 def denormalize(chrom, pos, ref, alts, genome):
-    print(chrom, pos, ref, alts)
     # trim_left
     if all([alt[0] == ref[0] for alt in alts]):
 
