@@ -52,28 +52,28 @@ def export_cram_depths(
     depths_dir = output_dir / 'depths'
     depths_dir.mkdir(exist_ok=True)
 
-    # with ProcessPool(n_threads) as pool:
-    #     for future in pool.uimap(
-    #             parse_cram,
-    #             jobs(crams, genome_file, output_dir / 'atomized_coordinates.tsv'),
-    #     ):
-    #         sample_name = future[0]
-    #         gender = future[1]
-    #         depth_df = pl.from_pandas(future[2])
-    #         # depth_df = future[1]
-    #
-    #
-    #         depth_df = coordinates\
-    #                 .join(depth_df, on = ['chrom', 'pos'], how = 'left')\
-    #                 .with_columns(
-    #                         pl.col('depth').fill_null(0), 
-    #                         pl.lit(sample_name).alias('sample'), 
-    #                         pl.lit(gender).alias('gender')
-    #                 )
-    #
-    #
-    #         output_file = depths_dir / f'{sample_name}.tsv'
-    #         depth_df.write_csv(output_file, include_header=True, separator='\t')
+    with ProcessPool(n_threads) as pool:
+        for future in pool.uimap(
+                parse_cram,
+                jobs(crams, genome_file, output_dir / 'atomized_coordinates.tsv'),
+        ):
+            sample_name = future[0]
+            gender = future[1]
+            depth_df = pl.from_pandas(future[2])
+            # depth_df = future[1]
+
+
+            depth_df = coordinates\
+                    .join(depth_df, on = ['chrom', 'pos'], how = 'left')\
+                    .with_columns(
+                            pl.col('depth').fill_null(0), 
+                            pl.lit(sample_name).alias('sample'), 
+                            pl.lit(gender).alias('gender')
+                    )
+
+
+            output_file = depths_dir / f'{sample_name}.tsv'
+            depth_df.write_csv(output_file, include_header=True, separator='\t')
 
     depths = summarize_depths(depths_dir)
 
