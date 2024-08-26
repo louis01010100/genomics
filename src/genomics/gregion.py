@@ -5,6 +5,11 @@ class GenomicRegion():
         self._start = start
         self._stop = end
 
+    def contains(self, chrom, pos):
+        if self.chrom != chrom:
+            return False
+        return self.start <= pos and self.end >= pos
+
     def is_overlapping(self, other):
         if self.chrom != other.chrom:
             return False

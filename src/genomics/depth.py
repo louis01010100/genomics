@@ -19,6 +19,7 @@ COORDINATES_FILENAME = 'coordinates.tsv'
 
 def export_cram_depths(
     crams_file: Path,
+    genders_file: Path,
     genome_file: Path,
     coordinates_file: Path,
     output_dir: Path,
@@ -26,12 +27,12 @@ def export_cram_depths(
     prod: bool = False,
 ):
 
-    def jobs(crams, genome_file, atomized_coordinates_file):
-        for cram in crams:
+    def jobs(sample2cram, sample2gender, genome_file, atomized_coordinates_file):
+        for sample, cram_file in sample2cram.items():
             yield {
-                'cram_file': cram['cram_path'],
-                'sample': cram['sample'],
-                'gender': cram['gender'],
+                'cram_file': cram_file,
+                'sample': sample,
+                'gender': sample2gender[sample],
                 'atomized_coordinates_file': atomized_coordinates_file,
                 'genome_file': genome_file,
             }
@@ -41,7 +42,8 @@ def export_cram_depths(
 
     output_dir.mkdir(exist_ok=True)
 
-    crams = pl.read_csv(crams_file, has_header = True, separator = '\t').to_dicts()
+    sample2cram = load_dict(crams_file)
+    sample2gender = load_dict(genders_file)
 
     coordinates = atomize_coordinates(coordinates_file)
     coordinates.write_csv(output_dir / 'atomized_coordinates_full.tsv', include_header = True, separator = '\t')
@@ -55,7 +57,7 @@ def export_cram_depths(
     with ProcessPool(n_threads) as pool:
         for future in pool.uimap(
                 parse_cram,
-                jobs(crams, genome_file, output_dir / 'atomized_coordinates.tsv'),
+                jobs(sample2cram, sample2gender, genome_file, output_dir / 'atomized_coordinates.tsv'),
         ):
             sample_name = future[0]
             gender = future[1]
@@ -80,11 +82,20 @@ def export_cram_depths(
     output_filename = f'{coordinates_file.name.split(".")[0]}-depth.tsv'
 
     result = pl.read_csv(coordinates_file, has_header = True, separator = '\t')
-    print(result)
-    print(depths)
     result = result.join(depths, on=['chrom', 'start', 'end'], how = 'left')
 
     df2tsv(result, output_dir / f'{output_filename}')
+
+def load_dict(file_):
+    bag = dict()
+    with file_.open('rt') as fh:
+        next(fh)
+
+        for line in fh:
+            items = line.strip().split('\t')
+            bag[items[0]] = items[1]
+
+    return bag
 
 # def export_gvcf_depths(
 #     gvcf_files: list[Path],
@@ -168,7 +179,6 @@ def summarize_depths(depth_dir):
     result = list()
 
     for key, depths in bag.items():
-        print(depths)
         result.append({
             'chrom': key[0],
             'start': key[1],

@@ -47,6 +47,7 @@ def main():
     elif args.subcommand == 'cram-depth':
         depth.export_cram_depths(
             crams_file=Path(args.crams_file),
+            genders_file=Path(args.genders_file),
             genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
             coordinates_file=Path(args.coordinates_file),
@@ -120,7 +121,8 @@ def _config_coordinate_parser(parser):
 
 
 def _config_cram_depth_parser(parser):
-    parser.add_argument('--crams-file')
+    parser.add_argument('--crams-file', required = True)
+    parser.add_argument('--genders-file', required = True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--coordinates-file', required=True)

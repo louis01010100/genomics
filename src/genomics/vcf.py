@@ -63,6 +63,28 @@ class Vcf():
             self._header = _load_header(self.filepath)
         return self._header
 
+    def standardize(self, normalize = False):
+        if normalize:
+            return self \
+                .bgzip()\
+                .drop_qual()\
+                .drop_filter() \
+                .drop_info() \
+                .fill_tags() \
+                .normalzie() \
+                .sort() \
+                .index()
+        else:
+            return self \
+                .bgzip()\
+                .drop_qual()\
+                .drop_filter() \
+                .drop_info() \
+                .fill_tags() \
+                .sort() \
+                .index()
+
+
     def to_variants(self, key='coordinate'):
 
         records = dict()
