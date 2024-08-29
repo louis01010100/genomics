@@ -690,78 +690,100 @@ def normalize_chrom_name(chrom):
 
 def sync(vx: Variant, vy: Variant, genome: Genome):
 
-    if vx.pos > vy.pos:
-        seq_x = genome.slice(vx.chrom, vy.pos - 1, vx.pos - 1)
-        seq_y = genome.slice(vy.chrom, vy.pos -1 + len(vy.ref), vx.pos - 1 + len(vx.ref))
+    def _sync(var, seq, region):
 
-        vx = Variant(
-                chrom = vx.chrom,
-                pos = vy.pos,
-                ref = seq_x + vx.ref,
-                alt = ','.join([seq_x + alt for alt in vx.alts]),
-            )
-        vy = Variant(
-                chrom = vy.chrom,
-                pos = vy.pos,
-                ref = vy.ref + seq_y,
-                alt = ','.join([alt +seq_y for alt in vy.alts]),
+        prefix = seq[:(var.region.start - region.start)+1 -1]
+        suffix = seq[(var.region.end  - region.start + 1):]
+
+        return Variant(
+                chrom = var.chrom,
+                pos = region.start,
+                ref = prefix + var.ref + suffix,
+                alt = ','.join([prefix + alt + suffix for alt in var.alts]),
+                id_ = var.id,
             )
 
-    elif vx.pos == vy.pos:
-        if len(vx.ref) > len(vy.ref):
-            assert vx.ref.startswith(vy.ref)
-            vy_seq = vx.ref[len(vy.ref):]
-            vy = Variant(
-                    chrom = vy.chrom,
-                    pos = vy.pos,
-                    ref = vy.ref + vy_seq,
-                    alt = ','.join([alt + vy_seq for alt in vy.alts]),
-                )
+    region = vx.region.merge(vy.region)
+    seq = genome.slice(vx.chrom, region.start -1, region.end)
 
-            pass
-        elif len(vx.ref) == len(vy.ref):
-            pass
-        elif len(vx.ref) < len(vy.ref):
-            assert vy.ref.startswith(vx.ref)
-            vx_seq = vy.ref[len(vx.ref):]
-            vx = Variant(
-                    chrom = vx.chrom,
-                    pos = vx.pos,
-                    ref = vx.ref + vx_seq,
-                    alt = ','.join([alt + vx_seq for alt in vx.alts]),
-                )
+    vx = _sync(vx, seq, region)
+    vy = _sync(vy, seq, region)
 
-            pass
-        else:
-            assert False
-            
-    elif vx.pos < vy.pos:
-        vx_seq = genome.slice(
-                    chrom = vx.chrom, 
-                    start = (vx.pos + len(vx.ref) - 1), 
-                    end = (vy.pos + len(vy.ref) - 1) ,
-                )
-        vy_seq = genome.slice(
-                    chrom = vy.chrom, 
-                    start = vx.pos - 1,
-                    end = vy.pos - 1,
-                )
 
-        vx = Variant(
-                chrom = vx.chrom,
-                pos = vx.pos,
-                ref = vx.ref + vx_seq,
-                alt = ','.join([alt +vx_seq for alt in vx.alts])
-            )
 
-        vy = Variant(
-                chrom = vy.chrom,
-                pos = vx.pos,
-                ref = vy_seq + vy.ref,
-                alt = ','.join([vy_seq + alt for alt in vy.alts])
-            )
-    else:
-        assert False
+    # if vx.pos > vy.pos:
+    #     seq_x = genome.slice(vx.chrom, vy.pos - 1, vx.pos - 1)
+    #     seq_y = genome.slice(vy.chrom, vy.pos + len(vy.ref) - 1, vx.pos  + len(vx.ref) - 1)
+    #
+    #     vx = Variant(
+    #             chrom = vx.chrom,
+    #             pos = vy.pos,
+    #             ref = seq_x + vx.ref,
+    #             alt = ','.join([seq_x + alt for alt in vx.alts]),
+    #         )
+    #     vy = Variant(
+    #             chrom = vy.chrom,
+    #             pos = vy.pos,
+    #             ref = vy.ref + seq_y,
+    #             alt = ','.join([alt +seq_y for alt in vy.alts]),
+    #         )
+    #
+    # elif vx.pos == vy.pos:
+    #     if len(vx.ref) > len(vy.ref):
+    #         assert vx.ref.startswith(vy.ref)
+    #         vy_seq = vx.ref[len(vy.ref):]
+    #         vy = Variant(
+    #                 chrom = vy.chrom,
+    #                 pos = vy.pos,
+    #                 ref = vy.ref + vy_seq,
+    #                 alt = ','.join([alt + vy_seq for alt in vy.alts]),
+    #             )
+    #
+    #         pass
+    #     elif len(vx.ref) == len(vy.ref):
+    #         pass
+    #     elif len(vx.ref) < len(vy.ref):
+    #         assert vy.ref.startswith(vx.ref)
+    #         vx_seq = vy.ref[len(vx.ref):]
+    #         vx = Variant(
+    #                 chrom = vx.chrom,
+    #                 pos = vx.pos,
+    #                 ref = vx.ref + vx_seq,
+    #                 alt = ','.join([alt + vx_seq for alt in vx.alts]),
+    #             )
+    #
+    #         pass
+    #     else:
+    #         assert False
+    #         
+    # elif vx.pos < vy.pos:
+    #
+    #     vx_seq = genome.slice(
+    #                 chrom = vx.chrom, 
+    #                 start = (vx.pos + len(vx.ref) - 1), 
+    #                 end = (vy.pos + len(vy.ref) - 1) ,
+    #             )
+    #     vy_seq = genome.slice(
+    #                 chrom = vy.chrom, 
+    #                 start = vx.pos - 1,
+    #                 end = vy.pos - 1,
+    #             )
+    #
+    #     vx = Variant(
+    #             chrom = vx.chrom,
+    #             pos = vx.pos,
+    #             ref = vx.ref + vx_seq,
+    #             alt = ','.join([alt +vx_seq for alt in vx.alts])
+    #         )
+    #
+    #     vy = Variant(
+    #             chrom = vy.chrom,
+    #             pos = vx.pos,
+    #             ref = vy_seq + vy.ref,
+    #             alt = ','.join([vy_seq + alt for alt in vy.alts])
+    #         )
+    # else:
+    #     assert False
 
     return vx, vy
 

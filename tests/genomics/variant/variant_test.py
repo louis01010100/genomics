@@ -390,21 +390,21 @@ def test_sync():
     assert nvx.alt == 'C'
     assert nvy.alt == 'T'
 
-    vx = Variant(chrom = 'chr1', pos = 3, ref = 'GC', alt = 'CC')
+    vx = Variant(chrom = 'chr1', pos = 3, ref = 'GT', alt = 'CC')
     vy = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'T')
     nvx, nvy = sync(vx,vy, genome)
-    assert nvx.pos == nvy.pos == 3
-    assert nvx.ref == nvy.ref == 'GC'
-    assert nvx.alt == 'CC'
-    assert nvy.alt == 'TC'
-
-    vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
-    vy = Variant(chrom = 'chr1', pos = 3, ref = 'GC', alt = 'TT')
-    nvx, nvy = sync(vx,vy, genome)
     assert 3 == nvx.pos == nvy.pos
-    assert 'GC' == nvx.ref == nvy.ref
+    assert 'GT' == nvx.ref == nvy.ref
     assert 'CC' == nvx.alt
     assert 'TT' == nvy.alt
+
+    vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
+    vy = Variant(chrom = 'chr1', pos = 3, ref = 'GT', alt = 'AA')
+    nvx, nvy = sync(vx,vy, genome)
+    assert 3 == nvx.pos == nvy.pos
+    assert 'GT' == nvx.ref == nvy.ref
+    assert 'CT' == nvx.alt
+    assert 'AA' == nvy.alt
 
     vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
     vy = Variant(chrom = 'chr1', pos = 4, ref = 'T', alt = 'G')
