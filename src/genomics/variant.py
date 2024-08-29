@@ -692,7 +692,7 @@ def sync(vx: Variant, vy: Variant, genome: Genome):
 
     if vx.pos > vy.pos:
         seq_x = genome.slice(vx.chrom, vy.pos - 1, vx.pos - 1)
-        seq_y = genome.slice(vy.chrom, vy.pos -1 + len(vy.ref), vx.pos - 1 + len(vy.ref))
+        seq_y = genome.slice(vy.chrom, vy.pos -1 + len(vy.ref), vx.pos - 1 + len(vx.ref))
 
         vx = Variant(
                 chrom = vx.chrom,

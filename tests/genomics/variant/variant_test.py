@@ -412,7 +412,6 @@ def test_sync():
     assert 3 == nvx.pos == nvy.pos
     assert 'GT' == nvx.ref
     assert 'GT' == nvy.ref
-    # assert nvx.ref == nvy.ref == 'GT'
     assert 'CT' == nvx.alt
     assert 'GG' == nvy.alt
 
@@ -423,6 +422,14 @@ def test_sync():
     assert 'CG' == nvx.ref == nvy.ref
     assert 'CC' == nvx.alt
     assert 'AG' == nvy.alt
+
+    vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'A')
+    vy = Variant(chrom = 'chr1', pos = 2, ref = 'CG', alt = 'C')
+    nvx, nvy = sync(vx,vy, genome)
+    assert 2 == nvx.pos == nvy.pos
+    assert 'CG' == nvx.ref == nvy.ref
+    assert 'CA' == nvx.alt
+    assert 'C' == nvy.alt
 
     vx = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'AA,AAC')
     vy = Variant(chrom = 'chr2', pos = 2, ref = 'A', alt = 'C')
