@@ -6,9 +6,11 @@ REGULAR_BASE = re.compile(r'^[ACGT]+$')
 from .genome import Genome
 from .gregion import GenomicRegion
 
+NUCLEOTIDES_PATTERN = re.compile(r'^[ACGTN]+$')
 
 class Variant():
 
+    # 1-based
     def __init__(
         self,
         chrom: str,
@@ -237,6 +239,10 @@ class Variant():
         return is_ma(self.ref, self.alt)
 
     @property
+    def is_vcf(self):
+        return is_vcf(self.ref, self.alts)
+
+    @property
     def is_mnv(self):
         return is_mnv(self.ref, self.alt)
 
@@ -255,6 +261,46 @@ class Variant():
                 and self.pos == other.pos 
                 and self.ref == other.ref 
                 and self.alt == other.alt)
+
+    def to_vcf(self, genome):
+        if self.is_vcf:
+            return self.clone()
+
+        if self.ref == '-':
+            pos = self.pos
+            prefix = genome.slice(self.chrom, pos - 1)
+            ref = prefix
+            new_alts = []
+            for alt in self.alts:
+                new_alts.append(prefix + alt)
+        else:
+            assert '-' in self.alts
+
+            pos = self.pos - 1
+            prefix = genome.slice(self.chrom, pos - 1)
+            ref = prefix + self.ref
+
+            new_alts = []
+            for alt in self.alts:
+                if alt == '-':
+                    alt = prefix
+                else:
+                    alt = prefix + alt
+                new_alts.append(alt)
+
+
+        return Variant(
+            chrom = self.chrom,
+            pos = pos,
+            ref = ref,
+            alt = ','.join(new_alts),
+            id_ = self.id,
+            qual = self.qual,
+            filter_ = self.filter,
+            info = self.info,
+            format_ = self.format,
+            calls = self.calls,
+        )
 
 
     def __eq__(self, other):
@@ -367,15 +413,16 @@ def is_mnv(ref, alt):
     return True
 
 
-
-def is_vcf(pos_start, pos_stop, ref_allele, alt_allele):
-    if ref_allele == '-':
+def is_vcf(ref, alts):
+    if not NUCLEOTIDES_PATTERN.match(ref):
         return False
 
-    if alt_allele == '-':
-        return False
+    for alt in alts:
+        if not NUCLEOTIDES_PATTERN.match(alt):
+            return False
 
     return True
+
 
     # # Multiallelic SNP is always in VCF format for Axiom arrays
     # if ',' in alt_allele:
@@ -625,3 +672,96 @@ def _load_idx2allele(ref: str, alts: list):
     allele_dict['.'] = '.'
 
     return allele_dict
+
+def normalize_chrom_name(chrom):
+    chrom = str(chrom).lower()
+
+    if not chrom.startswith('chr'):
+        chrom = 'chr' + chrom
+
+    if chrom == 'chrx':
+        return 'chrX'
+    elif chrom == 'chry':
+        return 'chrY'
+    elif 'chrmt' in chrom:
+        return 'chrM'
+    else:
+        return chrom
+
+def sync(vx: Variant, vy: Variant, genome: Genome):
+
+    if vx.pos > vy.pos:
+        seq_x = genome.slice(vx.chrom, vy.pos - 1, vx.pos - 1)
+        seq_y = genome.slice(vy.chrom, vy.pos -1 + len(vy.ref), vx.pos - 1 + len(vy.ref))
+
+        vx = Variant(
+                chrom = vx.chrom,
+                pos = vy.pos,
+                ref = seq_x + vx.ref,
+                alt = ','.join([seq_x + alt for alt in vx.alts]),
+            )
+        vy = Variant(
+                chrom = vy.chrom,
+                pos = vy.pos,
+                ref = vy.ref + seq_y,
+                alt = ','.join([alt +seq_y for alt in vy.alts]),
+            )
+
+    elif vx.pos == vy.pos:
+        if len(vx.ref) > len(vy.ref):
+            assert vx.ref.startswith(vy.ref)
+            vy_seq = vx.ref[len(vy.ref):]
+            vy = Variant(
+                    chrom = vy.chrom,
+                    pos = vy.pos,
+                    ref = vy.ref + vy_seq,
+                    alt = ','.join([alt + vy_seq for alt in vy.alts]),
+                )
+
+            pass
+        elif len(vx.ref) == len(vy.ref):
+            pass
+        elif len(vx.ref) < len(vy.ref):
+            assert vy.ref.startswith(vx.ref)
+            vx_seq = vy.ref[len(vx.ref):]
+            vx = Variant(
+                    chrom = vx.chrom,
+                    pos = vx.pos,
+                    ref = vx.ref + vx_seq,
+                    alt = ','.join([alt + vx_seq for alt in vx.alts]),
+                )
+
+            pass
+        else:
+            assert False
+            
+    elif vx.pos < vy.pos:
+        vx_seq = genome.slice(
+                    chrom = vx.chrom, 
+                    start = (vx.pos + len(vx.ref) - 1), 
+                    end = (vy.pos + len(vy.ref) - 1) ,
+                )
+        vy_seq = genome.slice(
+                    chrom = vy.chrom, 
+                    start = vx.pos - 1,
+                    end = vy.pos - 1,
+                )
+
+        vx = Variant(
+                chrom = vx.chrom,
+                pos = vx.pos,
+                ref = vx.ref + vx_seq,
+                alt = ','.join([alt +vx_seq for alt in vx.alts])
+            )
+
+        vy = Variant(
+                chrom = vy.chrom,
+                pos = vx.pos,
+                ref = vy_seq + vy.ref,
+                alt = ','.join([vy_seq + alt for alt in vy.alts])
+            )
+    else:
+        assert False
+
+    return vx, vy
+
