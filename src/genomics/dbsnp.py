@@ -7,7 +7,7 @@ from .variant import Variant, sync
 import gzip
 from ncls import NCLS
 from pathos.multiprocessing import ProcessPool
-from .utils import chromosomes
+from .utils import chroms
 
 from .vcf import Vcf
 
@@ -138,7 +138,7 @@ def _load_index(file_):
 def _create_index(output_dir, n_threads):
 
     def jobs(output_dir):
-        for chrom in chromosomes():
+        for chrom in chroms():
             chrom_dir = output_dir / chrom
             yield chrom_dir
 
@@ -190,17 +190,17 @@ def _create_intervals(
 
     def jobs(output_dir, genome_file):
         genome = Genome(genome_file)
-        for chrom in chromosomes():
+        for chrom in chroms():
             chrom_dir = output_dir / chrom
 
             yield {
                 'chrom_dir': chrom_dir,
-                'genome': genome,
+                'chromosome': genome.chromosome(chrom),
             }
 
     def process(job):
         chrom_dir = job['chrom_dir']
-        genome = job['genome']
+        chromosome = job['chromosome']
 
         snvs_file = chrom_dir / SNVS_FILENAME
         intervals_file = chrom_dir / INTERVALS_FILENAME
@@ -224,7 +224,7 @@ def _create_intervals(
 
                 if alt == '.':
                     continue
-                result = process_snv(chrom, pos, rsid, ref, alt, genome)
+                result = process_snv(chrom, pos, rsid, ref, alt, chromosome)
                 start = result['start']
                 end = result['end']
                 bed_record = '\t'.join([str(x) for x in [chrom, start -1, end, rsid]])
@@ -251,14 +251,14 @@ def _create_intervals(
 
         return chrom_dir.name
 
-    def process_snv(chrom, pos, rsid, ref, alt, genome):
+    def process_snv(chrom, pos, rsid, ref, alt, chromosome):
         start = None
         end = None
 
         for a in alt.split(','):
             v = Variant(chrom = chrom, pos = pos, ref = ref, alt = a)
-            normalized = v.normalize(genome)
-            denormalized = v.denormalize(genome)
+            normalized = v.normalize(chromosome)
+            denormalized = v.denormalize(chromosome)
 
             current_start = normalized.region.start
             current_end = denormalized.region.end
@@ -303,7 +303,7 @@ def create_db(
     #
     # # 64 threads 20 min
     # with pgzip.open(intervals_file, 'wt', thread = n_threads, blocksize = PGZIP_BLOCK_SIZE) as ofh:
-    #     for chrom in chromosomes():
+    #     for chrom in chroms():
     #         chrom_dir = output_dir / chrom
     #
     #         print(chrom_dir)
@@ -318,7 +318,7 @@ def create_db(
     #
     #     ofh.write(f'{DETAILS_HEADER}\n')
     #
-    #     for chrom in chromosomes():
+    #     for chrom in chroms():
     #         chrom_dir = output_dir / chrom
     #
     #         print(chrom_dir)

@@ -185,7 +185,7 @@ def tsv2df(input_file: Path,
 
 
 
-def chromosomes():
+def chroms():
     x = ['chr' + str(x) for x in range(1,22)]
     x.extend(['chrX', 'chrY', 'chrM'])
 
