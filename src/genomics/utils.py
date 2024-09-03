@@ -184,6 +184,14 @@ def tsv2df(input_file: Path,
     )
 
 
+
+def chromosomes():
+    x = ['chr' + str(x) for x in range(1,22)]
+    x.extend(['chrX', 'chrY', 'chrM'])
+
+    return sorted(x)
+
+
 def revcom(seq):
     return seq.translate(COMPLEMENT_BASES)[::-1]
 
@@ -196,3 +204,5 @@ def save(obj, file_):
 def load(file_):
     with gzip.open(file_, 'rb') as fh:
         return pickle.load(fh)
+
+

@@ -24,11 +24,18 @@ def main():
             genome_index_file=Path(args.genome_index_file),
             output_dir=Path(args.output_dir),
         )
-    elif args.subcommand == 'dbsnp':
-        dbsnp.process(
+    elif args.subcommand == 'dbsnp-normalize':
+        dbsnp.normalize(
             dbsnp_vcf_file=Path(args.dbsnp_vcf_file),
             genome_file=Path(args.genome_file),
             genome_index_file=Path(args.genome_index_file),
+            output_dir=Path(args.output_dir),
+            n_threads=args.n_threads,
+        )
+    elif args.subcommand == 'dbsnp-createdb':
+        dbsnp.create_db(
+            dbsnp_vcf_file=Path(args.dbsnp_vcf_file),
+            genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
             n_threads=args.n_threads,
         )
@@ -82,7 +89,8 @@ def config_parsers():
     parsers = parser.add_subparsers(dest='subcommand')
 
     _config_clinvar_parser(parsers.add_parser('clinvar'))
-    _config_dbsnp_parser(parsers.add_parser('dbsnp'))
+    _config_dbsnp_normalize_parser(parsers.add_parser('dbsnp-normalize'))
+    _config_dbsnp_createdb_parser(parsers.add_parser('dbsnp-createdb'))
     _config_acmg_parser(parsers.add_parser('acmg'))
     _config_coordinate_parser(parsers.add_parser('coordinate'))
     _config_cram_depth_parser(parsers.add_parser('cram-depth'))
@@ -92,10 +100,16 @@ def config_parsers():
     return parser
 
 
-def _config_dbsnp_parser(parser):
+def _config_dbsnp_normalize_parser(parser):
     parser.add_argument('--dbsnp-vcf-file', required=True)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--genome-index-file', required=True)
+    parser.add_argument('--output-dir', required=True)
+    parser.add_argument('--n-threads', type=int, default=1)
+
+def _config_dbsnp_createdb_parser(parser):
+    parser.add_argument('--dbsnp-vcf-file', required=True)
+    parser.add_argument('--genome-file', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--n-threads', type=int, default=1)
 

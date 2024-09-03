@@ -142,6 +142,8 @@ class Variant():
             data=self.data,
         )
 
+
+    # use sync instead
     def align(self, ref_variant, genome):
 
         result = align(
@@ -187,11 +189,11 @@ class Variant():
             calls = new_calls
         )
 
-    def denormalize(self, genome):
-        result = denormalize(self.chrom, self.pos, self.ref, self.alts, genome)
+    def denormalize(self, chromosome):
+        result = denormalize(self.pos, self.ref, self.alts, chromosome)
 
         return Variant(
-            chrom = result['chrom'],
+            chrom = self.chrom,
             pos = result['pos'],
             ref = result['ref'],
             alt = ','.join(result['alts']),
@@ -205,11 +207,11 @@ class Variant():
 
 
 
-    def normalize(self, genome):
-        result = normalize(self.chrom, self.pos, self.ref, self.alts, genome)
+    def normalize(self, chromosome):
+        result = normalize(self.pos, self.ref, self.alts, chromosome)
 
         return Variant(
-            chrom = result['chrom'],
+            chrom = self.chrom,
             pos = result['pos'],
             ref = result['ref'],
             alt = ','.join(result['alts']),
@@ -576,7 +578,7 @@ def align(chrom, pos, ref, alts, ref_pos, ref_ref, ref_alts, genome):
         else:
             return None
 
-def denormalize(chrom, pos, ref, alts, genome):
+def denormalize(pos, ref, alts, chromosome):
     # trim_left
     if all([alt[0] == ref[0] for alt in alts]):
 
@@ -585,16 +587,16 @@ def denormalize(chrom, pos, ref, alts, genome):
         pos += 1
 
         if len(ref) == 0:
-            base = genome.slice(chrom, pos -1, pos)
+            base = chromosome[pos-1:pos]
             ref = ref + base
             alts = [alt + base for alt in alts]
 
         if any([len(alt) == 0 for alt in alts]):
-            base = genome.slice(chrom, pos + len(ref) -1, pos + len(ref))
+            base = chromosome[pos + len(ref) -1: pos + len(ref)]
             ref = ref + base
             alts = [alt + base for alt in alts]
 
-        return denormalize(chrom, pos, ref, alts, genome)
+        return denormalize(pos, ref, alts, chromosome)
 
     # trim right
     if all([alt[-1] == ref[-1] for alt in alts]):
@@ -604,19 +606,19 @@ def denormalize(chrom, pos, ref, alts, genome):
 
         if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
             pos -= 1
-            base = genome.slice(chrom, pos -1, pos)
+            base = chromosome[pos -1: pos]
             ref = base + ref
             alts = [base + alt for alt in alts]
-            return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
+            return { 'pos': pos, 'ref': ref, 'alts': alts }
 
-        return denormalize(chrom, pos, ref, alts, genome)
+        return denormalize(pos, ref, alts, chromosome)
 
-    return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
+    return { 'pos': pos, 'ref': ref, 'alts': alts }
 
 
     
 
-def normalize(chrom, pos, ref, alts, genome):
+def normalize(pos, ref, alts, chromosome):
 
     # trim right
     if all([alt[-1] == ref[-1] for alt in alts]):
@@ -626,26 +628,26 @@ def normalize(chrom, pos, ref, alts, genome):
 
         if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
             pos -= 1
-            base = genome.slice(chrom, pos -1, pos)
+            base = chromosome[pos -1: pos]
             ref = base + ref
             alts = [base + alt for alt in alts]
 
-        return normalize(chrom, pos, ref, alts, genome)
+        return normalize( pos, ref, alts, chromosome)
 
     
     # trim left
     if any([alt[0] != ref[0] for alt in alts]):
 
-        return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
+        return {'pos': pos, 'ref': ref, 'alts': alts }
 
     if len(ref) == 1 or any([len(alt) == 1 for alt in alts]):
-        return { 'chrom': chrom , 'pos': pos, 'ref': ref, 'alts': alts }
+        return {'pos': pos, 'ref': ref, 'alts': alts }
 
     ref = ref[1:]
     alts = [alt[1:] for alt in alts]
     pos += 1
 
-    return normalize(chrom, pos, ref, alts, genome)
+    return normalize(pos, ref, alts, chromosome)
 
 
 
@@ -688,7 +690,7 @@ def normalize_chrom_name(chrom):
     else:
         return chrom
 
-def sync(vx: Variant, vy: Variant, genome: Genome):
+def sync(vx: Variant, vy: Variant, chromosome: str):
 
     def _sync(var, seq, region):
 
@@ -704,86 +706,11 @@ def sync(vx: Variant, vy: Variant, genome: Genome):
             )
 
     region = vx.region.merge(vy.region)
-    seq = genome.slice(vx.chrom, region.start -1, region.end)
+    seq = chromosome[region.start -1:region.end]
 
     vx = _sync(vx, seq, region)
     vy = _sync(vy, seq, region)
 
-
-
-    # if vx.pos > vy.pos:
-    #     seq_x = genome.slice(vx.chrom, vy.pos - 1, vx.pos - 1)
-    #     seq_y = genome.slice(vy.chrom, vy.pos + len(vy.ref) - 1, vx.pos  + len(vx.ref) - 1)
-    #
-    #     vx = Variant(
-    #             chrom = vx.chrom,
-    #             pos = vy.pos,
-    #             ref = seq_x + vx.ref,
-    #             alt = ','.join([seq_x + alt for alt in vx.alts]),
-    #         )
-    #     vy = Variant(
-    #             chrom = vy.chrom,
-    #             pos = vy.pos,
-    #             ref = vy.ref + seq_y,
-    #             alt = ','.join([alt +seq_y for alt in vy.alts]),
-    #         )
-    #
-    # elif vx.pos == vy.pos:
-    #     if len(vx.ref) > len(vy.ref):
-    #         assert vx.ref.startswith(vy.ref)
-    #         vy_seq = vx.ref[len(vy.ref):]
-    #         vy = Variant(
-    #                 chrom = vy.chrom,
-    #                 pos = vy.pos,
-    #                 ref = vy.ref + vy_seq,
-    #                 alt = ','.join([alt + vy_seq for alt in vy.alts]),
-    #             )
-    #
-    #         pass
-    #     elif len(vx.ref) == len(vy.ref):
-    #         pass
-    #     elif len(vx.ref) < len(vy.ref):
-    #         assert vy.ref.startswith(vx.ref)
-    #         vx_seq = vy.ref[len(vx.ref):]
-    #         vx = Variant(
-    #                 chrom = vx.chrom,
-    #                 pos = vx.pos,
-    #                 ref = vx.ref + vx_seq,
-    #                 alt = ','.join([alt + vx_seq for alt in vx.alts]),
-    #             )
-    #
-    #         pass
-    #     else:
-    #         assert False
-    #         
-    # elif vx.pos < vy.pos:
-    #
-    #     vx_seq = genome.slice(
-    #                 chrom = vx.chrom, 
-    #                 start = (vx.pos + len(vx.ref) - 1), 
-    #                 end = (vy.pos + len(vy.ref) - 1) ,
-    #             )
-    #     vy_seq = genome.slice(
-    #                 chrom = vy.chrom, 
-    #                 start = vx.pos - 1,
-    #                 end = vy.pos - 1,
-    #             )
-    #
-    #     vx = Variant(
-    #             chrom = vx.chrom,
-    #             pos = vx.pos,
-    #             ref = vx.ref + vx_seq,
-    #             alt = ','.join([alt +vx_seq for alt in vx.alts])
-    #         )
-    #
-    #     vy = Variant(
-    #             chrom = vy.chrom,
-    #             pos = vx.pos,
-    #             ref = vy_seq + vy.ref,
-    #             alt = ','.join([vy_seq + alt for alt in vy.alts])
-    #         )
-    # else:
-    #     assert False
 
     return vx, vy
 
