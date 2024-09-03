@@ -264,13 +264,13 @@ class Variant():
                 and self.ref == other.ref 
                 and self.alt == other.alt)
 
-    def to_vcf(self, genome):
+    def to_vcf(self, chromosome):
         if self.is_vcf:
             return self.clone()
 
         if self.ref == '-':
             pos = self.pos
-            prefix = genome.slice(self.chrom, pos - 1)
+            prefix = chromosome[pos -1: pos]
             ref = prefix
             new_alts = []
             for alt in self.alts:
@@ -279,7 +279,7 @@ class Variant():
             assert '-' in self.alts
 
             pos = self.pos - 1
-            prefix = genome.slice(self.chrom, pos - 1)
+            prefix = chromosome[pos -1: pos]
             ref = prefix + self.ref
 
             new_alts = []

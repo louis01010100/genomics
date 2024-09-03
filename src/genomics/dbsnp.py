@@ -57,7 +57,7 @@ class DbSnp():
     def __init__(self, chrom, db_dir, chromosome):
 
         self._chrom = chrom
-        self.vcf_fh = gzip.open(vcf_file, 'rt')
+        self.vcf_fh = gzip.open(db_dir / chrom / SNVS_FILENAME, 'rt')
 
         # self.vcf_file = vcf_file
         self.chromosome = chromosome
@@ -81,9 +81,7 @@ class DbSnp():
         for result in results:
             rsids.append(result[-1])
 
-
         results = list()
-        details = list()
 
         for rsid in rsids:
             offset = self.index[rsid]
@@ -99,15 +97,8 @@ class DbSnp():
 
             vx, vy = sync(variant, candidate, self.chromosome)
             if set(vx.alts) & set(vy.alts):
-                results.append({
-                    'chrom': chrom,
-                    'pos': candidate.pos,
-                    'ref': candidate.ref,
-                    'alt': candidate.alt,
-                    'rsid': vy.id,
-                })
 
-                details.append({
+                results.append({
                     'chrom': chrom,
                     'pos': variant.pos,
                     'ref': variant.ref,
@@ -120,7 +111,7 @@ class DbSnp():
                     'rsid': vy.id,
                 })
 
-        return {'result': results, 'details': details}
+        return results
 
 
 
@@ -333,7 +324,9 @@ def create_db(
 
 def load_intervals(file_):
 
-    bag = dict()
+    starts = list()
+    ends = list()
+    rsids = list()
 
     with gzip.open(file_, 'rt') as fh:
         for line in fh:
@@ -344,13 +337,12 @@ def load_intervals(file_):
             end = int(record[2])
             rsid = int(record[3])
 
-            bag = {'start': list(), 'end': list(), 'rsid': list()}
+            starts.append(start)
+            ends.append(end)
+            rsids.append(rsid)
 
-            bag['start'].append(start)
-            bag['end'].append(end)
-            bag['rsid'].append(rsid)
 
-    intervals = NCLS( bag['start'], bag['end'], bag['rsid'])
+    intervals = NCLS( starts, ends, rsids)
 
     return intervals
 
