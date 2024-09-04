@@ -186,7 +186,7 @@ def tsv2df(input_file: Path,
 
 
 def chroms():
-    x = ['chr' + str(x) for x in range(1,22)]
+    x = ['chr' + str(x) for x in range(1,23)]
     x.extend(['chrX', 'chrY', 'chrM'])
 
     return sorted(x)

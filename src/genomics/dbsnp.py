@@ -11,7 +11,6 @@ from .utils import chroms
 
 from .vcf import Vcf
 
-DB_DIRNAME='dbsnp_db'
 BATCH_SIZE=10000000
 
 PGZIP_BLOCK_SIZE= 16 * 1024 * 1024  # 16MB
@@ -19,9 +18,13 @@ BUFFER_SIZE = 1024 * 1024
 
 DETAILS_HEADER = f'rsid\tchrom\tpos\tref\talt\tstart\tend'
 SNVS_FILENAME = 'snvs.tsv.gz'
-INTERVALS_FILENAME = 'intervals.bed.gz'
+INTERVALS_FILENAME = 'intervals.tsv.gz'
 DETAILS_FILENAME = 'details.tsv.gz'
-INDEX_FILENAME = 'index.tsv.gz'
+RSID2OFFSET_FILENAME = 'rsid2offset.tsv.gz'
+INDEX_FILENAME = 'idx.tsv.gz'
+DB_FILENAME = 'db.tsv.gz'
+
+DB_COLUMNS = ['chrom', 'pos', 'rsid', 'ref', 'alt', 'start_bed', 'end_bed', 'idx']
 
 CHROM_MAP_TEMPLATE = {
     'NC_000001': 'chr1',
@@ -57,12 +60,11 @@ class DbSnp():
     def __init__(self, chrom, db_dir, chromosome):
 
         self._chrom = chrom
-        self.vcf_fh = gzip.open(db_dir / chrom / SNVS_FILENAME, 'rt')
-
-        # self.vcf_file = vcf_file
         self.chromosome = chromosome
-        self.index = _load_index(db_dir / chrom / INDEX_FILENAME)
-        self.intervals = load_intervals(db_dir / chrom/ INTERVALS_FILENAME)
+        self._db = _load_db(db_dir / chrom / DB_FILENAME)
+        self._idxs = _load_idxs(db_dir / chrom/ INDEX_FILENAME)
+        self._db_fh = gzip.open(db_dir / chrom / DB_FILENAME, 'rt')
+        self._col2idx = {c : i for i, c in enumerate(DB_COLUMNS)}
 
     @property
     def chrom(self):
@@ -75,24 +77,19 @@ class DbSnp():
 
         chrom = self._chrom
 
-        rsids = list()
-        results = self.intervals.find_overlap(start -1, end)
+        intervals = self._db.find_overlap(start -1, end)
+        idxs = [interval[-1] for interval in intervals]
 
-        for result in results:
-            rsids.append(result[-1])
+        for idx in idxs:
+            self._db_fh.seek(self._idxs[idx])
+            snv = self._db_fh.readline().strip().split('\t')
 
-        results = list()
-
-        for rsid in rsids:
-            offset = self.index[rsid]
-            self.vcf_fh.seek(offset)
-            record = self.vcf_fh.readline().strip().split('\t')
             candidate = Variant(
                 chrom = chrom,
-                pos = int(record[1]), 
-                id_ = record[2],
-                ref = record[3],
-                alt = record[4]
+                pos = int(snv[self._col2idx['pos']]), 
+                id_ = snv[self._col2idx['rsid']], 
+                ref = snv[self._col2idx['ref']], 
+                alt = snv[self._col2idx['alt']], 
             )
 
             vx, vy = sync(variant, candidate, self.chromosome)
@@ -113,20 +110,55 @@ class DbSnp():
 
         return results
 
+# 64 threads, 1hr32min
+def create_db(
+    dbsnp_vcf_file: Path,
+    genome_file: Path,
+    output_dir: Path,
+    n_threads: int,
+):
+
+    output_dir.mkdir(exist_ok = True)
+
+    # # 64 threads, 25 min
+    _chop(dbsnp_vcf_file, output_dir, n_threads)
+
+    # 64 threads, 60 min
+    _create_db(genome_file, output_dir, n_threads)
+
+    _create_idxs(output_dir, n_threads)
 
 
-def _load_index(file_):
-    index = dict()
-    with gzip.open(file_, 'rt') as fh:
-        for line in fh:
-            record = line.strip().split('\t')
-            rsid = int(record[0])
-            offset = int(record[1])
-            index[rsid] = offset
-    return index
+def normalize(
+    dbsnp_vcf_file: Path,
+    output_dir: Path,
+    genome_file: Path,
+    genome_index_file: Path,
+    n_threads: int,
+):
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
 
+    tmp_dir = output_dir / 'tmp'
+    tmp_dir.mkdir(parents=True)
 
-def _create_index(output_dir, n_threads):
+    vcf = Vcf(dbsnp_vcf_file, tmp_dir, n_threads)
+
+    vcf = vcf.bgzip().index()
+    contigs = vcf.contigs
+
+    chrom_map_file = tmp_dir / 'chrommap.tsv'
+
+    _export_chrom_map(contigs, CHROM_MAP_TEMPLATE, chrom_map_file)
+
+    vcf.rename_chroms(chrom_map_file)\
+        .include_chroms(CHROM_MAP_TEMPLATE.values())\
+        .fix_header(genome_index_file)\
+        .drop_info() \
+        .normalize(genome_file) \
+        .move_to(output_dir / 'dbsnp.vcf.bgz')
+
+def _create_idxs(output_dir, n_threads):
 
     def jobs(output_dir):
         for chrom in chroms():
@@ -135,22 +167,26 @@ def _create_index(output_dir, n_threads):
 
     def process(job):
         chrom_dir = job
-        snv_file = chrom_dir / SNVS_FILENAME
-        index_file = chrom_dir / INDEX_FILENAME
+        db_file = chrom_dir / DB_FILENAME
+        idx_file = chrom_dir / INDEX_FILENAME
 
         buffer_ = list()
-        with gzip.open(snv_file,'rt') as fh, gzip.open(index_file, 'wt') as ifh:
+        with gzip.open(db_file,'rt') as fh, gzip.open(idx_file, 'wt') as ifh:
+
+            header = fh.readline()
 
             offset = fh.tell()
             line = fh.readline()
             n_records = 0
 
+            ifh.write('idx\toffset\n')
+
 
             while line:
-                if not line.startswith('#'):
-                    k = line.split('\t',3)[2][2:]
-                    buffer_.append(f'{k}\t{offset}')
-                    n_records += 1
+                record = line.strip().split('\t')
+                idx = record[-1]
+                buffer_.append(f'{idx}\t{offset}')
+                n_records += 1
 
 
                 if n_records > BUFFER_SIZE:
@@ -173,7 +209,7 @@ def _create_index(output_dir, n_threads):
             print(result)
 
 
-def _create_intervals(
+def _create_db(
         genome_file: Path,
         output_dir: Path,
         n_threads: int,
@@ -194,51 +230,49 @@ def _create_intervals(
         chromosome = job['chromosome']
 
         snvs_file = chrom_dir / SNVS_FILENAME
-        intervals_file = chrom_dir / INTERVALS_FILENAME
-        details_file = chrom_dir / DETAILS_FILENAME
+        db_file = chrom_dir / DB_FILENAME
 
-        bed_buffer = list()
-        csv_buffer = list()
+        buffer_ = list()
         n_records = 0
 
+        idx = 0
+
         with gzip.open(snvs_file, 'rt') as fh, \
-                gzip.open(intervals_file, 'wt') as ifh, \
-                gzip.open(details_file, 'wt') as dfh:
+                gzip.open(db_file, 'wt') as ifh:
+
+            header = '\t'.join(DB_COLUMNS)
+
+            ifh.write(f'{header}\n')
 
             for line in fh:
                 record = line.strip().split('\t')
                 chrom = record[0]
                 pos = int(record[1])
-                rsid = record[2][2:]
+                rsid = record[2]
                 ref = record[3]
                 alt = record[4]
 
                 if alt == '.':
                     continue
+                
                 result = process_snv(chrom, pos, rsid, ref, alt, chromosome)
                 start = result['start']
                 end = result['end']
-                bed_record = '\t'.join([str(x) for x in [chrom, start -1, end, rsid]])
-                csv_record = '\t'.join([str(x) for x in [rsid, chrom, pos, ref, alt, start, end]])
+                record = '\t'.join([str(x) for x in [chrom, pos, rsid, ref, alt, start - 1, end, idx]])
 
-                bed_buffer.append(bed_record)
-                csv_buffer.append(csv_record)
+                buffer_.append(record)
                 n_records += 1
+                idx += 1
 
                 if n_records > BUFFER_SIZE:
-                    bed_data = '\n'.join(bed_buffer)
-                    csv_data = '\n'.join(csv_buffer)
+                    bed_data = '\n'.join(buffer_)
                     ifh.write(f'{bed_data}\n')
-                    dfh.write(f'{csv_data}\n')
                     n_records = 0
-                    bed_buffer = list()
-                    csv_buffer = list()
+                    buffer_ = list()
 
             if n_records:
-                bed_data = '\n'.join(bed_buffer)
-                csv_data = '\n'.join(csv_buffer)
+                bed_data = '\n'.join(buffer_)
                 ifh.write(f'{bed_data}\n')
-                dfh.write(f'{csv_data}\n')
 
         return chrom_dir.name
 
@@ -271,114 +305,50 @@ def _create_intervals(
             print(result)
 
 
-def create_db(
-    dbsnp_vcf_file: Path,
-    genome_file: Path,
-    output_dir: Path,
-    n_threads: int,
-):
 
-    output_dir.mkdir(exist_ok = True)
+def _load_idxs(file_):
+    bag = dict()
+    with gzip.open(file_, 'rt') as fh:
 
-    # # 64 threads, 25 min
-    # _chop(dbsnp_vcf_file, output_dir, n_threads)
-    #
-    # # 64 threads, 60 min
-    # _create_intervals(genome_file, output_dir, n_threads)
-
-    _create_index(output_dir, n_threads)
+        col2idx = {col: idx for idx, col in enumerate(next(fh).strip().split('\t'))}
+        for line in fh:
+            record = line.strip().split('\t')
+            idx = int(record[col2idx['idx']])
+            offset = int(record[col2idx['offset']])
+            bag[idx] = offset
+    return bag
 
 
-    # intervals_file = output_dir / (dbsnp_vcf_file.name.split('.')[0] + '.bed.gz')
-    # details_file = output_dir / (dbsnp_vcf_file.name.split('.')[0] + '.csv.gz')
-    #
-    # # 64 threads 20 min
-    # with pgzip.open(intervals_file, 'wt', thread = n_threads, blocksize = PGZIP_BLOCK_SIZE) as ofh:
-    #     for chrom in chroms():
-    #         chrom_dir = output_dir / chrom
-    #
-    #         print(chrom_dir)
-    #
-    #         with pgzip.open(
-    #                 (chrom_dir / INTERVALS_FILENAME), 'rt', 
-    #                 thread = n_threads, blocksize = PGZIP_BLOCK_SIZE) as fh:
-    #             for line in fh:
-    #                 ofh.write(line)
-    #
-    # with pgzip.open(details_file, 'wt', thread = n_threads, blocksize = PGZIP_BLOCK_SIZE) as ofh:
-    #
-    #     ofh.write(f'{DETAILS_HEADER}\n')
-    #
-    #     for chrom in chroms():
-    #         chrom_dir = output_dir / chrom
-    #
-    #         print(chrom_dir)
-    #
-    #         with pgzip.open(
-    #                 (chrom_dir / DETAILS_FILENAME), 'rt', 
-    #                 thread = n_threads, blocksize = PGZIP_BLOCK_SIZE) as fh:
-    #             next(fh)
-    #             for line in fh:
-    #                 ofh.write(line)
 
-
-def load_intervals(file_):
+def _load_db(file_):
 
     starts = list()
     ends = list()
-    rsids = list()
+    indices = list()
 
     with gzip.open(file_, 'rt') as fh:
+
+        col2idx = {col: idx for idx, col in enumerate(next(fh).strip().split('\t'))}
         for line in fh:
             record = line.strip().split('\t')
+            idx = int(record[col2idx['idx']])
+            start_bed = int(record[col2idx['start_bed']])
+            end_bed = int(record[col2idx['end_bed']])
 
-            chrom = record[0]
-            start = int(record[1])
-            end = int(record[2])
-            rsid = int(record[3])
-
-            starts.append(start)
-            ends.append(end)
-            rsids.append(rsid)
+            starts.append(start_bed)
+            ends.append(end_bed)
+            indices.append(idx)
 
 
-    intervals = NCLS( starts, ends, rsids)
+    intervals = NCLS( starts, ends, indices)
 
     return intervals
 
 
 
-def normalize(
-    dbsnp_vcf_file: Path,
-    output_dir: Path,
-    genome_file: Path,
-    genome_index_file: Path,
-    n_threads: int,
-):
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-
-    tmp_dir = output_dir / 'tmp'
-    tmp_dir.mkdir(parents=True)
-
-    vcf = Vcf(dbsnp_vcf_file, tmp_dir, n_threads)
-
-    vcf = vcf.bgzip().index()
-    contigs = vcf.contigs
-
-    chrom_map_file = tmp_dir / 'chrommap.tsv'
-
-    export_chrom_map(contigs, CHROM_MAP_TEMPLATE, chrom_map_file)
-
-    vcf.rename_chroms(chrom_map_file)\
-        .include_chroms(CHROM_MAP_TEMPLATE.values())\
-        .fix_header(genome_index_file)\
-        .drop_info() \
-        .normalize(genome_file) \
-        .move_to(output_dir / 'dbsnp.vcf.bgz')
 
 
-def export_chrom_map(contigs: set, template: dict, output_file):
+def _export_chrom_map(contigs: set, template: dict, output_file):
 
     bag = dict()
     for contig in contigs:
