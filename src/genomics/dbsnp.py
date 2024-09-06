@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+from datetime import datetime
 import pgzip
 import shutil
 from pathlib import Path
 from .genome import Genome
-from .variant import Variant, sync
+from .variant import Variant, sync, get_max_region
 import gzip
 from ncls import NCLS
 from pathos.multiprocessing import ProcessPool
@@ -71,14 +71,18 @@ class DbSnp():
         return self._chrom
 
 
-    def query(self, variant, start, end):
-
+    def query(self, variant):
+        start = datetime.now()
         assert self._chrom == variant.chrom
-
         chrom = self._chrom
 
-        intervals = self._db.find_overlap(start -1, end)
+        region = get_max_region(variant, self.chromosome)
+
+        intervals = self._db.find_overlap(region.start -1, region.end)
+
         idxs = [interval[-1] for interval in intervals]
+
+        results = list()
 
         for idx in idxs:
             self._db_fh.seek(self._idxs[idx])
@@ -103,10 +107,15 @@ class DbSnp():
                     'pos_sync': vx.pos,
                     'ref_sync': vx.ref,
                     'alt_sync': vx.alt,
+                    'pos_dbsnp': candidate.pos,
+                    'ref_dbsnp': candidate.ref,
                     'alt_dbsnp': candidate.alt,
                     'alt_dbsnp_sync': vy.alt,
                     'rsid': vy.id,
                 })
+        end = datetime.now()
+
+        print(end - start)
 
         return results
 
@@ -324,7 +333,7 @@ def _load_db(file_):
 
     starts = list()
     ends = list()
-    indices = list()
+    idxs = list()
 
     with gzip.open(file_, 'rt') as fh:
 
@@ -337,12 +346,11 @@ def _load_db(file_):
 
             starts.append(start_bed)
             ends.append(end_bed)
-            indices.append(idx)
+            idxs.append(idx)
 
 
-    intervals = NCLS( starts, ends, indices)
 
-    return intervals
+    return NCLS( starts, ends, idxs)
 
 
 

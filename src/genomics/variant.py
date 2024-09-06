@@ -114,6 +114,7 @@ class Variant():
     def calls(self, calls: str):
         self._calls = calls
 
+
     @property
     def region(self):
         return self._region
@@ -121,6 +122,9 @@ class Variant():
     @property
     def alts(self) -> list:
         return self.alt.split(',')
+
+
+
 
     def is_overlapping(self, other):
         return self.region.is_overlapping(other.region)
@@ -714,3 +718,28 @@ def sync(vx: Variant, vy: Variant, chromosome: str):
 
     return vx, vy
 
+def get_max_region(variant, chromosome):
+    start = None
+    end = None
+
+    assert variant.is_vcf
+
+    for a in variant.alts:
+        v = Variant(chrom = variant.chrom, pos = variant.pos, ref = variant.ref, alt = a)
+        normalized = v.normalize(chromosome)
+        denormalized = v.denormalize(chromosome)
+
+        current_start = normalized.region.start
+        current_end = denormalized.region.end
+
+        if not start:
+            start = current_start
+            end = current_end
+            continue
+
+        if current_start < start:
+            start = current_start
+        if current_end > end:
+            end = current_end
+
+    return GenomicRegion(variant.chrom, start, end)
