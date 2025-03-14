@@ -1,4 +1,4 @@
-from genomics.variant import is_vcf, Variant, _load_allele2idx, _load_idx2allele, transcode_gt, _transcode_gt, normalize, align, denormalize, normalize_chrom_name, sync
+from genomics.variant import is_vcf, Variant, _load_allele2idx, _load_idx2allele, transcode_gt, _transcode_gt, normalize, align, denormalize, normalize_chrom_name, sync, get_max_region
 from genomics.gregion import GenomicRegion
 from genomics.genome import Genome
 from pathlib import Path
@@ -215,6 +215,21 @@ def test_align():
     )
     assert None == v
 
+def test_get_max_region(tmp_path):
+    # 123456789012
+    # TCAGAGAAA
+    #  CAG 
+    #  C
+    #     AGA
+    #     A
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
+    genome = Genome(genome_file)
+    result = Variant('chr5', 2, 'CAG', 'C')
+
+    region = get_max_region(result, genome.chromosome('chr5'))
+
+    assert 2 == region.start 
+    assert 7 == region.end
 
 def test_denormalize(tmp_path):
     genome_file = Path(__file__).parents[0] / 'seq.fa'

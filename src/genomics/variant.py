@@ -119,6 +119,9 @@ class Variant():
     def region(self):
         return self._region
 
+    def max_region(self, chrom):
+        return get_max_region(self, chrom)
+
     @property
     def alts(self) -> list:
         return self.alt.split(',')
@@ -618,8 +621,6 @@ def denormalize(pos, ref, alts, chromosome):
         return denormalize(pos, ref, alts, chromosome)
 
     return { 'pos': pos, 'ref': ref, 'alts': alts }
-
-
     
 
 def normalize(pos, ref, alts, chromosome):
@@ -722,7 +723,7 @@ def get_max_region(variant, chromosome):
     start = None
     end = None
 
-    assert variant.is_vcf
+    assert variant.is_vcf, variant
 
     for a in variant.alts:
         v = Variant(chrom = variant.chrom, pos = variant.pos, ref = variant.ref, alt = a)

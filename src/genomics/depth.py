@@ -5,7 +5,9 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 import logging
 from icecream import ic
-from .utils import df2tsv
+from .utils import df2tsv, is_gzipped
+from .genome import Genome
+from .variant import Variant
 
 import numpy as np
 import polars as pl
@@ -27,29 +29,27 @@ def export_cram_depths(
     prod: bool = False,
 ):
 
-    def jobs(sample2cram, sample2gender, genome_file, atomized_coordinates_file):
+    def jobs(sample2cram, sample2gender, genome_file, target_regions_file):
         for sample, cram_file in sample2cram.items():
             yield {
                 'cram_file': cram_file,
                 'sample': sample,
                 'gender': sample2gender[sample],
-                'atomized_coordinates_file': atomized_coordinates_file,
+                'target_regions_file': target_regions_file,
                 'genome_file': genome_file,
             }
 
     if prod:
         shutil.rmtree(output_dir, ignore_errors=True)
 
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents = True, exist_ok=True)
 
     sample2cram = load_dict(crams_file)
     sample2gender = load_dict(genders_file)
 
-    coordinates = atomize_coordinates(coordinates_file)
-    coordinates.write_csv(output_dir / 'atomized_coordinates_full.tsv', include_header = True, separator = '\t')
-    coordinates\
-            .select(['chrom', 'pos'])\
-            .write_csv(output_dir / 'atomized_coordinates.tsv', include_header = False, separator = '\t')
+    coordinates = load_coordinates(coordinates_file, genome_file)
+    coordinates_file = output_dir / 'coordinates.tsv'
+    coordinates.write_csv(coordinates_file, include_header = True, separator = '\t')
 
     depths_dir = output_dir / 'depths'
     depths_dir.mkdir(exist_ok=True)
@@ -57,12 +57,11 @@ def export_cram_depths(
     with ProcessPool(n_threads) as pool:
         for future in pool.uimap(
                 parse_cram,
-                jobs(sample2cram, sample2gender, genome_file, output_dir / 'atomized_coordinates.tsv'),
+                jobs(sample2cram, sample2gender, genome_file, target_regions_file)
         ):
             sample_name = future[0]
             gender = future[1]
-            depth_df = pl.from_pandas(future[2])
-            # depth_df = future[1]
+            depth_df = future[2]
 
 
             depth_df = coordinates\
@@ -371,11 +370,11 @@ def parse_cram(args):
     genome_file = args['genome_file']
     sample = args['sample']
     gender = args['gender']
-    atomized_coordinates_file = args['atomized_coordinates_file']
+    target_regions_file = args['target_regions_file']
 
     cmd = (''
            f'samtools mpileup'
-           f'    -l {atomized_coordinates_file}'
+           f'    -l {target_regions_file}'
            f'    -f {genome_file}'
            f'    {cram_file}'
            '')
@@ -398,61 +397,74 @@ def parse_cram(args):
         if proc.returncode:
             raise Exception(cmd)
 
-    # coordinates = pd.read_csv(
-    #     coordinates_file,
-    #     header=None,
-    #     names=['chrom', 'pos'],
-    #     sep='\t',
-    #     dtype='str',
-    # )
-    # depths = pd.DataFrame.from_records(bag)
-    # depths = coordinates.merge(depths, on=['chrom', 'pos'], how='left')
 
-    # coordinates = pl.read_csv(
-    #     unique_coordinates_file,
-    #     has_header=False,
-    #     new_columns=['chrom', 'start', 'end'],
-    #     separator='\t',
-    #     infer_schema_length=0,
-    # )
-
-    # depths = pl.from_dicts(bag)
-
-    depths = pd.DataFrame.from_records(bag)
+    depths = pl.from_dicts(bag)
 
     return sample, gender, depths
 
-def atomize_coordinates(input_file):
+
+
+
+def load_coordinates(coordinates_vcf_file, genome_file):
+
+    def create_bed_record(items, genome):
+        chrom = items[0]
+        pos = int(items[1])
+        id_ = items[2]
+        ref = items[3]
+        alt = items[4]
+
+        v = Variant(chrom = chrom, pos = pos, id_ = id_, ref = ref, alt = alt)
+        region = v.max_region(genome.chromosome(chrom))
+
+        bag = list()
+
+        for pos in range(region.start, region.end + 1):
+            bag.append({
+                'chrom': chrom,
+                'pos': pos,
+                'id': id_,
+                'ref': ref,
+                'alt': alt,
+                'start': region.start,
+                'end': region.end,
+            })
+
+        return bag
+
+    genome = Genome(genome_file)
+
+    print('genome loaded')
+
+
+
     bag = list()
-    with open(input_file, 'rt') as fh:
-        header = next(fh)
-        col2idx = {col: idx for idx, col in enumerate(header.strip().split('\t'))}
+    if is_gzipped(coordinates_vcf_file):
+        with gzip.open(coordinates_vcf_file, 'rt') as fh:
+            for line in fh:
+                if line.startswith('##'):
+                    continue
+                break
 
-        for line in fh:
-            record = line.strip().split('\t')
+            for line in fh:
+                items = line.strip('\t').split('\t')
 
-            chrom = record[col2idx['chrom']]
-            start = str2int(record[col2idx['start']])
-            end = str2int(record[col2idx['end']])
+                record = create_bed_record(items, genome)
+                bag.extend(record)
+    else:
+        with coordinates_vcf_file.open('rt') as fh:
+            for line in fh:
+                if line.startswith('##'):
+                    continue
+                break
 
-            for i in range(0, end - start + 1):
-                bag.append({'chrom': chrom, 'pos': start + i, 'start': start, 'end': end})
+            for line in fh:
+                items = line.strip('\t').split('\t')
 
-    return pl.from_dicts(bag)
+                record = create_bed_record(items, genome)
+                bag.extend(record)
 
+    target_regions =  pl.from_dicts(bag)
 
+    return target_regions
 
-def export_unique_coordinates(input_file, output_dir):
-    output_file = output_dir / COORDINATES_FILENAME
-    data = pl.read_csv(input_file, has_header = True, separator = '\t')
-    data = data.with_columns(pl.col('start') -1)
-    data.select([ 'chrom', 'start' , 'end']) \
-        .unique()\
-        .sort(['chrom', 'start', 'end']) \
-        .write_csv(
-            output_file,
-            include_header=False,
-            separator='\t',
-    )
-
-    return output_file

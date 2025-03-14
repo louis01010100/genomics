@@ -1122,8 +1122,6 @@ class Vcf():
         return bag
 
 
-        
-
     def annotate(self, annotations_vcf, columns: set, delete_src=False):
         self.index()
         input_filepath = self.filepath
