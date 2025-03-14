@@ -75,10 +75,10 @@ def test_to_vcf():
     assert v == v.to_vcf(genome)
 
     assert Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = 'CG') \
-            == Variant(chrom = 'chr1', pos = 2, ref = '-', alt = 'G').to_vcf(genome)
+            == Variant(chrom = 'chr1', pos = 2, ref = '-', alt = 'G').to_vcf(genome.chromosome('chr1'))
 
     assert Variant(chrom = 'chr1', pos = 1, ref = 'AC', alt = 'A') \
-            == Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = '-').to_vcf(genome)
+            == Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = '-').to_vcf(genome.chromosome('chr1'))
 
 def test__load_allele2idx():
     assert _load_allele2idx('A', ['C']) == {'A': '0', 'C': '1', '.': '.'}
