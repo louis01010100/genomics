@@ -29,13 +29,13 @@ def export_cram_depths(
     prod: bool = False,
 ):
 
-    def jobs(sample2cram, sample2gender, genome_file, target_regions_file):
+    def jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file):
         for sample, cram_file in sample2cram.items():
             yield {
                 'cram_file': cram_file,
                 'sample': sample,
                 'gender': sample2gender[sample],
-                'target_regions_file': target_regions_file,
+                'coordinates_file': extended_coordinates_file,
                 'genome_file': genome_file,
             }
 
@@ -47,9 +47,18 @@ def export_cram_depths(
     sample2cram = load_dict(crams_file)
     sample2gender = load_dict(genders_file)
 
-    coordinates = load_coordinates(coordinates_file, genome_file)
-    coordinates_file = output_dir / 'coordinates.tsv'
-    coordinates.write_csv(coordinates_file, include_header = True, separator = '\t')
+    extended_coordinates = load_coordinates(coordinates_file, genome_file)
+    extended_coordinates.write_csv(
+            output_dir / 'extended_coordinates_details.tsv', include_header = True, separator = '\t')
+
+    extended_coordinates = pl.read_csv(
+            output_dir / 'extended_coordinates_details.tsv', has_header = True, separator = '\t')
+
+
+    extended_coordinates_file = output_dir / 'extended_coordinates.tsv'
+    extended_coordinates.select(['chrom', 'pos']).unique().sort(['chrom', 'pos']).write_csv(
+            extended_coordinates_file, include_header = False, separator = '\t')
+    
 
     depths_dir = output_dir / 'depths'
     depths_dir.mkdir(exist_ok=True)
@@ -57,31 +66,25 @@ def export_cram_depths(
     with ProcessPool(n_threads) as pool:
         for future in pool.uimap(
                 parse_cram,
-                jobs(sample2cram, sample2gender, genome_file, target_regions_file)
+                jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file)
         ):
             sample_name = future[0]
             gender = future[1]
             depth_df = future[2]
 
-
-            depth_df = coordinates\
-                    .join(depth_df, on = ['chrom', 'pos'], how = 'left')\
+            depth_df = extended_coordinates.join(depth_df, on = ['chrom', 'pos'], how = 'left')\
                     .with_columns(
                             pl.col('depth').fill_null(0), 
-                            pl.lit(sample_name).alias('sample'), 
-                            pl.lit(gender).alias('gender')
                     )
-
 
             output_file = depths_dir / f'{sample_name}.tsv'
             depth_df.write_csv(output_file, include_header=True, separator='\t')
 
-    depths = summarize_depths(depths_dir)
+    depths = summarize_depths(depths_dir, sample2gender)
 
     output_filename = f'{coordinates_file.name.split(".")[0]}-depth.tsv'
 
-    result = pl.read_csv(coordinates_file, has_header = True, separator = '\t')
-    result = result.join(depths, on=['chrom', 'start', 'end'], how = 'left')
+    result = extended_coordinates.join(depths, on=['chrom', 'pos'], how = 'left')
 
     df2tsv(result, output_dir / f'{output_filename}')
 
@@ -141,12 +144,14 @@ def load_dict(file_):
 #         separator='\t',
 #     )
 
-def summarize_depths(depth_dir):
+def summarize_depths(depth_dir, sample2gender):
 
     bag = dict()
     for f in depth_dir.glob('*.tsv'):
 
         with f.open('rt') as fh:
+            sample = f.name[0:-4]
+            gender = sample2gender[sample]
             col2idx = {col: idx for idx, col in enumerate(next(fh).strip().split('\t'))}
 
             n_fields = len(col2idx)
@@ -161,9 +166,8 @@ def summarize_depths(depth_dir):
                 start = str2int(record[col2idx['start']])
                 end = str2int(record[col2idx['end']])
                 depth = str2int(record[col2idx['depth']])
-                gender = record[col2idx['gender']]
 
-                key = (chrom, start, end)
+                key = (chrom, pos)
 
                 if key not in bag:
                     bag[key] = list()
@@ -180,13 +184,12 @@ def summarize_depths(depth_dir):
     for key, depths in bag.items():
         result.append({
             'chrom': key[0],
-            'start': key[1],
-            'end': key[2],
+            'pos': key[1],
             'depth_median': int(np.median(depths)),
             'depth_max': np.max(depths),
             'depth_min': np.min(depths),
-            'n_zero_depth': len([x for x in depths if x == 0]),
-            'n_depths': len(depths),
+            'n_samples_zero_depth': len([x for x in depths if x == 0]),
+            'n_samples': len(depths),
         })
 
     return pl.from_dicts(result)
@@ -370,11 +373,11 @@ def parse_cram(args):
     genome_file = args['genome_file']
     sample = args['sample']
     gender = args['gender']
-    target_regions_file = args['target_regions_file']
+    coordinates_file = args['coordinates_file']
 
     cmd = (''
            f'samtools mpileup'
-           f'    -l {target_regions_file}'
+           f'    -l {coordinates_file}'
            f'    -f {genome_file}'
            f'    {cram_file}'
            '')
@@ -407,7 +410,7 @@ def parse_cram(args):
 
 def load_coordinates(coordinates_vcf_file, genome_file):
 
-    def create_bed_record(items, genome):
+    def create_coordinates(items, genome):
         chrom = items[0]
         pos = int(items[1])
         id_ = items[2]
@@ -424,8 +427,8 @@ def load_coordinates(coordinates_vcf_file, genome_file):
                 'chrom': chrom,
                 'pos': pos,
                 'id': id_,
-                'ref': ref,
-                'alt': alt,
+                'ref_original': ref,
+                'alt_original': alt,
                 'start': region.start,
                 'end': region.end,
             })
@@ -433,10 +436,6 @@ def load_coordinates(coordinates_vcf_file, genome_file):
         return bag
 
     genome = Genome(genome_file)
-
-    print('genome loaded')
-
-
 
     bag = list()
     if is_gzipped(coordinates_vcf_file):
@@ -449,7 +448,7 @@ def load_coordinates(coordinates_vcf_file, genome_file):
             for line in fh:
                 items = line.strip('\t').split('\t')
 
-                record = create_bed_record(items, genome)
+                record = create_coordinates(items, genome)
                 bag.extend(record)
     else:
         with coordinates_vcf_file.open('rt') as fh:
@@ -461,10 +460,8 @@ def load_coordinates(coordinates_vcf_file, genome_file):
             for line in fh:
                 items = line.strip('\t').split('\t')
 
-                record = create_bed_record(items, genome)
+                record = create_coordinates(items, genome)
                 bag.extend(record)
 
-    target_regions =  pl.from_dicts(bag)
-
-    return target_regions
+    return  pl.from_dicts(bag).sort(['chrom', 'pos'])
 
