@@ -1,4 +1,6 @@
 import gzip
+import logging
+import humanfriendly
 import pickle
 import shutil
 from pathlib import Path
@@ -63,6 +65,73 @@ class _AllelePairs():
 
         return f'[{output}]'
 
+def init_logging(log_file: Path):
+
+    h0 = logging.StreamHandler(sys.stderr)
+    h0.setLevel(logging.INFO)
+
+    h1 = logging.FileHandler(log_file, 'w')
+    h1.setLevel(logging.DEBUG)
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        handlers=[h0, h1],
+        format='[%(levelname)s] %(asctime)s\t%(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+    )
+
+def log_info(message: str):
+    logging.info('')
+    logging.info(message)
+
+def log_start(
+    banner: str,
+    info: dict,
+):
+    logging.info('#' * config.BANNER_WIDTH)
+    logging.info(banner.center(config.BANNER_WIDTH))
+    logging.info('#' * config.BANNER_WIDTH)
+
+    for k, v in info.items():
+        logging.info(f"{k}: {v}")
+
+
+def log_stop(banner: str, start_time, stop_time):
+    logging.info('')
+    logging.info('#' * config.BANNER_WIDTH)
+    logging.info(banner.center(config.BANNER_WIDTH))
+    logging.info('#' * config.BANNER_WIDTH)
+    logging.info(f"start time: {start_time}")
+    logging.info(f"stop time: {stop_time}")
+    logging.info(
+        f"duration: {humanfriendly.format_timespan(stop_time - start_time)}")
+
+
+def load_list(file_, dedup = True):
+
+    samples = pl.read_csv(
+            file_,
+            has_header=True,
+            separator='\t',
+        )['sample']
+
+    if dedup:
+        samples = list(set(samples))
+    else:
+        samples = list(samples)
+
+    return samples
+
+def load_dict(file_):
+    bag = dict()
+    with file_.open('rt') as fh:
+        next(fh)
+
+        for line in fh:
+            items = line.strip().split('\t')
+            bag[items[0]] = items[1]
+
+    return bag
 
 def is_gzipped(filepath):
     with open(filepath, 'rb') as fd:

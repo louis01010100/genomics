@@ -8,6 +8,7 @@ from .gregion import GenomicRegion
 
 NUCLEOTIDES_PATTERN = re.compile(r'^[ACGTN]+$')
 
+
 class Variant():
 
     # 1-based
@@ -119,15 +120,33 @@ class Variant():
     def region(self):
         return self._region
 
-    def max_region(self, chrom):
-        return get_max_region(self, chrom)
+    def expand(self, chrom):
+        max_region = get_max_region(self, chrom)
+        new_pos = max_region.start
+
+        ref_prefix = chrom[max_region.start - 1: self.pos - 1]
+        ref_suffix = chrom[self.pos + len(self.ref) - 1:max_region.end]
+
+        new_ref = ref_prefix + self.ref + ref_suffix
+        new_alt = ','.join([ref_prefix + alt + ref_suffix for alt in self.alts])
+
+        return Variant(
+            self.chrom,
+            new_pos,
+            new_ref,
+            new_alt,
+            self.id,
+            self.qual,
+            self.filter,
+            self.info,
+            self.format,
+            self.calls,
+        )
+
 
     @property
     def alts(self) -> list:
         return self.alt.split(',')
-
-
-
 
     def is_overlapping(self, other):
         return self.region.is_overlapping(other.region)
@@ -355,6 +374,7 @@ class Variant():
 
     def __repr__(self):
         return self.__str__()
+
 
 
 def get_region(chrom, pos, ref, alt):
@@ -709,15 +729,16 @@ def sync(vx: Variant, vy: Variant, chromosome: str):
                 alt = ','.join([prefix + alt + suffix for alt in var.alts]),
                 id_ = var.id,
             )
+    vx_expanded = vx.expand(chromosome)
+    vy_expanded = vy.expand(chromosome)
 
-    region = vx.region.merge(vy.region)
+    region = vx_expanded.region.merge(vy_expanded.region)
     seq = chromosome[region.start -1:region.end]
 
-    vx = _sync(vx, seq, region)
-    vy = _sync(vy, seq, region)
+    vx_synced = _sync(vx_expanded, seq, region)
+    vy_synced = _sync(vy_expanded, seq, region)
 
-
-    return vx, vy
+    return vx_synced, vy_synced
 
 def get_max_region(variant, chromosome):
     start = None

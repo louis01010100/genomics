@@ -5,7 +5,7 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 import logging
 from icecream import ic
-from .utils import df2tsv, is_gzipped
+from .utils import df2tsv, is_gzipped, load_dict
 from .genome import Genome
 from .variant import Variant
 
@@ -14,6 +14,7 @@ import polars as pl
 from pathos.multiprocessing import ProcessPool
 from .vcf import Vcf
 import multiprocess.context as ctx
+
 
 ctx._force_start_method('spawn')
 
@@ -88,16 +89,6 @@ def export_cram_depths(
 
     df2tsv(result, output_dir / f'{output_filename}')
 
-def load_dict(file_):
-    bag = dict()
-    with file_.open('rt') as fh:
-        next(fh)
-
-        for line in fh:
-            items = line.strip().split('\t')
-            bag[items[0]] = items[1]
-
-    return bag
 
 # def export_gvcf_depths(
 #     gvcf_files: list[Path],

@@ -162,58 +162,6 @@ def test_transcode_gt():
 
     assert calls == '0/0\t0/2\t2|2\t0\t2\t.'
 
-def test_align():
-    genome_file = Path(__file__).parents[0] / 'seq.fa'
-    genome = Genome(genome_file)
-
-    v = align(
-        chrom = 'chr1', 
-        pos = 4, ref = 'TA', alts = ['T'], 
-        ref_pos = 4, ref_ref = 'TA', ref_alts = ['T'], 
-        genome = genome
-    )
-
-    assert 'chr1' == v['chrom']
-    assert 4 == v['pos']
-    assert 'TA' == v['ref']
-    assert ['T'] == v['alts']
-
-    v = align(
-        chrom = 'chr1', 
-        pos = 4, ref = 'TA', alts = ['T','TAA'], 
-        ref_pos = 6, ref_ref = 'AA', ref_alts = ['A','AAA'], 
-        genome = genome
-    )
-
-    assert 'chr1' == v['chrom']
-    assert 6 == v['pos']
-    assert 'AA' == v['ref']
-    assert ['A','AAA'] == v['alts']
-
-    v = align(
-        chrom = 'chr2', 
-        pos = 12, 
-        ref = 'T', 
-        alts = ['A'], 
-        ref_pos = 10, 
-        ref_ref = 'TTTCA', 
-        ref_alts = ['GAATGATC','TTACA','TTTA','TTTTA'],
-        genome = genome,
-    )
-
-    assert 'chr2' == v['chrom']
-    assert 10 == v['pos']
-    assert 'TTTCA' == v['ref']
-    assert ['TTACA']  == v['alts']
-
-
-    v = align(
-        chrom = 'chr1', 
-        pos = 4, ref = 'TA', alts = 'AG', 
-        ref_pos = 6, ref_ref = 'AA', ref_alts = 'A,AAA', 
-        genome = genome
-    )
-    assert None == v
 
 def test_get_max_region(tmp_path):
     # 123456789012
@@ -363,33 +311,6 @@ def test_normalize(tmp_path):
     assert 'TA' == result.ref
     assert 'TAA,T' == result.alt
 
-def test_variant_align():
-
-    genome_file = Path(__file__).parents[0] / 'seq.fa'
-    genome = Genome(genome_file)
-
-    ref_variant = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'A,AAA')
-    v = Variant(chrom = 'chr1', pos = 4, ref = 'TA', alt = 'TAA', format_ = 'GT', calls = '0/0\t0/1\t1/1')
-    v1 = v.align(ref_variant, genome)
-
-    assert 'chr1' == v1.chrom 
-    assert 6 == v1.pos 
-    assert 'AA' == v1.ref 
-    assert 'A,AAA' == v1.alt
-    assert '0/0\t0/2\t2/2' == v1.calls
-
-# chr13   32394895        AX-599399085    TTTCA   GAATGATC,TTACA,TTTA,TTTTA
-    ref_variant = Variant(chrom = 'chr2', pos = 10, ref = 'TTTCA', alt = 'GAATGATC,TTACA,TTTA,TTTTA')
-
-    v = Variant(chrom = 'chr2', pos = 12, ref = 'T', alt = 'A', format_ = 'GT', calls = '1/1\t0/1\t0/0')
-
-    v1 = v.align(ref_variant, genome)
-
-    assert 'chr2' == v1.chrom 
-    assert 10 == v1.pos 
-    assert 'TTTCA' == v1.ref 
-    assert 'GAATGATC,TTACA,TTTA,TTTTA' == v1.alt
-    assert '2/2\t0/2\t0/0' == v1.calls
 
 def test_normalize_chrom_name():
     assert 'chr1' == normalize_chrom_name(1)
@@ -397,6 +318,37 @@ def test_normalize_chrom_name():
     assert 'chrY' == normalize_chrom_name('Y')
     assert 'chrM' == normalize_chrom_name('MT')
     assert 'chr1' == normalize_chrom_name('chr1')
+
+def test_expand():
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
+    genome = Genome(genome_file)
+    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'C').expand(genome.chromosome('chr2'))
+    assert 'chr2' == v.chrom
+    assert 3 == v.pos
+    assert 'A' == v.ref
+    assert 'C' == v.alt
+
+    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'CC').expand(genome.chromosome('chr2'))
+    assert 'chr2' == v.chrom
+    assert 3 == v.pos
+    assert 'A' == v.ref
+    assert 'CC' == v.alt
+
+    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'AA').expand(genome.chromosome('chr2'))
+    assert 'chr2' == v.chrom
+    assert 2 == v.pos
+    assert 'GAAAA' == v.ref
+    assert 'GAAAAA' == v.alt
+
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
+    genome = Genome(genome_file)
+    v = Variant(chrom = 'chr2', pos = 4, ref = 'A', alt = 'AA,AAC')
+
+    v = v.expand(genome.chromosome('chr2'))
+    assert 'chr2' == v.chrom
+    assert 2 == v.pos
+    assert 'GAAAA' == v.ref
+    assert 'GAAAAA,GAAACAA' == v.alt
 
 
 def test_sync():
@@ -418,6 +370,7 @@ def test_sync():
     assert 'GT' == nvx.ref == nvy.ref
     assert 'CC' == nvx.alt
     assert 'TT' == nvy.alt
+
 
     vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
     vy = Variant(chrom = 'chr1', pos = 3, ref = 'GT', alt = 'AA')
@@ -452,10 +405,11 @@ def test_sync():
     assert 'CA' == nvx.alt
     assert 'C' == nvy.alt
 
-    vx = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'AA,AAC')
-    vy = Variant(chrom = 'chr2', pos = 2, ref = 'A', alt = 'C')
+    vx = Variant(chrom = 'chr2', pos = 4, ref = 'A', alt = 'AA,AAC')
+    vy = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'C')
+
     nvx, nvy = sync(vx,vy, genome.chromosome('chr2'))
     assert 2 == nvx.pos == nvy.pos
-    assert 'AA' == nvx.ref == nvy.ref
-    assert 'AAA,AAAC' == nvx.alt
-    assert 'CA' == nvy.alt
+    assert 'GAAAA' == nvx.ref == nvy.ref
+    assert 'GAAAAA,GAAACAA' == nvx.alt
+    assert 'GCAAA' == nvy.alt
