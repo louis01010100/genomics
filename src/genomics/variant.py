@@ -543,10 +543,11 @@ def sync(vx: Variant, vy: Variant, chromosome: str):
     return vx_synced, vy_synced
 
 def get_max_region(variant, chromosome):
-    start = None
-    end = None
 
     assert variant.is_vcf, variant
+
+    start = variant.region.start
+    end = variant.region.end
 
     for a in variant.alts:
         v = Variant(chrom = variant.chrom, pos = variant.pos, ref = variant.ref, alt = a)
@@ -555,11 +556,6 @@ def get_max_region(variant, chromosome):
 
         current_start = normalized.region.start
         current_end = denormalized.region.end
-
-        if not start:
-            start = current_start
-            end = current_end
-            continue
 
         if current_start < start:
             start = current_start

@@ -3,9 +3,10 @@ import shutil
 import pandas as pd
 from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
+from collections import OrderedDict
 import logging
 from icecream import ic
-from .utils import df2tsv, is_gzip, load_dict
+from .utils import df2tsv, is_gzip, load_dict, init_logging, log_start, log_stop, log_info
 from .genome import Genome
 from .variant import Variant
 
@@ -23,7 +24,6 @@ COORDINATES_FILENAME = 'coordinates.tsv'
 def export_cram_depths(
     coordinates_file: Path,
     crams_file: Path,
-    vcfs_file: Path,
     genders_file: Path,
     genome_file: Path,
     output_dir: Path,
@@ -31,20 +31,26 @@ def export_cram_depths(
     prod: bool = False,
 ):
 
-    def jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file):
-        for sample, cram_file in sample2cram.items():
-            yield {
-                'cram_file': cram_file,
-                'sample': sample,
-                'gender': sample2gender[sample],
-                'coordinates_file': extended_coordinates_file,
-                'genome_file': genome_file,
-            }
 
     if prod:
         shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(parents = True, exist_ok=True)
+
+    log_file = output_dir / 'depth.log'
+
+    init_logging(log_file)
+
+    info = OrderedDict()
+
+    info['coordinates-file'] = coordinates_file
+    info['crams-file'] = crams_file
+    info['genders-file'] = genders_file
+    info['genome-file'] = genome_file
+    info['ouput_dir'] = output_dir
+    info['n-threads'] = n_threads
+
+    log_start('CRAM-based Read Depth Export', info)
 
     sample2cram = load_dict(crams_file)
     sample2gender = load_dict(genders_file)
@@ -60,6 +66,8 @@ def export_cram_depths(
     extended_coordinates_file = output_dir / 'extended_coordinates.tsv'
     extended_coordinates.select(['chrom', 'pos']).unique().sort(['chrom', 'pos']).write_csv(
             extended_coordinates_file, include_header = False, separator = '\t')
+
+    return
     
 
     depths_dir = output_dir / 'depths'
@@ -68,7 +76,7 @@ def export_cram_depths(
     with ProcessPool(n_threads) as pool:
         for future in pool.uimap(
                 parse_cram,
-                jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file)
+                parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file)
         ):
             sample_name = future[0]
             gender = future[1]
@@ -411,15 +419,17 @@ def load_coordinates(coordinates_vcf_file, genome_file):
         alt = items[4]
 
         v = Variant(chrom = chrom, pos = pos, id_ = id_, ref = ref, alt = alt)
-        region = v.max_region(genome.chromosome(chrom))
+        region = v.expand(genome.chromosome(chrom)).region
 
         bag = list()
 
-        for pos in range(region.start, region.end + 1):
+        for _pos in range(region.start, region.end + 1):
+
             bag.append({
                 'chrom': chrom,
-                'pos': pos,
+                'pos': _pos,
                 'id': id_,
+                'pos_original': pos,
                 'ref_original': ref,
                 'alt_original': alt,
                 'start': region.start,
@@ -439,7 +449,7 @@ def load_coordinates(coordinates_vcf_file, genome_file):
                 break
 
             for line in fh:
-                items = line.strip('\t').split('\t')
+                items = line.strip('\n').split('\t')
 
                 record = create_coordinates(items, genome)
                 bag.extend(record)
@@ -458,3 +468,12 @@ def load_coordinates(coordinates_vcf_file, genome_file):
 
     return  pl.from_dicts(bag).sort(['chrom', 'pos'])
 
+def parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file):
+    for sample, cram_file in sample2cram.items():
+        yield {
+            'cram_file': cram_file,
+            'sample': sample,
+            'gender': sample2gender[sample],
+            'coordinates_file': extended_coordinates_file,
+            'genome_file': genome_file,
+        }

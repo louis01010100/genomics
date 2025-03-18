@@ -15,7 +15,6 @@ from .variant import Variant, sync
 from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, list_contigs, standardize
 from .gregion import GenomicRegion
 from .genome import Genome
-from .coordinate import create_coordinates
 
 COORDINATES_FILENAME = 'coordinates.tsv'
 
@@ -326,7 +325,7 @@ def fetch_calls(job):
         for candidate in candidates:
             coordinate_synced, candidate_synced = sync(coordinate, candidate, chromosome)
 
-            n_match_alts_current = len(coordinate_synced.alts & candidate_synced.alts)
+            n_match_alts_current = len(set(coordinate_synced.alts) & set(candidate_synced.alts))
 
             if n_match_alts is None:
                 n_match_alts = n_match_alts_current

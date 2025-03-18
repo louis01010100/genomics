@@ -120,6 +120,19 @@ def test_get_max_region(tmp_path):
     assert 2 == region.start 
     assert 7 == region.end
 
+    # 12345678901
+    # CCCAAGACGTT
+    #   CAAGA
+    #   CGT
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
+    genome = Genome(genome_file)
+    result = Variant('chr6', 3, 'CAAGA', 'CGT')
+
+    region = get_max_region(result, genome.chromosome('chr5'))
+
+    assert 3 == region.start 
+    assert 7 == region.end
+
 def test_denormalize(tmp_path):
     genome_file = Path(__file__).parents[0] / 'seq.fa'
     genome = Genome(genome_file)
