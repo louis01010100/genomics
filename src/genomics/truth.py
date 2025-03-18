@@ -354,6 +354,11 @@ def fill_missing_calls(
         chrm_missing_as_homref: bool,    #chrM always has high coverage
 ):
 
+    note = data['note']
+
+    if note == 'DONE':
+        return data
+
     chrom = data['chrom']
     pos = data['pos']
     ref = data['ref']
@@ -361,27 +366,14 @@ def fill_missing_calls(
     pos_synced = data['pos_synced']
     ref_synced = data['ref_synced']
 
-    note = data['note']
-
     region = GenomicRegion(chrom, pos, pos + len(ref) - 1)
     region_synced = GenomicRegion(chrom, pos_synced, pos_synced + len(ref_synced) - 1)
 
-    if note == 'DONE':
-        pass
-    elif note == 'COMPLEX':
-        data['variant'].format = 'GT'
-        data['variant_synced'].format = 'GT'
-        data['variant'].calls = create_dummy_calls(chrom,  region, ref = False, x_pars = X_PARS)
-        data['variant_synced'].calls = create_dummy_calls(chrom, region_synced, ref = False, x_pars = X_PARS)
+
+    if note == 'COMPLEX':
+        ref = False
 
     elif note == 'MISSING':
-
-        data['variant'].format = 'GT'
-        data['variant_synced'].format = 'GT'
-
-        chrom = data['chrom']
-        start = data['pos_synced']
-        end = data['pos_synced'] + len(data['ref_synced']) - 1
 
         keys = [(chrom, pos) for pos in range(start, end)]
 
@@ -407,6 +399,8 @@ def fill_missing_calls(
     else:
         raise Exception(note)
 
+    data['variant'].format = 'GT'
+    data['variant_synced'].format = 'GT'
     data['variant'].calls = create_dummy_calls(chrom,  region, ref = ref, genders = genders, x_pars = X_PARS)
     data['variant_synced'].calls = create_dummy_calls(chrom, region_synced, ref = ref, genders = genders, x_pars = X_PARS)
 

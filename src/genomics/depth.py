@@ -55,34 +55,29 @@ def export_cram_depths(
     sample2cram = load_dict(crams_file)
     sample2gender = load_dict(genders_file)
 
-    extended_coordinates = load_coordinates(coordinates_file, genome_file)
-    extended_coordinates.write_csv(
-            output_dir / 'extended_coordinates_details.tsv', include_header = True, separator = '\t')
+    log_info('Expand Coordinates')
+    coordinates_expanded = expand_coordinates(coordinates_file, genome_file)
+    coordinates_expanded = pl.read_csv(
+            output_dir / 'coordinates_expanded_details.tsv', has_header = True, separator = '\t')
+    coordinates_expanded_file = output_dir / 'coordinates_expanded.tsv'
+    coordinates_expanded.select(['chrom', 'pos']).unique().sort(['chrom', 'pos']).write_csv(
+            coordinates_expanded_file, include_header = False, separator = '\t')
 
-    extended_coordinates = pl.read_csv(
-            output_dir / 'extended_coordinates_details.tsv', has_header = True, separator = '\t')
-
-
-    extended_coordinates_file = output_dir / 'extended_coordinates.tsv'
-    extended_coordinates.select(['chrom', 'pos']).unique().sort(['chrom', 'pos']).write_csv(
-            extended_coordinates_file, include_header = False, separator = '\t')
-
-    return
-    
 
     depths_dir = output_dir / 'depths'
     depths_dir.mkdir(exist_ok=True)
 
+    log_info('Parse CRAM')
     with ProcessPool(n_threads) as pool:
         for future in pool.uimap(
                 parse_cram,
-                parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file)
+                parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, coordinates_expanded_file)
         ):
             sample_name = future[0]
             gender = future[1]
             depth_df = future[2]
 
-            depth_df = extended_coordinates.join(depth_df, on = ['chrom', 'pos'], how = 'left')\
+            depth_df = coordinates_expanded.join(depth_df, on = ['chrom', 'pos'], how = 'left')\
                     .with_columns(
                             pl.col('depth').fill_null(0), 
                     )
@@ -90,11 +85,12 @@ def export_cram_depths(
             output_file = depths_dir / f'{sample_name}.tsv'
             depth_df.write_csv(output_file, include_header=True, separator='\t')
 
+    log_info('Summarize Depths')
     depths = summarize_depths(depths_dir, sample2gender)
 
     output_filename = f'{coordinates_file.name.split(".")[0]}-depth.tsv'
 
-    result = extended_coordinates.join(depths, on=['chrom', 'pos'], how = 'left')
+    result = coordinates_expanded.join(depths, on=['chrom', 'pos'], how = 'left')
 
     df2tsv(result, output_dir / f'{output_filename}')
 
@@ -409,7 +405,7 @@ def parse_cram(args):
 
 
 
-def load_coordinates(coordinates_vcf_file, genome_file):
+def expand_coordinates(coordinates_vcf_file, genome_file):
 
     def create_coordinates(items, genome):
         chrom = items[0]
@@ -468,12 +464,12 @@ def load_coordinates(coordinates_vcf_file, genome_file):
 
     return  pl.from_dicts(bag).sort(['chrom', 'pos'])
 
-def parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, extended_coordinates_file):
+def parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, coordinates_expanded_file):
     for sample, cram_file in sample2cram.items():
         yield {
             'cram_file': cram_file,
             'sample': sample,
             'gender': sample2gender[sample],
-            'coordinates_file': extended_coordinates_file,
+            'coordinates_file': coordinates_expanded_file,
             'genome_file': genome_file,
         }
