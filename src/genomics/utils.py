@@ -7,11 +7,13 @@ from pathlib import Path
 import polars as pl
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
+import sys
 
 import pandas as pd
 from icecream import ic
 
 COMPLEMENT_BASES = str.maketrans("ACGT", "TGCA")
+BANNER_WIDTH = 50
 
 
 class _AllelePairs():
@@ -88,9 +90,9 @@ def log_start(
     banner: str,
     info: dict,
 ):
-    logging.info('#' * config.BANNER_WIDTH)
-    logging.info(banner.center(config.BANNER_WIDTH))
-    logging.info('#' * config.BANNER_WIDTH)
+    logging.info('#' * BANNER_WIDTH)
+    logging.info(banner.center(BANNER_WIDTH))
+    logging.info('#' * BANNER_WIDTH)
 
     for k, v in info.items():
         logging.info(f"{k}: {v}")
@@ -98,9 +100,9 @@ def log_start(
 
 def log_stop(banner: str, start_time, stop_time):
     logging.info('')
-    logging.info('#' * config.BANNER_WIDTH)
-    logging.info(banner.center(config.BANNER_WIDTH))
-    logging.info('#' * config.BANNER_WIDTH)
+    logging.info('#' * BANNER_WIDTH)
+    logging.info(banner.center(BANNER_WIDTH))
+    logging.info('#' * BANNER_WIDTH)
     logging.info(f"start time: {start_time}")
     logging.info(f"stop time: {stop_time}")
     logging.info(
@@ -133,7 +135,7 @@ def load_dict(file_):
 
     return bag
 
-def is_gzipped(filepath):
+def is_gzip(filepath):
     with open(filepath, 'rb') as fd:
         magic_number = fd.read(2)
         if magic_number == b'\x1f\x8b':
@@ -145,7 +147,7 @@ def vcf2dict(*vcf_files) -> dict:
     result = None
 
     for vcf_file in vcf_files:
-        if is_gzipped(vcf_file):
+        if is_gzip(vcf_file):
             with gzip.open(vcf_file, 'rt') as fh:
                 output = _vcf2dict(fh)
         else:

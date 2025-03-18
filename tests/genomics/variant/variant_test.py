@@ -1,4 +1,4 @@
-from genomics.variant import is_vcf, Variant, _load_allele2idx, _load_idx2allele, transcode_gt, _transcode_gt, normalize, align, denormalize, normalize_chrom_name, sync, get_max_region
+from genomics.variant import is_vcf, Variant, normalize, denormalize, normalize_chrom_name, sync, get_max_region
 from genomics.gregion import GenomicRegion
 from genomics.genome import Genome
 from pathlib import Path
@@ -80,44 +80,6 @@ def test_to_vcf():
     assert Variant(chrom = 'chr1', pos = 1, ref = 'AC', alt = 'A') \
             == Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = '-').to_vcf(genome.chromosome('chr1'))
 
-def test__load_allele2idx():
-    assert _load_allele2idx('A', ['C']) == {'A': '0', 'C': '1', '.': '.'}
-    assert _load_allele2idx('C', ['CT','G']) == {
-        'C': '0',
-        'CT': '1',
-        'G': '2',
-        '.': '.'
-    }
-
-
-def test__load_idx2allele():
-    assert _load_idx2allele('A', ['C']) == {'0': 'A', '1': 'C', '.': '.'}
-    assert _load_idx2allele('C', ['CT','G']) == {
-        '0': 'C',
-        '1': 'CT',
-        '2': 'G',
-        '.': '.'
-    }
-
-
-def test__transcode_gt():
-
-    idx2allele = {'0': 'A', '1': 'G', '.': '.'}
-    allele2idx = {'A': '0', 'C': '1', 'G': '2', '.': '.'}
-    allele2allele = {'A': 'A', 'G': 'G', '.': '.'}
-
-    assert _transcode_gt('0/0', idx2allele, allele2allele,
-                         allele2idx) == '0/0'
-    assert _transcode_gt('0/1', idx2allele, allele2allele,
-                         allele2idx) == '0/2'
-    assert _transcode_gt('.', idx2allele, allele2allele, allele2idx) == '.'
-    assert _transcode_gt('0', idx2allele, allele2allele, allele2idx) == '0'
-    assert _transcode_gt('./0', idx2allele, allele2allele,
-                         allele2idx) == '0/.'
-    assert _transcode_gt('0/.', idx2allele, allele2allele,
-                         allele2idx) == '0/.'
-
-
 def test___str__():
 
     expected = '\t'.join([
@@ -140,27 +102,6 @@ def test___str__():
 
     assert expected == actual
 
-
-def test_transcode_gt():
-
-    calls = transcode_gt(
-        idx2allele={
-            '0': 'C',
-            '1': 'G'
-        },
-        allele2idx={
-            'AC': '0',
-            'A': '1',
-            'AG': '2',
-        },
-        allele2allele={
-            'C': 'AC',
-            'G': 'AG'
-        },
-        calls='\t'.join(['0/0', '0/1', '1|1', '0', '1', '.']),
-    )
-
-    assert calls == '0/0\t0/2\t2|2\t0\t2\t.'
 
 
 def test_get_max_region(tmp_path):

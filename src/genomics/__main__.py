@@ -44,13 +44,6 @@ def main():
             input_file=Path(args.input_file),
             output_file=Path(args.output_file),
         )
-    elif args.subcommand == 'coordinate':
-        coordinate.export_coordinates(
-            input_vcf_file=Path(args.input_vcf_file),
-            genome_file=Path(args.genome_file),
-            genome_index_file=Path(args.genome_index_file),
-            output_dir=Path(args.output_dir),
-        )
     elif args.subcommand == 'cram-depth':
         depth.export_cram_depths(
             crams_file=Path(args.crams_file),
@@ -71,16 +64,16 @@ def main():
     #     )
     elif args.subcommand == 'snv-truth':
         truth.export_snv_truth(
+            coordinates_file=Path(args.coordinates_file),
             vcf_files=_load_files(args.vcfs_file, args.vcf_files),
+            depths_file=_new_path(args.depths_file),
             samples_file=_new_path(args.samples_file),
             genders_file=_new_path(args.genders_file),
-            coordinates_file=Path(args.coordinates_file),
-            depths_file=_new_path(args.depths_file),
             genome_file=Path(args.genome_file),
-            output_dir=Path(args.output_dir),
             min_depth=args.min_depth,
             chrm_missing_as_homref=args.chrm_missing_as_homref,
             merge_vcf=args.merge_vcf,
+            output_dir=Path(args.output_dir),
             n_threads=args.n_threads,
         )
     else:
@@ -106,7 +99,6 @@ def config_parsers():
     _config_dbsnp_normalize_parser(parsers.add_parser('dbsnp-normalize'))
     _config_dbsnp_createdb_parser(parsers.add_parser('dbsnp-createdb'))
     _config_acmg_parser(parsers.add_parser('acmg'))
-    _config_coordinate_parser(parsers.add_parser('coordinate'))
     _config_cram_depth_parser(parsers.add_parser('cram-depth'))
     _config_gvcf_depth_parser(parsers.add_parser('gvcf-depth'))
     _config_snv_truth_parser(parsers.add_parser('snv-truth'))
@@ -141,13 +133,6 @@ def _config_acmg_parser(parser):
     parser.add_argument('--output-file', required=True)
 
 
-def _config_coordinate_parser(parser):
-    parser.add_argument('--input-vcf-file', required=True)
-    parser.add_argument('--genome-file', required=True)
-    parser.add_argument('--genome-index-file', required=True)
-    parser.add_argument('--output-dir', required=True)
-
-
 def _config_cram_depth_parser(parser):
     parser.add_argument('--crams-file', required = True)
     parser.add_argument('--genders-file', required = True)
@@ -165,21 +150,22 @@ def _config_gvcf_depth_parser(parser):
     parser.add_argument('gvcf_files', nargs='*')
 
 
-def config_snv_truth_parser(parser):
+def _config_snv_truth_parser(parser):
+    parser.add_argument('--coordinates-file', required=True)
     parser.add_argument('--vcfs-file', required=False)
     parser.add_argument('--samples-file', required=False)
     parser.add_argument('--genders-file', required=False)
-    parser.add_argument('--coordinates-file', required=True)
     parser.add_argument('--depths-file', required=False)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--min-depth', type=int, default=2)
-    parser.add_argument('--n-threads', type=int, default=1)
     parser.add_argument('--chrm-missing-as-homref',
                         action='store_true',
                         default=False)
     parser.add_argument('--merge-vcf', action='store_true', default=False)
+    parser.add_argument('--n-threads', type=int, default=1)
     parser.add_argument('vcf_files', nargs='*')
+
 
 def _new_path(file_):
     if file_:
@@ -194,7 +180,7 @@ def _load_files(manifest_file, files):
         with open(manifest_file, 'rt') as fh:
             next(fh)
             for line in fh:
-                files.add(Path(line.strip())
+                files.add(Path(line.strip()))
 
     files = list(files)
 

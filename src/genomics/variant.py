@@ -148,8 +148,8 @@ class Variant():
     def alts(self) -> list:
         return self.alt.split(',')
 
-    def is_overlapping(self, other):
-        return self.region.is_overlapping(other.region)
+    def overlaps(self, other):
+        return self.region.overlaps(other.region)
 
     def fix_ref(self, genome: Genome):
         g_ref = genome.slice(self.chrom, self.pos - 1,
@@ -520,7 +520,17 @@ def sync(vx: Variant, vy: Variant, chromosome: str):
                 ref = prefix + var.ref + suffix,
                 alt = ','.join([prefix + alt + suffix for alt in var.alts]),
                 id_ = var.id,
+                qual = var.qual,
+                filter_ = var.filter,
+                info = var.info,
+                format_ = var.format,
+                calls = var.calls,
             )
+
+    if vx.chrom != vy.chrom:
+        raise Exception(f'{vx.chrom} != {vy.chrom}; {vx.id}, {vy.id}')
+
+
     vx_expanded = vx.expand(chromosome)
     vy_expanded = vy.expand(chromosome)
 

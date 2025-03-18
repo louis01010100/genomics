@@ -5,7 +5,7 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 import logging
 from icecream import ic
-from .utils import df2tsv, is_gzipped, load_dict
+from .utils import df2tsv, is_gzip, load_dict
 from .genome import Genome
 from .variant import Variant
 
@@ -21,10 +21,11 @@ ctx._force_start_method('spawn')
 COORDINATES_FILENAME = 'coordinates.tsv'
 
 def export_cram_depths(
+    coordinates_file: Path,
     crams_file: Path,
+    vcfs_file: Path,
     genders_file: Path,
     genome_file: Path,
-    coordinates_file: Path,
     output_dir: Path,
     n_threads: int,
     prod: bool = False,
@@ -135,6 +136,7 @@ def export_cram_depths(
 #         separator='\t',
 #     )
 
+# male X and female Y are excluded from the summary
 def summarize_depths(depth_dir, sample2gender):
 
     bag = dict()
@@ -429,7 +431,7 @@ def load_coordinates(coordinates_vcf_file, genome_file):
     genome = Genome(genome_file)
 
     bag = list()
-    if is_gzipped(coordinates_vcf_file):
+    if is_gzip(coordinates_vcf_file):
         with gzip.open(coordinates_vcf_file, 'rt') as fh:
             for line in fh:
                 if line.startswith('##'):

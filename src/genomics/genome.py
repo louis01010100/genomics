@@ -1,7 +1,7 @@
 from .gregion import GenomicRegion
 import re
 from pathlib import Path
-from .utils import is_gzipped
+from .utils import is_gzip
 import gzip
 
 # HG38_X_PAR_1 = GenomicRegion('chrX', 10000, 2781479)
@@ -19,7 +19,7 @@ class Genome():
 
     def __init__(self, genome_file):
 
-        if is_gzipped(genome_file):
+        if is_gzip(genome_file):
             with gzip.open(genome_file, 'rt')  as fh:
                 self._chroms = load_chroms(fh)
         else:

@@ -4,19 +4,23 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 from collections import OrderedDict
 from icecream import ic
+from .genome import Genome
 
 import numpy as np
 import polars as pl
 from pathos.multiprocessing import ProcessPool
 
-from .utils import load, save, create_col2idx, is_gzip, load_dict, load_list, log_start, log_stop, log_info
+from .utils import is_gzip, load_dict, load_list, init_logging, log_start, log_stop, log_info
 from .variant import Variant, sync
 from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, list_contigs, standardize
 from .gregion import GenomicRegion
+from .genome import Genome
+from .coordinate import create_coordinates
 
 COORDINATES_FILENAME = 'coordinates.tsv'
 
-VCF_DIRNAME = 'vcf'
+SUBSET_SAMPLES_DIR = 'samples'
+SUBSET_SNVS_DIR = 'snv'
 
 X_PAR_1 = GenomicRegion('chrX',10000, 2781479)
 X_PAR_2 = GenomicRegion('chrX', 155701382, 156030895)
@@ -29,9 +33,9 @@ X_PARS = [X_PAR_1, X_PAR_2]
 def export_snv_truth(
     coordinates_file: Path,
     vcf_files: list,
+    depths_file: Path,
     samples_file: Path,
     genders_file: Path,
-    depths_file: Path,
     genome_file: Path,
     output_dir: Path,
     n_threads: int = 1,
@@ -41,17 +45,18 @@ def export_snv_truth(
     prod: bool = True,
 ):
 
-    if prod:
-        shutil.rmtree(output_dir, ignore_errors=True)
+    # if prod:
+    #     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(exist_ok=True)
 
     log_file = output_dir / 'snv_truth.log'
+    init_logging(log_file)
 
     info = OrderedDict()
-    info['coordinates-file'] = coordinates_file
+    info['coordiantes-file'] = coordinates_file
+    info['n_vcf_files'] = len(vcf_files)
     info['samples-file'] = samples_file
     info['genders-file'] = genders_file
-    info['depths-file'] = depths_file
     info['genome-file'] = genome_file
     info['output-dir'] = output_dir
     info['min-depth'] = min_depth
@@ -61,9 +66,25 @@ def export_snv_truth(
 
     log_start(banner = 'SNV Truth Creation', info = info)
 
-    vcf_tmp_dir = output_dir / VCF_DIRNAME
+    sample_vcf_dir = output_dir / 'samples'
 
-    vcf_tmp_dir.mkdir(exist_ok=True)
+    sample_vcf_dir.mkdir(exist_ok=True)
+
+    log_info('load samples')
+    samples = load_list(samples_file)
+    sample2gender = load_dict(genders_file)
+
+    # log_info('subset samples')
+    # vcf_files = subset_samples(
+    #     vcf_files=vcf_files,
+    #     genome_file=genome_file,
+    #     samples=samples,
+    #     trim_alts = True,
+    #     output_dir=sample_vcf_dir,
+    #     n_threads=n_threads,
+    # )
+
+    vcf_files = [x for x in sample_vcf_dir.glob('*/*info-norm-uppercase-samples-format-info-trim_alt-norm-uppercase-ex.vcf.bgz')]
 
     log_info('load coordinates')
     coordinates = load_coordinates(coordinates_file)
@@ -71,32 +92,22 @@ def export_snv_truth(
     log_info('load depths')
     depths = load_depths(depths_file)
 
-    log_info('load samples')
-    samples = load_list(samples_file)
-    sample2gender = load_dict(genders_file)
-
-    log_info('subset samples')
-    vcf_files = subset_samples(
-        vcf_files=vcf_files,
-        genome_file=genome_file,
-        samples=samples,
-        output_dir=vcf_tmp_dir,
-        n_threads=n_threads,
-    )
-
     log_info('fetch snvs')
+    snv_vcf_dir = output_dir / 'snv'
 
-    vcf_files = subset_snvs(
+    result = subset_snvs(
         coordinates = coordinates,
         vcf_files=vcf_files,
         sample2gender = sample2gender,
         genome_file = genome_file,
         depths=depths,
         min_depth=min_depth,
-        output_dir=vcf_tmp_dir,
+        output_dir=snv_vcf_dir,
         chrm_missing_as_homref=chrm_missing_as_homref,
         n_threads=n_threads,
     )
+
+    return
 
     if merge_vcf:
         one_vcf = concat(
@@ -128,100 +139,90 @@ def subset_snvs(
 
     genome = Genome(genome_file)
 
-    bag = list()
     for vcf_file in vcf_files:
 
-        output_file = output_dir / vcf_file.name.replace(
-            '.vcf.bgz', '-snv.vcf')
+        task_dir = output_dir / vcf_file.name.replace('.vcf.bgz', '')
+        task_dir.mkdir(parents = True, exist_ok = True)
 
-        copy_header(vcf_file, output_file)
+        truth_vcf_file = task_dir / 'truth.vcf'
+
+        truth_synced_vcf_file = task_dir / 'truth_synced.vcf'
+
+        snv_profile_file = output_dir / 'snv_profile.tsv'
+
+        copy_header(vcf_file, truth_vcf_file)
+        copy_header(vcf_file, truth_synced_vcf_file)
+
+        with snv_profile_file.open('wt') as fh:
+            snv_profile_header = '\t'.join([
+                    'chrom',
+                    'pos',
+                    'id',
+                    'ref',
+                    'alt',
+                    'pos_synced',
+                    'ref_synced',
+                    'alt_synced',
+                    'note',
+            ])
+            fh.write(f'{snv_profile_header}\n')
 
         samples = list_samples(vcf_file)
         n_samples = len(samples)
 
-        genders = [sample2gender(sample) for sample in samples]
+        genders = [sample2gender[sample] for sample in samples]
 
+        with truth_vcf_file.open('at') as fh_t, \
+                truth_synced_vcf_file.open('at') as fh_s, \
+                snv_profile_file.open('at') as fh_p:
 
-        with output_file.open('at') as fh:
             with ProcessPool(n_threads) as pool:
-                for result in pool.uimap(
-                        _subset_snvs, _subset_snv_jobs(
+                for data in pool.uimap(
+                        fetch_calls, fetch_calls_jobs(
                             coordinates,
                             genome,
                             vcf_file,
                         )):
 
-                    snv = fill_calls(
-                        snv=result['snv'],
-                        note=result['note'],
+                    data = fill_missing_calls(
+                        data,
                         depths=depths,
                         genders = genders,
                         min_depth=min_depth,
                         chrm_missing_as_homref=
                         chrm_missing_as_homref,
-                        genome = genome,
                     )
 
-                    fh.write(f'{snv}\n')
-                    n_done += 1
-                    print(f'{n_done / n_total}', end='\r')
+                    variant= data['variant']
+                    fh_t.write(f'{variant}')
 
-        bag.append(output_file)
+                    variant_synced = data['variant_synced']
+                    fh_s.write(f'{variant_synced}\n')
 
-    bag2 = list()
-    with ProcessPool(n_threads) as pool:
-        for result in pool.uimap(
-                standardize_vcf,
-                standardize_vcf_jobs(bag, output_dir),
-        ):
-            bag2.append(result)
+                    record = '\t'.join([
+                            data['chrom'],
+                            str(data['pos']),
+                            data['id'],
+                            data['ref'],
+                            data['alt'],
+                            str(data['pos_synced']),
+                            data['ref_synced'],
+                            data['alt_synced'],
+                            data['note'],
+                    ])
+                    fh_p.write(f'{record}\n')
 
-    return bag2
+    return {
+        'truth_vcf_files' : list(task_dirs.glob('*/truth.vcf')),
+        'truth_synced_vcf_files' : list(task_dir.glob('*/truth_synced.vcf')),
+        'snv_profile_files' : list(task_dir.glob('*/snv_profile.tsv')),
+    }
 
 
-def _subset_snv_jobs(coordinates, genome, vcf_file):
-    contigs = list_contigs(vcf_file)
+    
 
-    for coordinate in coordinates:
 
-        chrom = coordinate['chrom']
-        pos = int(coordinate['pos']),
-        id_ = coordinate['id']
-        ref = coordinate['ref'],
-        alt = coordinate['alt'],
-
-        if id_ == '.':
-            id_ = f'{chrom}_{pos}_{ref}_{alt}'
-
-        snv = Variant(
-                chrom = chrom,
-                pos = int(coordinate['pos']),
-                id_ =  id_,
-                ref = ref,
-                alt = alt,
-        )
-
-        yield {
-                'snv': snv,
-                'vcf_file': vcf_file,
-                'chrom': genome.chromosome(chrom),
-        }
-
-def _subset_snvs(job):
-
-    def _new_record(coordindate, coordinate_synced, variant, note):
-
-        if variant is None:
-            variant = Variant(
-                chrom = '.', 
-                pos = '.', 
-                id_ = '.', 
-                ref = '.', 
-                alt = '.'
-                qual = '.'
-                filter_ = '.'
-                info = '.'
-            )
+def format_report(data):
         return {
             'chrom': coordinate.chrom,
             'pos': coordinate.pos,
@@ -230,152 +231,187 @@ def _subset_snvs(job):
             'alt': coordinate.alt,
             'pos_synced': coordinate_synced.pos,
             'ref_synced': coordinate_synced.ref,
-            'alt_synced': coordiante_synced.alt,
+            'alt_synced': coordinate_synced.alt,
             'variant': variant,
+            'variant_synced': variant_synced,
             'note': note,
         }
 
 
-    snv = job['snv']
+def fetch_calls_jobs(coordinates, genome, vcf_file):
+    contigs = list_contigs(vcf_file)
+
+    for coordinate in coordinates:
+
+        chrom = coordinate['chrom']
+
+        if chrom not in contigs:
+            continue
+        pos = int(coordinate['pos']),
+        id_ = coordinate['id']
+        ref = coordinate['ref']
+        alt = coordinate['alt']
+
+        if id_ == '.':
+            id_ = f'{chrom}_{pos}_{ref}_{alt}'
+
+        coordinate = Variant(
+                chrom = chrom,
+                pos = int(coordinate['pos']),
+                id_ =  id_,
+                ref = ref,
+                alt = alt,
+        )
+
+        yield {
+                'coordinate': coordinate,
+                'vcf_file': vcf_file,
+                'chrom': genome.chromosome(chrom),
+        }
+
+def fetch_calls(job):
+
+    def _new_record(coordindate, coordinate_synced, variant, variant_synced, note):
+
+        if variant is None:
+            variant = coordinate.clone()
+            variant_synced = coordinate_synced.clone()
+        return {
+            'chrom': coordinate.chrom,
+            'pos': coordinate.pos,
+            'id': coordinate.id,
+            'ref': coordinate.ref,
+            'alt': coordinate.alt,
+            'pos_synced': coordinate_synced.pos,
+            'ref_synced': coordinate_synced.ref,
+            'alt_synced': coordinate_synced.alt,
+            'variant': variant,
+            'variant_synced': variant_synced,
+            'note': note,
+        }
+
+
+    coordinate = job['coordinate']
     vcf_file = job['vcf_file']
     chromosome = job['chrom']
 
-    max_region = snv.max_region(chromosome)
+    coordinate_expanded = coordinate.expand(chromosome)
+
     candidates = fetch_variants(
-        chrom = snv.chrom,
-        pos = max_region.start,
-        end = max_region.end,
+        chrom = coordinate_expanded.chrom,
+        pos = coordinate_expanded.region.start,
+        end = coordinate_expanded.region.end,
         vcf_file = vcf_file,
         regions_overlap = 1,
     )
 
     if len(candidates) == 0:
-        result = _new_record(coordinate, coordinate, None, 'missing')
-    elif len(candidates) == 1:
-        if '*' in candidates[0].alts:
-            result = _new_record(coordinate, coordinate, None, 'complex')
-        else:
-            vx, vy = sync(coordinate, candidate, chromosome)
-            if not result :
-                result = refsnv
-                note = 'complex'
-            note = 'done'
+        return _new_record(coordinate, coordinate, None, None, 'MISSING')
+
+    candidates = [ x for x in candidates if '*' not in x.alts]
+
+    if len(candidates) == 0:
+        return _new_record(coordinate, coordinate, None, None, 'COMPLEX')
+
+    if len(candidates) == 1:
+        candidate = candidates[0]
+        coordinate_synced, candidate_synced = sync(coordinate, candidate, chromosome)
+        result = _new_record(coordinate, coordinate_synced, candidates[0], candidate_synced, 'DONE')
     else:
-        target = None
-        candidates = [snv.align(refsnv, genome) for snv in candidates]
+        best_coordinate_synced = None
+        best_candidate = None
+        best_candidate_synced = None
+        n_match_alts = None
 
-        for snv in candidates:
-            if snv.same_coordinate(refsnv):
-                target = snv
-        if target:
-            note = 'done'
-        else:
-            result = refsnv
-            note = 'complex'
-    result.id = id_
+        for candidate in candidates:
+            coordinate_synced, candidate_synced = sync(coordinate, candidate, chromosome)
 
-    return {'snv': result, 'note': note}
+            n_match_alts_current = len(coordinate_synced.alts & candidate_synced.alts)
 
-def _subset_snvs(job):
+            if n_match_alts is None:
+                n_match_alts = n_match_alts_current
+                best_coordinate_synced = coordinate_synced
+                best_candidate = candidate
+                best_candidate_synced = candidate_synced
+            elif n_match_alts_current > n_match_alts:
+                n_match_alts = n_match_alts_current
+                best_coordinate_synced = coordinate_synced
+                best_candidate = candidate
+                best_candidate_synced = candidate_synced
+            else:
+                continue
+        result = _new_record(coordinate, best_coordinate_synced, best_candidate, best_candidate_synced, 'DONE')
 
-    refsnv = job['refsnv']
-    span_start = job['span_start']
-    span_end = job['span_end']
-    vcf_file = job['vcf_file']
-    genome = job['genome']
 
-
-    snvs = fetch_variants(
-        chrom = refsnv.chrom,
-        pos = span_start,
-        end = span_end,
-        vcf_file = vcf_file,
-        regions_overlap = 1,
-    )
-
-    if len(snvs) == 0:
-        result = refsnv
-        note = 'missing'
-    elif len(snvs) == 1:
-        if '*' in snvs[0].alts:
-            result = refsnv
-            note = 'complex'
-        else:
-            result = snvs[0].align(refsnv, genome)
-            if not result :
-                result = refsnv
-                note = 'complex'
-            note = 'done'
-    else:
-        target = None
-        snvs = [snv.align(refsnv, genome) for snv in snvs]
-
-        for snv in snvs:
-            if snv.same_coordinate(refsnv):
-                target = snv
-        if target:
-            note = 'done'
-        else:
-            result = refsnv
-            note = 'complex'
-    result.id = id_
-
-    return {'snv': result, 'note': note}
+    return result
 
 
 
-def standardize_vcf(job):
-    vcf_file = job['vcf_file']
-    output_dir = job['output_dir']
-
-    return standardize(vcf_file, output_dir)
-
-
-def standardize_vcf_jobs(vcf_files, output_dir):
-    for vcf_file in vcf_files:
-        yield {
-            'vcf_file': vcf_file,
-            'output_dir': output_dir,
-        }
-
-
-def fill_calls(
-        snv: Variant,
-        note: str,
+def fill_missing_calls(
+        data: dict,
         depths: dict,
         genders: list,
         min_depth: int,
         chrm_missing_as_homref: bool,    #chrM always has high coverage
 ):
 
+    chrom = data['chrom']
+    pos = data['pos']
+    ref = data['ref']
 
-    if note == 'done':
+    pos_synced = data['pos_synced']
+    ref_synced = data['ref_synced']
+
+    note = data['note']
+
+    region = GenomicRegion(chrom, pos, pos + len(ref) - 1)
+    region_synced = GenomicRegion(chrom, pos_synced, pos_synced + len(ref_synced) - 1)
+
+    if note == 'DONE':
         pass
-    elif note == 'complex':
-        snv.format = 'GT'
-        snv.calls = create_dummy_calls(snv.chrom, snv.pos, '.', x_pars = X_PARS)
-    elif note == 'missing':
-        snv.format = 'GT'
-        key = (snv.chrom, snv.pos)
+    elif note == 'COMPLEX':
+        data['variant'].format = 'GT'
+        data['variant_synced'].format = 'GT'
+        data['variant'].calls = create_dummy_calls(chrom,  region, ref = False, x_pars = X_PARS)
+        data['variant_synced'].calls = create_dummy_calls(chrom, region_synced, ref = False, x_pars = X_PARS)
+
+    elif note == 'MISSING':
+
+        data['variant'].format = 'GT'
+        data['variant_synced'].format = 'GT'
+
+        chrom = data['chrom']
+        start = data['pos_synced']
+        end = data['pos_synced'] + len(data['ref_synced']) - 1
+
+        keys = [(chrom, pos) for pos in range(start, end)]
 
         if not depths:
-            snv.calls = create_dummy_calls(snv.chrom, snv.pos, '.', x_pars = X_PARS)
-        elif chrm_missing_as_homref and 'm' in snv.chrom.lower():
-            snv.calls = create_dummy_calls(snv.chrom, snv.pos, '0', x_pars = X_PARS)
-        elif key not in depths:
-            snv.calls = create_dummy_calls(snv.chrom, snv.pos, '.', x_pars = X_PARS)
+            ref = False
+        elif len(keys & depths.keys()) == 0:
+            ref = False
+        elif chrm_missing_as_homref and 'm' in chrom.lower():
+            ref = True
         else:
-            depth = depths[key]
+            bag = list()
+            for key in keys:
+                if key not in depths:
+                    assert False, f'{key};{data}'
+
+            depth = min([depths[key] for key in keys])
 
             if depth >= min_depth:
-                snv.calls = create_dummy_calls(snv.chrom, snv.pos, '0', x_pars = X_PARS)
+                ref = True
             else:
+                ref = False
                 print(key, f'{depth} < {min_depth}')
-                snv.calls = create_dummy_calls(snv.chrom, snv.pos, '.', x_pars = X_PARS)
     else:
         raise Exception(note)
 
-    return snv
+    data['variant'].calls = create_dummy_calls(chrom,  region, ref = ref, genders = genders, x_pars = X_PARS)
+    data['variant_synced'].calls = create_dummy_calls(chrom, region_synced, ref = ref, genders = genders, x_pars = X_PARS)
+
+    return data
 
 
 def copy_header(input_file, output_file):
@@ -388,7 +424,7 @@ def copy_header(input_file, output_file):
             break
 
 
-def subset_samples(vcf_files, genome_file, samples, output_dir, n_threads):
+def subset_samples(vcf_files, genome_file, samples, output_dir, trim_alts, n_threads):
 
     def jobs(vcf_files, outupt_dir, samples, trim_alts):
         for vcf_file in vcf_files:
@@ -406,7 +442,7 @@ def subset_samples(vcf_files, genome_file, samples, output_dir, n_threads):
         trim_alts = job['trim_alts']
         if samples:
             v = Vcf(vcf_file, output_dir) \
-                    .subset_samples(samples) \
+                    .subset_samples(samples, ) \
                     .keep_format(fields = ['GT'])
         else:
             v = Vcf(vcf_file, output_dir) \
@@ -478,11 +514,11 @@ def load_depths(depths_file):
             return process(fh)
 
 
-def load_coordinates(coordiantes_file):
+def load_coordinates(coordinates_file):
     coordinates = pl.read_csv(coordinates_file, comment_prefix = '##', has_header = True, separator = '\t')
 
     coordinates = coordinates.rename({'#CHROM': 'chrom'})
-    coordinates.columns = [x.lowercase() for x in coordinates.columns]
+    coordinates.columns = [x.lower() for x in coordinates.columns]
 
     return coordinates.to_dicts()
 
@@ -496,7 +532,7 @@ def export_coordinates(input_file, output_dir):
 
     return output_file
 
-def create_dummy_calls(chrom: str, pos: int, genders: list, ref = True, x_pars = X_PARS):
+def create_dummy_calls(chrom: str, region: GenomicRegion, genders: list, ref = True, x_pars = X_PARS):
 
     if ref:
         allele = '0'
@@ -506,7 +542,7 @@ def create_dummy_calls(chrom: str, pos: int, genders: list, ref = True, x_pars =
     if 'chrX' == chrom:
         in_par = False
         for par in x_pars:
-            if par.contains(chrom, pos):
+            if par.overlaps(region):
                 in_par = True
 
         if in_par:

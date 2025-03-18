@@ -18,7 +18,7 @@ from icecream import ic
 import re
 
 from .gregion import GenomicRegion
-from .utils import df2tsv, execute, is_gzipped
+from .utils import df2tsv, execute, is_gzip
 from .variant import Variant
 
 ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
@@ -1291,7 +1291,7 @@ def _load_header(vcf):
                 break
         return header
 
-    if is_gzipped(vcf):
+    if is_gzip(vcf):
         with gzip.open(vcf, 'rt') as fd:
             return fetch_header(fd)
     else:
@@ -1311,7 +1311,7 @@ def _load_meta(vcf):
             break
         return '\n'.join(meta)
 
-    if is_gzipped(vcf):
+    if is_gzip(vcf):
         with gzip.open(vcf, 'rt') as fd:
             return fetch_meta(fd)
     else:
