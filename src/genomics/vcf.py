@@ -18,7 +18,7 @@ from icecream import ic
 import re
 
 from .gregion import GenomicRegion
-from .utils import df2tsv, execute, is_gzip
+from .utils import df2tsv, execute, is_gzip, create_col2idx
 from .variant import Variant
 
 ##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
@@ -1209,6 +1209,7 @@ class Vcf():
 
         input_filepath = self.filepath
 
+
         output_file = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',
             '.tsv',
@@ -1719,6 +1720,141 @@ def list_contigs(vcf_file: Path) -> list[str]:
     )
 
     return sorted(list(set(df['contig_name'])))
+
+def group_spanning_deletion(input_vcf_file, output_vcf_file):
+
+    def process(ifh, ofh):
+        for line in ifh:
+            if line.startswith('##'):
+                continue
+            col2idx = create_col2idx(line)
+            break
+
+        deletion = None
+        targets = list()
+
+        for line in ifh:
+            line = line.strip()
+            items = line.split('\t', 8)
+
+            if '*' not in items[col2idx['ALT']]:
+                if deletion and targets:
+                    record = _group_spanning_deletion(deletion, targets, col2idx)
+                    ofh.write(f'{record}\n')
+                    deletion = None
+                    targets = list()
+                    ofh.write(f'{line}\n')
+                elif deletion: 
+                    ofh.write(f'{deletion}\n')
+                    ofh.write(f'{line}\n')
+                    deletion = None
+                else:
+                    if len(items[col2idx['REF']]) > 1:
+                        deletion = line
+                    else:
+                        ofh.write(f'{line}\n')
+
+            else:
+                targets.append(line)
+
+        if deletion and targets:
+            record = _group_spanning_deletion(deletion, targets, col2idx)
+            ofh.write(f'{record}\n')
+        elif deletion: 
+            ofh.write(f'{deletion}\n')
+        else:
+            pass
+
+
+
+    copy_header(input_vcf_file, output_vcf_file)
+
+    if is_gzip(input_vcf_file):
+        with gzip.open(input_vcf_file) as ifh, output_vcf_file.open('at') as ofh:
+
+            process(ifh, ofh)
+    else:
+        with input_vcf_file.open('rt') as ifh, output_vcf_file.open('at') as ofh:
+            process(ifh, ofh)
+
+
+    return output_vcf_file
+
+def _expand_spanning_deletion(deletion: str, targets:list[str], col2idx:dict)-> tuple[str, str]:
+    dpos = int(deletion[col2idx['POS']])
+    dref = deletion[col2idx['REF']]
+    dalt = deletion[col2idx['ALT']]
+
+    max_end = dpos + len(dref) -1
+    max_ref = dref
+    suffix = ''
+
+    for target in targets:
+        tpos = int(target[col2idx['POS']])
+        tref = target[col2idx['REF']]
+
+        tend = tpos + len(tref) - 1
+
+        if tend > max_end:
+            suffix = tref[-(tend - max_end):]
+            max_ref = max_ref + suffix
+            max_end = tpos + len(tref) -1
+
+    deletion[col2idx['REF']] = max_ref
+    deletion[col2idx['ALT']] = ','.join([alt + suffix for alt in dalt.split(',')])
+    return deletion
+
+
+def _group_spanning_deletion(deletion: str, targets:list[str], col2idx:dict) -> str:
+
+    deletion = deletion.split('\t')
+
+    targets = [target.split('\t') for target in targets]
+
+    deletion = _expand_spanning_deletion(deletion, targets, col2idx)
+    dpos = int(deletion[col2idx['POS']])
+    dref = deletion[col2idx['REF']]
+    dalt = deletion[col2idx['ALT']]
+
+    alts = list()
+    alts.append(dalt)
+
+    for target in targets:
+        tpos = int(target[col2idx['POS']])
+        tref = target[col2idx['REF']]
+        talts = target[col2idx['ALT']].split(',')
+        prefix = dref[0:(tpos - dpos + 1 - 1)]
+        suffix = dref[tpos - dpos + 1 -1 + len(tref) + 1 - 1:]
+        for talt in talts:
+            if talt == '*':
+                continue
+            else:
+                talt = prefix + talt + suffix
+            alts.append(talt)
+
+    deletion[col2idx['ALT']] = ','.join(alts)
+
+    return '\t'.join(deletion)
+
+
+    
+def copy_header(input_file, output_file):
+    if is_gzip(input_file):
+        with gzip.open(input_file, 'rt') as ifh, output_file.open('wt') as ofh:
+            for line in ifh:
+                if line.startswith('##'):
+                    ofh.write(line)
+                    continue
+                ofh.write(line)
+                break
+    else: 
+        with input_file.open('rt') as ifh, output_file.open('wt') as ofh:
+            for line in ifh:
+                if line.startswith('##'):
+                    ofh.write(line)
+                    continue
+                ofh.write(line)
+                break
 
 
 def get_format_keys(vcf_file):

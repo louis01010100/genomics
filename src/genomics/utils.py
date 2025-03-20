@@ -67,6 +67,9 @@ class _AllelePairs():
 
         return f'[{output}]'
 
+def create_col2idx(cols_str, separator = '\t'):
+    return {col: idx for idx, col in enumerate(cols_str.strip().split(separator))}
+
 def init_logging(log_file: Path):
 
     h0 = logging.StreamHandler(sys.stderr)

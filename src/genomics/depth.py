@@ -57,8 +57,13 @@ def export_cram_depths(
 
     log_info('Expand Coordinates')
     coordinates_expanded = expand_coordinates(coordinates_file, genome_file)
+
+    coordinates_expanded.write_csv(
+            output_dir / 'coordinates_expanded_details.tsv', include_header = True, separator = '\t')
+
     coordinates_expanded = pl.read_csv(
             output_dir / 'coordinates_expanded_details.tsv', has_header = True, separator = '\t')
+
     coordinates_expanded_file = output_dir / 'coordinates_expanded.tsv'
     coordinates_expanded.select(['chrom', 'pos']).unique().sort(['chrom', 'pos']).write_csv(
             coordinates_expanded_file, include_header = False, separator = '\t')
