@@ -279,4 +279,22 @@ def load(file_):
     with gzip.open(file_, 'rb') as fh:
         return pickle.load(fh)
 
+def copy_vcf_header(input_file, output_file):
+    if is_gzip(input_file):
+        with gzip.open(input_file, 'rt') as ifh, output_file.open('wt') as ofh:
+            for line in ifh:
+                if line.startswith('##'):
+                    ofh.write(line)
+                    continue
+                ofh.write(line)
+                break
+    else: 
+        with input_file.open('rt') as ifh, output_file.open('wt') as ofh:
+            for line in ifh:
+                if line.startswith('##'):
+                    ofh.write(line)
+                    continue
+                ofh.write(line)
+                break
+
 
