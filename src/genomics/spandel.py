@@ -202,6 +202,10 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
     for code, new_alt in enumerate(new_alts, 1):
         at.update_allele2code(new_alt, code)
 
+    print(at.allele2code)
+    print(at.allele2allele)
+    print(at.code2allele)
+
     expanded_deletion[col2idx['ALT']] = ','.join(new_alts)
     expanded_deletion[col2idx['ID']] = deletion[col2idx['ID']]
 
