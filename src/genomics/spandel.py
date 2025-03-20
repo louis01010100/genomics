@@ -90,12 +90,18 @@ def _expand_spandel(deletion: list, targets:list[list], col2idx:dict)-> tuple[st
 class AlleleTranslator():
 
     def __init__(self):
-        self.code2allele = {}
-        self.allele2allele = {}
-        self.allele2code = {}
+        self._code2allele = {}
+        self._allele2allele = {}
+        self._allele2code = {}
 
     def code2allele(self, id_, code):
-        return self.code2allele[id_][code]
+        return self._code2allele[id_][code]
+
+    def allele2code(self, allele):
+        return self._allele2code[allele]
+
+    def allele2allele(self, id_, allele):
+        return self._allele2allele[id_][allele]
 
     def update_code2allele(self, deletion, targets, col2idx):
         self._add_code2allele(deletion[col2idx['ID']], 0, deletion[col2idx['REF']])
@@ -108,18 +114,18 @@ class AlleleTranslator():
                 self._add_code2allele(target[col2idx['ID']], code, allele)
 
     def _add_code2allele(self, id_, code, allele):
-        if id_ not in self.code2allele:
-            self.code2allele[id_] = dict()
+        if id_ not in self._code2allele:
+            self._code2allele[id_] = dict()
 
-        self.code2allele[id_][code] = allele
+        self._code2allele[id_][code] = allele
 
     def update_allele2code(self, code, allele):
-        self.allele2code[code] = allele
+        self._allele2code[code] = allele
 
     def update_allele2allele(self, id_, old_allele, new_allele):
-        if id_ not in self.allele2allele:
-            self.allele2allele[id_] = dict()
-        self.allele2allele[id_][old_allele] = new_allele
+        if id_ not in self._allele2allele:
+            self._allele2allele[id_] = dict()
+        self._allele2allele[id_][old_allele] = new_allele
 
     def translate(self, id_, gt):
 
@@ -138,11 +144,11 @@ class AlleleTranslator():
                 new_codes.append('.')
             else:
                 code = int(code)
-                old_allele = self.code2allele[id_][code]
+                old_allele = self._code2allele[id_][code]
                 if old_allele == '*':
                     return None
-                new_allele = self.allele2allele[id_][old_allele]
-                new_code = self.allele2code[new_allele]
+                new_allele = self._allele2allele[id_][old_allele]
+                new_code = self._allele2code[new_allele]
                 new_codes.append(new_code)
         return sep.join([str(x) for x in new_codes])
 
@@ -202,10 +208,6 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
     for code, new_alt in enumerate(new_alts, 1):
         at.update_allele2code(new_alt, code)
 
-    print(at.allele2code)
-    print(at.allele2allele)
-    print(at.code2allele)
-
     expanded_deletion[col2idx['ALT']] = ','.join(new_alts)
     expanded_deletion[col2idx['ID']] = deletion[col2idx['ID']]
 
@@ -218,31 +220,52 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
     return grouped_record
 
 
-def update_calls(deletion: list, targets: list[list], col2idx, allele_translator)-> str:
+def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator)-> str:
 
     idx = 0
 
     result = list()
 
-    for idx in range(0, len(deletion)):
+    for idx in range(0, len(expanded_deletion)):
         if idx < 10:
-            result.append(deletion[idx])
+            result.append(expanded_deletion[idx])
             continue
 
-        new_gt = allele_translator.translate(deletion[col2idx['ID']], deletion[idx])
+        for gt in expanded_deletion[idx].split('\t'):
 
-        for target in targets:
-            if '*' in target[col2idx['ALT']]:
-                new_target_gt = new_gt
+            alleles = list()
+
+            for code in gt.split('/'):
+                if code == '.':
+                    continue
+                code = int(code)
+                allele_old = allele_translator.code2allele(expanded_deletion[col2idx['ID']], code)
+                allele_new = allele_translator.allele2allele(expanded_deletion[col2idx['ID']], allele_old)
+                alleles.append(allele_new)
+
+            for target in targets:
+                for code in target[idx].split('/'):
+                    if code == '.':
+                        continue
+                    code = int(code)
+                    allele_old = allele_translator.code2allele(target[col2idx['ID']], code)
+                    if allele_old == '*':
+                        continue
+                    allele_new = allele_translator.allele2allele(target[col2idx['ID']], allele_old)
+                    if allele_new not in alleles:
+                        alleles.append(allele_new)
+            if len(alleles) > 2:
+                print('##', expanded_deletion[col2idx['ID']], alleles)
+                call = './.'
+            elif len(alleles) == 0:
+                call = './.'
             else:
-                new_target_gt = allele_translator.translate(target[col2idx['ID']], target[idx])
-
-            if new_gt != new_target_gt:
-                print('##', idx, target[idx])
-                print('##', new_gt, '\t'.join(deletion))
-                print('##', new_target_gt, '\t'.join(target))
-                raise Exception('Inconsistent calls')
-        result.append(new_gt)
+                codes = list()
+                for allele in alleles:
+                    code = allele_translator.allele2code(allele)
+                    codes.append(code)
+                call = '\t'.join(codes)
+            result.append(call)
     return '\t'.join(result)
 
 
