@@ -94,14 +94,20 @@ class AlleleTranslator():
         self._code2allele = {}
         self._allele2allele = {}
         self._allele2code = {}
+        self._new_alts = None
 
-    def code2allele(self, id_, code):
+    def __str__(self):
+        return f'{self._code2allele}\n{self._allele2allele}\n{self._allele2code}\n'
+    def __expr__(self):
+        return str(self)
+
+    def turn_code2allele(self, id_, code):
         return self._code2allele[id_][code]
 
-    def allele2code(self, allele):
+    def turn_allele2code(self, allele):
         return self._allele2code[allele]
 
-    def allele2allele(self, id_, allele):
+    def trun_allele2allele(self, id_, allele):
         return self._allele2allele[id_][allele]
 
     def update_code2allele(self, deletion, targets, col2idx):
@@ -127,6 +133,14 @@ class AlleleTranslator():
         if id_ not in self._allele2allele:
             self._allele2allele[id_] = dict()
         self._allele2allele[id_][old_allele] = new_allele
+
+    @property
+    def new_alts(self):
+        return self._new_alts
+
+    @new_alts.setter
+    def new_alts(self, new_alts):
+        self._new_alts = new_alts
 
     def translate(self, id_, gt):
 
@@ -159,16 +173,13 @@ def set_id(record: list, col2idx:dict)-> list:
 
     return record
 
-def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) -> str:
-
+def _new_allele_translator(
+        deletion: list[str], expanded_deletion: list[str], 
+        targets:list[list[str]], col2idx:dict):
     at = AlleleTranslator()
-
-    deletion = set_id(deletion, col2idx)
-    targets = [set_id(target, col2idx) for target in targets]
 
     at.update_code2allele(deletion, targets, col2idx)
 
-    expanded_deletion = _expand_spandel(deletion, targets, col2idx)
     dpos_expanded = int(expanded_deletion[col2idx['POS']])
     dref_expanded = expanded_deletion[col2idx['REF']]
     dalts_expanded = expanded_deletion[col2idx['ALT']].split(',')
@@ -209,12 +220,21 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
     for code, new_alt in enumerate(new_alts, 1):
         at.update_allele2code(new_alt, code)
 
-    expanded_deletion[col2idx['ALT']] = ','.join(new_alts)
-    expanded_deletion[col2idx['ID']] = deletion[col2idx['ID']]
+    at.new_alts = new_alts
 
-    # print(at.code2allele)
-        # self.allele2allele = {}
-    # print(at.allele2code)
+    return at
+
+
+
+def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) -> str:
+
+    deletion = set_id(deletion, col2idx)
+    targets = [set_id(target, col2idx) for target in targets]
+    expanded_deletion = _expand_spandel(deletion, targets, col2idx)
+    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+
+    expanded_deletion[col2idx['ALT']] = ','.join(at.new_alts)
+    expanded_deletion[col2idx['ID']] = deletion[col2idx['ID']]
 
     grouped_record = update_calls(expanded_deletion, targets, col2idx, at)
 
@@ -236,8 +256,8 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
             if code == '.':
                 continue
             code = int(code)
-            allele_old = allele_translator.code2allele(expanded_deletion[col2idx['ID']], code)
-            allele_new = allele_translator.allele2allele(expanded_deletion[col2idx['ID']], allele_old)
+            allele_old = allele_translator.turn_code2allele(expanded_deletion[col2idx['ID']], code)
+            allele_new = allele_translator.trun_allele2allele(expanded_deletion[col2idx['ID']], allele_old)
             alleles.append(allele_new)
 
         for target in targets:
@@ -245,13 +265,16 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
                 if code == '.':
                     continue
                 code = int(code)
-                allele_old = allele_translator.code2allele(target[col2idx['ID']], code)
+                allele_old = allele_translator.turn_code2allele(target[col2idx['ID']], code)
                 if allele_old == '*':
                     continue
-                allele_new = allele_translator.allele2allele(target[col2idx['ID']], allele_old)
+                allele_new = allele_translator.trun_allele2allele(target[col2idx['ID']], allele_old)
                 if allele_new not in alleles:
-                    print(code, allele_new, alleles)
-                    alleles.append(allele_new)
+                    if is_prefix(allele_new, alleles):
+                        print('## is prefix', allele_new, alleles)
+                    else:
+                        print(code, allele_new, alleles)
+                        alleles.append(allele_new)
         if len(alleles) > 2:
             print('##', expanded_deletion[col2idx['ID']], alleles)
             call = './.'
@@ -260,13 +283,17 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
         else:
             codes = list()
             for allele in alleles:
-                code = allele_translator.allele2code(allele)
+                code = allele_translator.turn_allele2code(allele)
                 codes.append(code)
             call = '/'.join([str(x) for x in sorted(codes)])
         result.append(call)
-    return '\t'.join(result)
+    return '\t'.join([str(x) for x in result])
 
-
+def is_prefix(allele_new, alleles):
+    for allele in alleles:
+        if allele.startswith(allele_new):
+            return True
+    return False
         
 
 
