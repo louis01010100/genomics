@@ -1,5 +1,6 @@
 
 from .utils import copy_vcf_header, is_gzip, create_col2idx
+import gzip
 
 def _group_spandel(ifh, ofh):
     for line in ifh:
@@ -36,7 +37,7 @@ def _group_spandel(ifh, ofh):
             targets.append(line.split('\t'))
 
     if deletion and targets:
-        record = _group_spandel(deletion, targets, col2idx)
+        record = __group_spandel(deletion.split('\t'), targets, col2idx)
         ofh.write(f'{record}\n')
     elif deletion: 
         ofh.write(f'{deletion}\n')
@@ -47,7 +48,7 @@ def group_spandel(input_vcf_file, output_vcf_file):
     copy_vcf_header(input_vcf_file, output_vcf_file)
 
     if is_gzip(input_vcf_file):
-        with gzip.open(input_vcf_file) as ifh, output_vcf_file.open('at') as ofh:
+        with gzip.open(input_vcf_file, 'rt') as ifh, output_vcf_file.open('at') as ofh:
 
             _group_spandel(ifh, ofh)
     else:
@@ -222,50 +223,47 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
 
 def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator)-> str:
 
-    idx = 0
-
     result = list()
 
     for idx in range(0, len(expanded_deletion)):
-        if idx < 10:
+        if idx < 9:
             result.append(expanded_deletion[idx])
             continue
 
-        for gt in expanded_deletion[idx].split('\t'):
+        alleles = list()
 
-            alleles = list()
+        for code in expanded_deletion[idx].split('/'):
+            if code == '.':
+                continue
+            code = int(code)
+            allele_old = allele_translator.code2allele(expanded_deletion[col2idx['ID']], code)
+            allele_new = allele_translator.allele2allele(expanded_deletion[col2idx['ID']], allele_old)
+            alleles.append(allele_new)
 
-            for code in gt.split('/'):
+        for target in targets:
+            for code in target[idx].split('/'):
                 if code == '.':
                     continue
                 code = int(code)
-                allele_old = allele_translator.code2allele(expanded_deletion[col2idx['ID']], code)
-                allele_new = allele_translator.allele2allele(expanded_deletion[col2idx['ID']], allele_old)
-                alleles.append(allele_new)
-
-            for target in targets:
-                for code in target[idx].split('/'):
-                    if code == '.':
-                        continue
-                    code = int(code)
-                    allele_old = allele_translator.code2allele(target[col2idx['ID']], code)
-                    if allele_old == '*':
-                        continue
-                    allele_new = allele_translator.allele2allele(target[col2idx['ID']], allele_old)
-                    if allele_new not in alleles:
-                        alleles.append(allele_new)
-            if len(alleles) > 2:
-                print('##', expanded_deletion[col2idx['ID']], alleles)
-                call = './.'
-            elif len(alleles) == 0:
-                call = './.'
-            else:
-                codes = list()
-                for allele in alleles:
-                    code = allele_translator.allele2code(allele)
-                    codes.append(code)
-                call = '\t'.join(codes)
-            result.append(call)
+                allele_old = allele_translator.code2allele(target[col2idx['ID']], code)
+                if allele_old == '*':
+                    continue
+                allele_new = allele_translator.allele2allele(target[col2idx['ID']], allele_old)
+                if allele_new not in alleles:
+                    print(code, allele_new, alleles)
+                    alleles.append(allele_new)
+        if len(alleles) > 2:
+            print('##', expanded_deletion[col2idx['ID']], alleles)
+            call = './.'
+        elif len(alleles) == 0:
+            call = './.'
+        else:
+            codes = list()
+            for allele in alleles:
+                code = allele_translator.allele2code(allele)
+                codes.append(code)
+            call = '/'.join([str(x) for x in sorted(codes)])
+        result.append(call)
     return '\t'.join(result)
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
 from pathos.multiprocessing import ProcessPool
+from .spandel import group_spandel
 
 import numpy as np
 import pandas as pd
@@ -85,6 +86,7 @@ class Vcf():
                 .index()
 
 
+
     def to_variants(self, key='coordinate'):
 
         records = dict()
@@ -148,6 +150,20 @@ class Vcf():
         log_filepath.unlink(missing_ok=True)
         index_filepath.unlink(missing_ok=True)
         index_log_filepath.unlink(missing_ok=True)
+
+    def group_spanning_deletion(self,  delete_src=False):
+        input_filepath = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            f'-spandel.vcf',
+        )
+        group_spandel(input_filepath, output_file)
+
+
+        if delete_src:
+            self.delete()
+
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False).bgzip().index()
 
     def rename(self, stem, delete_src=False):
         input_filepath = self.filepath
