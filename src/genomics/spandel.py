@@ -271,7 +271,7 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
                 allele_new = allele_translator.turn_allele2allele(target[col2idx['ID']], allele_old)
                 if allele_new not in alleles:
                     if is_prefix(allele_new, alleles):
-                        print('## is prefix', allele_new, alleles)
+                        print('## is prefix', expanded_deletion[col2idx['ID']], allele_new, alleles)
                     else:
                         print(code, allele_new, alleles)
                         alleles.append(allele_new)
@@ -291,9 +291,9 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
 
 def is_prefix(allele_new, alleles):
     for allele in alleles:
-        if allele.startswith(allele_new):
-            return True
-    return False
+        if not allele.startswith(allele_new):
+            return False
+    return True
         
 
 

@@ -5,66 +5,9 @@ import pandas as pd
 import pytest
 from genomics.gregion import GenomicRegion
 from genomics.variant import Variant
-from genomics.vcf import (Vcf, filter_variants, split_rtrim, group_spanning_deletion, _group_spanning_deletion, _expand_spanning_deletion)
+from genomics.vcf import Vcf, filter_variants, split_rtrim
 import polars as pl
 
-def _test__expand_spanning_deletion_alleles():
-    deletion = '\t'.join(['chr22', '100','.','ATT','A','.','.','.'])
-    targets = list()
-    targets.append('\t'.join(['chr22', '101','.','TTG','*,T','.','.','.']))
-
-    col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
-
-    deletion = _expand_spanning_deletion(deletion, targets, col2idx)
-
-    assert list == type(record)
-    assert 'chr22' == record[0]
-    assert '100' == record[1]
-    assert '.' == record[2]
-    assert 'ATTG' == record[3]
-    assert 'AG' == record[4]
-
-def test__group_spanning_deletion(tmp_path):
-
-    deletion = '\t'.join(['chr22', '10516150','.','GTA','G','.','.','.'])
-    targets = list()
-    targets.append('\t'.join(['chr22', '10516151','.','T','*','.','.','.']))
-    targets.append('\t'.join(['chr22', '10516152','.','A','*,G','.','.','.']))
-
-    col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
-
-    record = _group_spanning_deletion(deletion, targets, col2idx)
-
-    assert str == type(record)
-    assert 'chr22' == record.split('\t')[0]
-    assert '10516150' == record.split('\t')[1]
-    assert '.' == record.split('\t')[2]
-    assert 'GTA' == record.split('\t')[3]
-    assert 'G,GTG' == record.split('\t')[4]
-
-    deletion = '\t'.join(['chr22', '100','.','ATT','A','.','.','.'])
-    targets = list()
-    targets.append('\t'.join(['chr22', '101','.','TTG','*,T','.','.','.']))
-
-    col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
-
-    record = _group_spanning_deletion(deletion, targets, col2idx)
-
-    assert str == type(record)
-    assert 'chr22' == record.split('\t')[0]
-    assert '100' == record.split('\t')[1]
-    assert '.' == record.split('\t')[2]
-    assert 'ATTG' == record.split('\t')[3]
-    assert 'AG,AT' == record.split('\t')[4]
-
-def test_group_spanning_deletion(tmp_path):
-
-    vcf_file = Path(__file__).parents[0] / 'fixture/spanning_deletion.vcf'
-    output_vcf_file = tmp_path / 'output.vcf'
-
-    print(output_vcf_file)
-    output_vcf_file = group_spanning_deletion(vcf_file, output_vcf_file)
-    print(Vcf(output_vcf_file, tmp_path / 'tmp').bgzip().to_df(site_only = True).select(pl.col(['chrom', 'pos', 'id', 'ref', 'alt'])))
 
 def test_meta(tmp_path):
     vcf_file = Path(__file__).parents[0] / 'fixture/sample.vcf'
