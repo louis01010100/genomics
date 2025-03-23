@@ -107,7 +107,7 @@ class AlleleTranslator():
     def turn_allele2code(self, allele):
         return self._allele2code[allele]
 
-    def trun_allele2allele(self, id_, allele):
+    def turn_allele2allele(self, id_, allele):
         return self._allele2allele[id_][allele]
 
     def update_code2allele(self, deletion, targets, col2idx):
@@ -257,7 +257,7 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
                 continue
             code = int(code)
             allele_old = allele_translator.turn_code2allele(expanded_deletion[col2idx['ID']], code)
-            allele_new = allele_translator.trun_allele2allele(expanded_deletion[col2idx['ID']], allele_old)
+            allele_new = allele_translator.turn_allele2allele(expanded_deletion[col2idx['ID']], allele_old)
             alleles.append(allele_new)
 
         for target in targets:
@@ -268,7 +268,7 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
                 allele_old = allele_translator.turn_code2allele(target[col2idx['ID']], code)
                 if allele_old == '*':
                     continue
-                allele_new = allele_translator.trun_allele2allele(target[col2idx['ID']], allele_old)
+                allele_new = allele_translator.turn_allele2allele(target[col2idx['ID']], allele_old)
                 if allele_new not in alleles:
                     if is_prefix(allele_new, alleles):
                         print('## is prefix', allele_new, alleles)
