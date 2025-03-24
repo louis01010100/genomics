@@ -151,7 +151,7 @@ class Vcf():
         index_filepath.unlink(missing_ok=True)
         index_log_filepath.unlink(missing_ok=True)
 
-    def group_spanning_deletion(self,  delete_src=False):
+    def group_spanning_deletions(self,  delete_src=False):
         input_filepath = self.filepath
         output_file = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz',

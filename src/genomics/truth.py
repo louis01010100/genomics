@@ -10,9 +10,9 @@ import numpy as np
 import polars as pl
 from pathos.multiprocessing import ProcessPool
 
-from .utils import is_gzip, load_dict, load_list, init_logging, log_start, log_stop, log_info
+from .utils import is_gzip, load_dict, load_list, init_logging, log_start, log_stop, log_info,copy_vcf_header
 from .variant import Variant, sync
-from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, list_contigs, standardize, copy_header
+from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, list_contigs, standardize
 from .gregion import GenomicRegion
 from .genome import Genome
 
@@ -68,7 +68,6 @@ def export_snv_truth(
     log_start(banner = 'SNV Truth Creation', info = info)
 
     sample_vcf_dir = output_dir / 'samples'
-
     sample_vcf_dir.mkdir(exist_ok=True)
 
     log_info('load samples')
@@ -86,6 +85,17 @@ def export_snv_truth(
     # )
 
     vcf_files = [x for x in sample_vcf_dir.glob('*/*info-norm-uppercase-samples-format-info-trim_alt-norm-uppercase-ex.vcf.bgz')]
+
+    log_info('groupd spanning deletions')
+
+    spandel_dir = output_dir / 'spandels'
+    spandel_dir.mkdir(exist_ok=True)
+
+    vcf_files = group_spanning_deletions(
+            vcf_files = vcf_files,
+            output_dir = spandel_dir,
+            n_threads = n_threads,
+    )
 
     log_info('load coordinates')
     coordinates = load_coordinates(coordinates_file)
@@ -151,8 +161,8 @@ def subset_snvs(
 
         snv_profile_file = task_dir / 'snv_profile.tsv'
 
-        copy_header(vcf_file, truth_vcf_file)
-        copy_header(vcf_file, truth_synced_vcf_file)
+        copy_vcf_header(vcf_file, truth_vcf_file)
+        copy_vcf_header(vcf_file, truth_synced_vcf_file)
 
         with snv_profile_file.open('wt') as fh:
             snv_profile_header = '\t'.join([
@@ -623,4 +633,32 @@ def create_dummy_calls(chrom: str, region: GenomicRegion, genders: list, ref = T
         return '\t'.join([f'{allele}' for x in genders])
     else:
         return '\t'.join([f'{allele}/{allele}' for x in genders])
+
+
+
+def group_spanning_deletions(
+            vcf_files,
+            output_dir,
+            n_threads,
+    ):
+
+    def process(job):
+        vcf_file = job['vcf_file']
+        output_dir = job['output_dir']
+        return Vcf(vcf_file, tmp_dir = output_dir).group_spanning_deletions().filepath
+
+    def jobs(vcf_files, output_dir):
+        for vcf_file in vcf_files:
+            yield {
+                'vcf_file': vcf_file,
+                'output_dir': output_dir,
+            }
+
+
+    with ProcessPool(n_threads) as pool:
+        for future in pool.uimap(process, jobs(vcf_files, output_dir)):
+            pass
+
+    return [x for x in output_dir.glob('**/*.vcf.bgz')]
+
 
