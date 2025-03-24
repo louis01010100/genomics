@@ -5,7 +5,7 @@ import polars as pl
 from genomics.vcf import Vcf
 
 def test__expand_spandel():
-    deletion = ['chr22', '100','.','ATT','A','.','.','.']
+    deletion = ['chr22', '100','rs100','ATT','A','.','.','.']
     targets = list()
     targets.append(['chr22', '101','.','TTG','*,T','.','.','.'])
 
@@ -16,11 +16,11 @@ def test__expand_spandel():
     assert list == type(record)
     assert 'chr22' == record[0]
     assert '100' == record[1]
-    assert '.' == record[2]
+    assert 'rs100' == record[2]
     assert 'ATTG' == record[3]
     assert 'AG' == record[4]
 
-    deletion = ['chr22', '100','.','AGATGAAAT','A','.','.','.']
+    deletion = ['chr22', '100','rs100','AGATGAAAT','A','.','.','.']
     targets = list()
     targets.append(['chr22', '101','.','GATGAAATGATGAA','*','.','.','.'])
     targets.append(['chr22', '102','.','A','ATGAAG,*','.','.','.'])
@@ -32,7 +32,7 @@ def test__expand_spandel():
     assert list == type(record)
     assert 'chr22' == record[0]
     assert '100' == record[1]
-    assert '.' == record[2]
+    assert 'rs100' == record[2]
     assert 'AGATGAAATGATGAA' == record[3]
     assert 'AGATGAA' == record[4]
 
@@ -95,7 +95,7 @@ def test___group_spandel(tmp_path):
 #     assert 'rs100' == record.split('\t')[2]
 #     assert 'AAAAG' == record.split('\t')[3]
 #     assert 'A,AA' == record.split('\t')[4]
-#     assert './.' == record.split('\t')[9]
+#     assert '1/2' == record.split('\t')[9]
 #
 #
 #     # 012

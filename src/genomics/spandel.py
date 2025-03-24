@@ -84,6 +84,7 @@ def _expand_spandel(deletion: list, targets:list[list], col2idx:dict)-> tuple[st
     expanded_deletion = list()
     expanded_deletion.extend(deletion)
 
+    expanded_deletion[col2idx['ID']] = deletion[col2idx['ID']]
     expanded_deletion[col2idx['REF']] = max_ref
     expanded_deletion[col2idx['ALT']] = ','.join(max_alts)
     return expanded_deletion
