@@ -240,9 +240,11 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
     return grouped_record
 
 
-def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator)-> str:
+def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator, cn = 2)-> str:
 
-    expanded_deletion[col2idx['ALT']] = ','.join(at.new_alts)
+    expanded_deletion[col2idx['ALT']] = ','.join(allele_translator.new_alts)
+
+    ref_allele = expanded_deletion[col2idx['REF']]
 
     result = list()
 
@@ -251,43 +253,54 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
             result.append(expanded_deletion[idx])
             continue
 
-        alleles = list()
+        alt_alleles = list()
 
         for code in expanded_deletion[idx].split('/'):
             if code == '.':
                 continue
+            if code == '0':
+                continue
+
             code = int(code)
+
             allele_old = allele_translator.turn_code2allele(expanded_deletion[col2idx['ID']], code)
             allele_new = allele_translator.turn_allele2allele(expanded_deletion[col2idx['ID']], allele_old)
-            alleles.append(allele_new)
+
+            alt_alleles.append(allele_new)
 
         for target in targets:
             for code in target[idx].split('/'):
                 if code == '.':
                     continue
+                if code == '0':
+                    continue
+
                 code = int(code)
                 allele_old = allele_translator.turn_code2allele(target[col2idx['ID']], code)
+
                 if allele_old == '*':
                     continue
+
                 allele_new = allele_translator.turn_allele2allele(target[col2idx['ID']], allele_old)
-                if allele_new not in alleles:
-                    if is_prefix(allele_new, alleles):
-                        print('## is prefix', expanded_deletion[col2idx['ID']], allele_new, alleles)
-                    else:
-                        print(code, allele_new, alleles)
-                        alleles.append(allele_new)
+
+                alt_alleles.append(allele_new)
+
+        alleles = alt_alleles
+        if cn == 2 and len(alleles) == 1:
+            alleles.append(ref_allele)
         if len(alleles) > 2:
-            print('##', expanded_deletion[col2idx['ID']], alleles)
             call = './.'
-        elif len(alleles) == 0:
-            call = './.'
+            print('## multiallelic genotypes', expanded_deletion, alleles)
+
         else:
             codes = list()
             for allele in alleles:
                 code = allele_translator.turn_allele2code(allele)
                 codes.append(code)
             call = '/'.join([str(x) for x in sorted(codes)])
+
         result.append(call)
+
     return '\t'.join([str(x) for x in result])
 
 def is_prefix(allele_new, alleles):
