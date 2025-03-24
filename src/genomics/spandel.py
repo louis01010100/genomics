@@ -234,8 +234,6 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
     expanded_deletion = _expand_spandel(deletion, targets, col2idx)
     at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
 
-    expanded_deletion[col2idx['ALT']] = ','.join(at.new_alts)
-    expanded_deletion[col2idx['ID']] = deletion[col2idx['ID']]
 
     grouped_record = update_calls(expanded_deletion, targets, col2idx, at)
 
@@ -243,6 +241,8 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
 
 
 def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator)-> str:
+
+    expanded_deletion[col2idx['ALT']] = ','.join(at.new_alts)
 
     result = list()
 
