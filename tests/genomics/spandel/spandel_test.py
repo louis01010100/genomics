@@ -203,14 +203,50 @@ def test_update_calls():
     assert 'C,CAAA,CAAAA,CAC,CCA' == record.split('\t')[4]
     assert './.' == record.split('\t')[9]
 
+    col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
+    deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '0/0']
+    target1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
+    target2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
+    targets = [target1, target2]
+    expanded_deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '0/0']
 
+    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+
+    record = update_calls(deletion, targets, col2idx, at)
+
+    assert str == type(record)
+    assert 'chr1' == record.split('\t')[0]
+    assert '100' == record.split('\t')[1]
+    assert 'rs100' == record.split('\t')[2]
+    assert 'CAA' == record.split('\t')[3]
+    assert 'C,CAAA,CAAAA,CAC,CCA' == record.split('\t')[4]
+    assert '0/0' == record.split('\t')[9]
+
+    col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
+    deletion = ['chrY', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1']
+    target1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '1']
+    target2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '1']
+    targets = [target1, target2]
+    expanded_deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1']
+
+    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+
+    record = update_calls(deletion, targets, col2idx, at)
+
+    assert str == type(record)
+    assert 'chrY' == record.split('\t')[0]
+    assert '100' == record.split('\t')[1]
+    assert 'rs100' == record.split('\t')[2]
+    assert 'CAA' == record.split('\t')[3]
+    assert 'C,CAAA,CAAAA,CAC,CCA' == record.split('\t')[4]
+    assert '1' == record.split('\t')[9]
 
 def test_group_spandel(tmp_path):
 
     vcf_file = Path(__file__).parents[0] / 'fixture.vcf'
     output_vcf_file = tmp_path / 'output.vcf'
 
-    print(output_vcf_file)
+    # print(output_vcf_file)
     output_vcf_file = group_spandel(vcf_file, output_vcf_file)
     # print(Vcf(output_vcf_file, tmp_path / 'tmp').bgzip().to_df(site_only = True).select(pl.col(['chrom', 'pos', 'id', 'ref', 'alt'])))
     #

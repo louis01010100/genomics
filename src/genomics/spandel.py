@@ -240,7 +240,7 @@ def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) 
     return grouped_record
 
 
-def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator, cn = 2)-> str:
+def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator)-> str:
 
     expanded_deletion[col2idx['ALT']] = ','.join(allele_translator.new_alts)
 
@@ -255,7 +255,12 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
 
         alt_alleles = list()
 
-        for code in expanded_deletion[idx].split('/'):
+        
+        old_codes = expanded_deletion[idx].split('/')
+
+        cn = len(old_codes)
+
+        for code in old_codes:
             if code == '.':
                 continue
             if code == '0':
@@ -286,12 +291,12 @@ def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_t
                 alt_alleles.append(allele_new)
 
         alleles = alt_alleles
-        if cn == 2 and len(alleles) == 1:
-            alleles.append(ref_allele)
-        if len(alleles) > 2:
+        if len(alleles) < cn:
+            for i in range(cn - len(alleles)):
+                alleles.append(ref_allele)
+        if len(alleles) > cn:
             call = './.'
             print('## multiallelic genotypes', expanded_deletion, alleles)
-
         else:
             codes = list()
             for allele in alleles:
