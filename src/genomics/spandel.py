@@ -230,7 +230,8 @@ def _new_allele_translator(
 
 
 def __group_spandel(parent: list[str], children:list[list[str]], col2idx:dict) -> str:
-    return SpanFamily(parent, children, col2idx).combine()
+    sf =  SpanFamily(parent, children, col2idx)
+    return sf.combine()
 
 
 def update_calls(parent_expanded: list, children: list[list], col2idx, allele_translator)-> str:
@@ -321,36 +322,129 @@ def is_prefix(allele_new, alleles):
 
 class SpanFamily:
     def __init__(self, parent, children, col2idx):
-        self._raw_parent = parent
-        self._raw_children = children
+        self._parent = parent
         self._col2idx = col2idx
 
+        self._parent = set_id(parent, self._col2idx)
+        self._children = [set_id(child, self._col2idx) for child in children]
+        self._parent_expanded = None
+        self._children_expanded = list()
+
+    def __str__(self):
+
+        data = list()
+        data.append('#' * 78)
+        data.append('PARENT')
+        data.append('\t'.join(self._parent))
+        if self._parent_expanded:
+            data.append('\t'.join([str(x) for x in self._parent_expanded['snv']]))
+        else:
+            data.append('\t'.join(['.' for x in self._parent]))
+        data.append('CHILDREN')
+
+        if self._children_expanded:
+            for before, after in zip(self._children, self._children_expanded):
+                data.append( '\t'.join(before))
+                data.append( '\t'.join([str(x) for x in after['snv']]))
+        else:
+            for child in self._children:
+                data.append( '\t'.join(child))
+                data.append( '\t'.join(['.' for x in child]))
+
+        data.pop()
+        data.append('#' * 78)
+
+        return  '\n'.join(data)
+
     def combine(self):
-        self._parent = set_id(self._raw_parent, self._col2idx)
-        self._children = [set_id(child, self._col2idx) for child in self._raw_children]
 
-        self._parent_expanded = _expand_spandel(self._parent, self._children, self._col2idx)
+        pos, end, seq = _create_backbone(self._parent, self._children, self._col2idx)
+        parent_expanded, parent_map = _expand(self._parent, self._col2idx, pos, end, seq)
 
-        at = _new_allele_translator(self._parent, self._parent_expanded, self._children, self._col2idx)
+        self._parent_expanded = {
+            'snv': parent_expanded,
+            'map': parent_map,
+        }
 
-        grouped_record = update_calls(self._parent_expanded, self._children, self._col2idx, at)
+        for child in self._children:
+            child_expanded, child_map = _expand(child, self._col2idx, pos, end, seq)
+            self._children_expanded.append({
+                'snv': child_expanded,
+                'map': child_map,
+            })
+
+        print(self)
+
+
+        at = _new_allele_translator(self._parent, parent_expanded, self._children, self._col2idx)
+
+        grouped_record = update_calls(self._parent_expanded['snv'], self._children, self._col2idx, at)
 
         return grouped_record
 
 
+def _expand(snv, col2idx, backbone_pos, backbone_end, backbone_seq):
+
+    pos = int(snv[col2idx['POS']])
+    ref = snv[col2idx['REF']]
+    alts = snv[col2idx['ALT']].split(',')
+    end = pos + len(ref) - 1
 
 
+    prefix = backbone_seq[0: (pos - backbone_pos + 1 - 1)]
+    suffix = backbone_seq[end -backbone_pos + 1:]
+
+    pos_new = backbone_pos
+    ref_new = prefix + ref + suffix
+
+    alts_new = list()
+    for alt in alts:
+        if alt == '*':
+            alt_new = '*'
+        else:
+            alt_new = prefix + alt + suffix
+        alts_new.append(alt_new)
 
 
+    alt_map = dict()
+    for x, y in zip(alts, alts_new):
+        alt_map[x] = y
 
+    map_ = {
+        'pos': {pos: pos_new},
+        'ref': {ref: ref_new},
+        'alt': alt_map,
+    }
 
+    snv_expanded = list()
 
+    snv_expanded.extend(snv)
 
+    snv_expanded[col2idx['POS']] = pos_new
+    snv_expanded[col2idx['REF']] = ref_new
+    snv_expanded[col2idx['ALT']] = ','.join(alts_new)
 
+    return snv_expanded, map_
 
-        
+def _create_backbone(parent, children, col2idx):
+    ppos = int(parent[col2idx['POS']])
+    pref = parent[col2idx['REF']]
+    palts = parent[col2idx['ALT']].split('\t')
 
+    max_end = ppos + len(pref) -1
+    max_ref = pref
+    max_alts = palts
+    suffix = ''
 
+    for child in children:
+        cpos = int(child[col2idx['POS']])
+        cref = child[col2idx['REF']]
 
+        cend = cpos + len(cref) - 1
 
+        if cend > max_end:
+            suffix = cref[-(cend - max_end):]
+            max_ref = max_ref + suffix
+            max_end = cpos + len(cref) -1
 
+    return ppos, max_end, max_ref
