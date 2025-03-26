@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from pathlib import Path
-from genomics.spandel import ( group_spandel, __group_spandel, _expand_spandel, update_calls, AlleleTranslator, _new_allele_translator, _expand, _create_backbone)
+from genomics.spandel import ( group_spandel, _expand_spandel, update_calls, AlleleTranslator, _new_allele_translator, _expand, _create_backbone, SpanFamily)
 import polars as pl
 from genomics.vcf import Vcf
 
@@ -38,7 +38,7 @@ def test__expand_spandel():
 
 
 
-def test___group_spandel(tmp_path):
+def test_SpanFamily_combine(tmp_path):
 
     parent = ['chr22', '10516150','.','GTA','G','.','.','.']
     children = list()
@@ -47,7 +47,8 @@ def test___group_spandel(tmp_path):
 
     col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
 
-    record = __group_spandel(parent, children, col2idx)
+    record = SpanFamily(parent, children, col2idx).combine()
+
     assert str == type(record)
     assert 'chr22' == record.split('\t')[0]
     assert '10516150' == record.split('\t')[1]
@@ -61,7 +62,7 @@ def test___group_spandel(tmp_path):
 
     col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
 
-    record = __group_spandel(parent, children, col2idx)
+    record = SpanFamily(parent, children, col2idx).combine()
 
     assert str == type(record)
     assert 'chr22' == record.split('\t')[0]
@@ -308,3 +309,14 @@ def test__expand():
     assert 'chr22:10516152:A:*'[2]
     assert 'GTA' == record[3]
     assert 'GTG' == record[4]
+
+
+    snv = ['chr1', '49515','.','G','*','.','.','.']
+    record, map_ = _expand(snv, col2idx, 49514, 49515, 'AG' )
+
+    assert list == type(record)
+    assert 'chr1' == record[0]
+    assert 49514 == record[1]
+    assert 'chr1::49515:G:*'[2]
+    assert 'AG' == record[3]
+    assert '*' == record[4]

@@ -227,13 +227,6 @@ def _new_allele_translator(
 
     return at
 
-
-
-def __group_spandel(parent: list[str], children:list[list[str]], col2idx:dict) -> str:
-    sf =  SpanFamily(parent, children, col2idx)
-    return sf.combine()
-
-
 def update_calls(parent_expanded: list, children: list[list], col2idx, allele_translator)-> str:
 
     parent_expanded[col2idx['ALT']] = ','.join(allele_translator.new_alts)
@@ -372,8 +365,6 @@ class SpanFamily:
                 'snv': child_expanded,
                 'map': child_map,
             })
-
-        print(self)
 
 
         at = _new_allele_translator(self._parent, parent_expanded, self._children, self._col2idx)
