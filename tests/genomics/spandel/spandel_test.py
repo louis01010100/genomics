@@ -5,13 +5,13 @@ import polars as pl
 from genomics.vcf import Vcf
 
 def test__expand_spandel():
-    deletion = ['chr22', '100','rs100','ATT','A','.','.','.']
-    targets = list()
-    targets.append(['chr22', '101','.','TTG','*,T','.','.','.'])
+    parent = ['chr22', '100','rs100','ATT','A','.','.','.']
+    children = list()
+    children.append(['chr22', '101','.','TTG','*,T','.','.','.'])
 
     col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
 
-    record = _expand_spandel(deletion, targets, col2idx)
+    record = _expand_spandel(parent, children, col2idx)
 
     assert list == type(record)
     assert 'chr22' == record[0]
@@ -20,14 +20,14 @@ def test__expand_spandel():
     assert 'ATTG' == record[3]
     assert 'AG' == record[4]
 
-    deletion = ['chr22', '100','rs100','AGATGAAAT','A','.','.','.']
-    targets = list()
-    targets.append(['chr22', '101','.','GATGAAATGATGAA','*','.','.','.'])
-    targets.append(['chr22', '102','.','A','ATGAAG,*','.','.','.'])
+    parent = ['chr22', '100','rs100','AGATGAAAT','A','.','.','.']
+    children = list()
+    children.append(['chr22', '101','.','GATGAAATGATGAA','*','.','.','.'])
+    children.append(['chr22', '102','.','A','ATGAAG,*','.','.','.'])
 
     col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
 
-    record = _expand_spandel(deletion, targets, col2idx)
+    record = _expand_spandel(parent, children, col2idx)
     
     assert list == type(record)
     assert 'chr22' == record[0]
@@ -40,14 +40,14 @@ def test__expand_spandel():
 
 def test___group_spandel(tmp_path):
 
-    deletion = ['chr22', '10516150','.','GTA','G','.','.','.']
-    targets = list()
-    targets.append(['chr22', '10516151','.','T','*','.','.','.'])
-    targets.append(['chr22', '10516152','.','A','*,G','.','.','.'])
+    parent = ['chr22', '10516150','.','GTA','G','.','.','.']
+    children = list()
+    children.append(['chr22', '10516151','.','T','*','.','.','.'])
+    children.append(['chr22', '10516152','.','A','*,G','.','.','.'])
 
     col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
 
-    record = __group_spandel(deletion, targets, col2idx)
+    record = __group_spandel(parent, children, col2idx)
 
     assert str == type(record)
     assert 'chr22' == record.split('\t')[0]
@@ -56,13 +56,13 @@ def test___group_spandel(tmp_path):
     assert 'GTA' == record.split('\t')[3]
     assert 'G,GTG' == record.split('\t')[4]
 
-    deletion = ['chr22', '100','.','ATT','A','.','.','.']
-    targets = list()
-    targets.append(['chr22', '101','.','TTG','*,T','.','.','.'])
+    parent = ['chr22', '100','.','ATT','A','.','.','.']
+    children = list()
+    children.append(['chr22', '101','.','TTG','*,T','.','.','.'])
 
     col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
 
-    record = __group_spandel(deletion, targets, col2idx)
+    record = __group_spandel(parent, children, col2idx)
 
     assert str == type(record)
     assert 'chr22' == record.split('\t')[0]
@@ -80,14 +80,14 @@ def test_update_calls():
     #       T
 
     col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/0']
-    target1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '0/1']
-    targets = [target1]
-    expanded_deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/0']
+    parent = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/0']
+    child1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '0/1']
+    children = [child1]
+    parent_expanded = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/0']
 
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+    at = _new_allele_translator(parent, parent_expanded, children, col2idx)
 
-    record = update_calls(deletion, targets, col2idx, at)
+    record = update_calls(parent, children, col2idx, at)
 
     assert str == type(record)
     assert 'chr1' == record.split('\t')[0]
@@ -98,14 +98,14 @@ def test_update_calls():
     assert '0/2' == record.split('\t')[9]
 
     col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
-    target1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '1/2']
-    targets = [target1]
-    expanded_deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
+    parent = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
+    child1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '1/2']
+    children = [child1]
+    parent_expanded = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
 
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+    at = _new_allele_translator(parent, parent_expanded, children, col2idx)
 
-    record = update_calls(deletion, targets, col2idx, at)
+    record = update_calls(parent, children, col2idx, at)
 
     assert str == type(record)
     assert 'chr1' == record.split('\t')[0]
@@ -116,14 +116,14 @@ def test_update_calls():
     assert '1/2' == record.split('\t')[9]
 
     col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '1/1']
-    target1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '2/2']
-    targets = [target1]
-    expanded_deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
+    parent = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '1/1']
+    child1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '2/2']
+    children = [child1]
+    parent_expanded = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
 
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+    at = _new_allele_translator(parent, parent_expanded, children, col2idx)
 
-    record = update_calls(deletion, targets, col2idx, at)
+    record = update_calls(parent, children, col2idx, at)
 
     assert str == type(record)
     assert 'chr1' == record.split('\t')[0]
@@ -134,14 +134,14 @@ def test_update_calls():
     assert '1/1' == record.split('\t')[9]
 
     col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
-    target1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '0/2']
-    targets = [target1]
-    expanded_deletion = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
+    parent = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
+    child1 = ['chr1', 105, 'rs101', 'A', 'T,*', '.', '.', '.', 'GT', '0/2']
+    children = [child1]
+    parent_expanded = ['chr1', 100, 'rs100', 'GCCCCACCC', 'G', '.', '.', '.', 'GT', '0/1']
 
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+    at = _new_allele_translator(parent, parent_expanded, children, col2idx)
 
-    record = update_calls(deletion, targets, col2idx, at)
+    record = update_calls(parent, children, col2idx, at)
 
     assert str == type(record)
     assert 'chr1' == record.split('\t')[0]
@@ -151,49 +151,48 @@ def test_update_calls():
     assert 'G,GCCCCTCCC' == record.split('\t')[4]
     assert '0/1' == record.split('\t')[9]
 
-
-    # 012
+    # # 012
+    # #
+    # # CAA
+    # # C
+    # # CAAAA x
+    # # CAAA  x
+    # #
+    # #  A    x
+    # #  C
+    # #
+    # #   A   x
+    # #   C
     #
-    # CAA
-    # C
-    # CAAAA x
-    # CAAA  x
+    # col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
+    # parent = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '2/3']
+    # child1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
+    # child2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
+    # children = [child1, child2]
+    # parent_expanded = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '2/3']
     #
-    #  A    x
-    #  C
+    # at = _new_allele_translator(parent, parent_expanded, children, col2idx)
     #
-    #   A   x
-    #   C
+    # record = update_calls(parent, children, col2idx, at)
+    #
+    # assert str == type(record)
+    # assert 'chr1' == record.split('\t')[0]
+    # assert '100' == record.split('\t')[1]
+    # assert 'rs100' == record.split('\t')[2]
+    # assert 'CAA' == record.split('\t')[3]
+    # assert 'C,CAAA,CAAAA,CAC,CCA' == record.split('\t')[4]
+    # assert '2/3' == record.split('\t')[9]
 
     col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '2/3']
-    target1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
-    target2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
-    targets = [target1, target2]
-    expanded_deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '2/3']
+    parent = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1/2']
+    child1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '1/2']
+    child2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '1/2']
+    children = [child1, child2]
+    parent_expanded = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1/2']
 
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+    at = _new_allele_translator(parent, parent_expanded, children, col2idx)
 
-    record = update_calls(deletion, targets, col2idx, at)
-
-    assert str == type(record)
-    assert 'chr1' == record.split('\t')[0]
-    assert '100' == record.split('\t')[1]
-    assert 'rs100' == record.split('\t')[2]
-    assert 'CAA' == record.split('\t')[3]
-    assert 'C,CAAA,CAAAA,CAC,CCA' == record.split('\t')[4]
-    assert '2/3' == record.split('\t')[9]
-
-    col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1/2']
-    target1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '1/2']
-    target2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '1/2']
-    targets = [target1, target2]
-    expanded_deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1/2']
-
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
-
-    record = update_calls(deletion, targets, col2idx, at)
+    record = update_calls(parent, children, col2idx, at)
 
     assert str == type(record)
     assert 'chr1' == record.split('\t')[0]
@@ -204,15 +203,15 @@ def test_update_calls():
     assert './.' == record.split('\t')[9]
 
     col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '0/0']
-    target1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
-    target2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
-    targets = [target1, target2]
-    expanded_deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '0/0']
+    parent = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '0/0']
+    child1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
+    child2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '0/0']
+    children = [child1, child2]
+    parent_expanded = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '0/0']
 
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+    at = _new_allele_translator(parent, parent_expanded, children, col2idx)
 
-    record = update_calls(deletion, targets, col2idx, at)
+    record = update_calls(parent, children, col2idx, at)
 
     assert str == type(record)
     assert 'chr1' == record.split('\t')[0]
@@ -223,15 +222,15 @@ def test_update_calls():
     assert '0/0' == record.split('\t')[9]
 
     col2idx = {'#CHROM': 0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4}
-    deletion = ['chrY', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1']
-    target1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '1']
-    target2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '1']
-    targets = [target1, target2]
-    expanded_deletion = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1']
+    parent = ['chrY', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1']
+    child1 = ['chr1', 101, 'rs101', 'A', '*,C', '.', '.', '.', 'GT', '1']
+    child2 = ['chr1', 102, 'rs102', 'A', '*,C', '.', '.', '.', 'GT', '1']
+    children = [child1, child2]
+    parent_expanded = ['chr1', 100, 'rs100', 'CAA', 'C,CAAAA,CAAA', '.', '.', '.', 'GT', '1']
 
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+    at = _new_allele_translator(parent, parent_expanded, children, col2idx)
 
-    record = update_calls(deletion, targets, col2idx, at)
+    record = update_calls(parent, children, col2idx, at)
 
     assert str == type(record)
     assert 'chrY' == record.split('\t')[0]

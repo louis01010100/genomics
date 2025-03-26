@@ -1,6 +1,7 @@
 
 from .utils import copy_vcf_header, is_gzip, create_col2idx
 import gzip
+import logging
 
 def _group_spandel(ifh, ofh):
     for line in ifh:
@@ -9,38 +10,39 @@ def _group_spandel(ifh, ofh):
         col2idx = create_col2idx(line)
         break
 
-    deletion = None
-    targets = list()
+    parent = None
+    children = list()
 
     for line in ifh:
         line = line.strip()
         items = line.split('\t', 8)
 
         if '*' not in items[col2idx['ALT']]:
-            if deletion and targets:
-                record = __group_spandel(deletion.split('\t'), targets, col2idx)
+            if parent and children:
+                
+                record = SpanFamily(parent.split('\t'), children, col2idx).combine()
                 ofh.write(f'{record}\n')
-                deletion = None
-                targets = list()
+                parent = None
+                children = list()
                 ofh.write(f'{line}\n')
-            elif deletion: 
-                ofh.write(f'{deletion}\n')
+            elif parent: 
+                ofh.write(f'{parent}\n')
                 ofh.write(f'{line}\n')
-                deletion = None
+                parent = None
             else:
                 if len(items[col2idx['REF']]) > 1:
-                    deletion = line
+                    parent = line
                 else:
                     ofh.write(f'{line}\n')
 
         else:
-            targets.append(line.split('\t'))
+            children.append(line.split('\t'))
 
-    if deletion and targets:
-        record = __group_spandel(deletion.split('\t'), targets, col2idx)
+    if parent and children:
+        record = SpanFamily(parent.split('\t'), children, col2idx).combine()
         ofh.write(f'{record}\n')
-    elif deletion: 
-        ofh.write(f'{deletion}\n')
+    elif parent: 
+        ofh.write(f'{parent}\n')
     else:
         pass
 
@@ -58,19 +60,19 @@ def group_spandel(input_vcf_file, output_vcf_file):
 
     return output_vcf_file
 
-def _expand_spandel(deletion: list, targets:list[list], col2idx:dict)-> tuple[str, str]:
-    dpos = int(deletion[col2idx['POS']])
-    dref = deletion[col2idx['REF']]
-    dalts = deletion[col2idx['ALT']].split('\t')
+def _expand_spandel(parent: list, children:list[list], col2idx:dict):
+    dpos = int(parent[col2idx['POS']])
+    dref = parent[col2idx['REF']]
+    dalts = parent[col2idx['ALT']].split('\t')
 
     max_end = dpos + len(dref) -1
     max_ref = dref
     max_alts = dalts
     suffix = ''
 
-    for target in targets:
-        tpos = int(target[col2idx['POS']])
-        tref = target[col2idx['REF']]
+    for child in children:
+        tpos = int(child[col2idx['POS']])
+        tref = child[col2idx['REF']]
 
         tend = tpos + len(tref) - 1
 
@@ -81,13 +83,13 @@ def _expand_spandel(deletion: list, targets:list[list], col2idx:dict)-> tuple[st
 
             max_end = tpos + len(tref) -1
 
-    expanded_deletion = list()
-    expanded_deletion.extend(deletion)
+    parent_expanded = list()
+    parent_expanded.extend(parent)
 
-    expanded_deletion[col2idx['ID']] = deletion[col2idx['ID']]
-    expanded_deletion[col2idx['REF']] = max_ref
-    expanded_deletion[col2idx['ALT']] = ','.join(max_alts)
-    return expanded_deletion
+    parent_expanded[col2idx['ID']] = parent[col2idx['ID']]
+    parent_expanded[col2idx['REF']] = max_ref
+    parent_expanded[col2idx['ALT']] = ','.join(max_alts)
+    return parent_expanded
 
 class AlleleTranslator():
 
@@ -111,15 +113,15 @@ class AlleleTranslator():
     def turn_allele2allele(self, id_, allele):
         return self._allele2allele[id_][allele]
 
-    def update_code2allele(self, deletion, targets, col2idx):
-        self._add_code2allele(deletion[col2idx['ID']], 0, deletion[col2idx['REF']])
-        for code, allele in enumerate(deletion[col2idx['ALT']].split(','), 1):
-            self._add_code2allele(deletion[col2idx['ID']], code, allele)
+    def update_code2allele(self, parent, children, col2idx):
+        self._add_code2allele(parent[col2idx['ID']], 0, parent[col2idx['REF']])
+        for code, allele in enumerate(parent[col2idx['ALT']].split(','), 1):
+            self._add_code2allele(parent[col2idx['ID']], code, allele)
 
-        for target in targets:
-            self._add_code2allele(target[col2idx['ID']], 0, target[col2idx['REF']])
-            for code, allele in enumerate(target[col2idx['ALT']].split(','), 1):
-                self._add_code2allele(target[col2idx['ID']], code, allele)
+        for child in children:
+            self._add_code2allele(child[col2idx['ID']], 0, child[col2idx['REF']])
+            for code, allele in enumerate(child[col2idx['ALT']].split(','), 1):
+                self._add_code2allele(child[col2idx['ID']], code, allele)
 
     def _add_code2allele(self, id_, code, allele):
         if id_ not in self._code2allele:
@@ -175,44 +177,44 @@ def set_id(record: list, col2idx:dict)-> list:
     return record
 
 def _new_allele_translator(
-        deletion: list[str], expanded_deletion: list[str], 
-        targets:list[list[str]], col2idx:dict):
+        parent: list[str], parent_expanded: list[str], 
+        children:list[list[str]], col2idx:dict):
     at = AlleleTranslator()
 
-    at.update_code2allele(deletion, targets, col2idx)
+    at.update_code2allele(parent, children, col2idx)
 
-    dpos_expanded = int(expanded_deletion[col2idx['POS']])
-    dref_expanded = expanded_deletion[col2idx['REF']]
-    dalts_expanded = expanded_deletion[col2idx['ALT']].split(',')
+    dpos_expanded = int(parent_expanded[col2idx['POS']])
+    dref_expanded = parent_expanded[col2idx['REF']]
+    dalts_expanded = parent_expanded[col2idx['ALT']].split(',')
 
     at.update_allele2allele(
-        deletion[col2idx['ID']], 
-        deletion[col2idx['REF']], 
+        parent[col2idx['ID']], 
+        parent[col2idx['REF']], 
         dref_expanded,
     )
 
-    for old_allele, new_allele in zip(deletion[col2idx['ALT']].split(','), dalts_expanded):
+    for old_allele, new_allele in zip(parent[col2idx['ALT']].split(','), dalts_expanded):
         at.update_allele2allele(
-            deletion[col2idx['ID']], 
+            parent[col2idx['ID']], 
             old_allele,
             new_allele,
         )
 
     new_alts = dalts_expanded
 
-    for target in targets:
-        tpos = int(target[col2idx['POS']])
-        tref = target[col2idx['REF']]
-        talts = target[col2idx['ALT']].split(',')
+    for child in children:
+        tpos = int(child[col2idx['POS']])
+        tref = child[col2idx['REF']]
+        talts = child[col2idx['ALT']].split(',')
         prefix = dref_expanded[0:(tpos - dpos_expanded + 1 - 1)]
         suffix = dref_expanded[tpos - dpos_expanded + 1 -1 + len(tref) + 1 - 1:]
-        at.update_allele2allele(target[col2idx['ID']], tref, dref_expanded)
+        at.update_allele2allele(child[col2idx['ID']], tref, dref_expanded)
         for talt in talts:
             if talt == '*':
                 continue
             else:
                 new_talt = prefix + talt + suffix
-                at.update_allele2allele(target[col2idx['ID']], talt, new_talt)
+                at.update_allele2allele(child[col2idx['ID']], talt, new_talt)
             new_alts.append(new_talt)
 
     new_alts = sorted(new_alts)
@@ -227,77 +229,78 @@ def _new_allele_translator(
 
 
 
-def __group_spandel(deletion: list[str], targets:list[list[str]], col2idx:dict) -> str:
-
-    deletion = set_id(deletion, col2idx)
-    targets = [set_id(target, col2idx) for target in targets]
-    expanded_deletion = _expand_spandel(deletion, targets, col2idx)
-    at = _new_allele_translator(deletion, expanded_deletion, targets, col2idx)
+def __group_spandel(parent: list[str], children:list[list[str]], col2idx:dict) -> str:
+    return SpanFamily(parent, children, col2idx).combine()
 
 
-    grouped_record = update_calls(expanded_deletion, targets, col2idx, at)
+def update_calls(parent_expanded: list, children: list[list], col2idx, allele_translator)-> str:
 
-    return grouped_record
+    parent_expanded[col2idx['ALT']] = ','.join(allele_translator.new_alts)
 
-
-def update_calls(expanded_deletion: list, targets: list[list], col2idx, allele_translator)-> str:
-
-    expanded_deletion[col2idx['ALT']] = ','.join(allele_translator.new_alts)
-
-    ref_allele = expanded_deletion[col2idx['REF']]
+    ref_allele = parent_expanded[col2idx['REF']]
 
     result = list()
 
-    for idx in range(0, len(expanded_deletion)):
+    for idx in range(0, len(parent_expanded)):
         if idx < 9:
-            result.append(expanded_deletion[idx])
+            result.append(parent_expanded[idx])
             continue
 
         alt_alleles = list()
 
-        
-        old_codes = expanded_deletion[idx].split('/')
+        old_codes = parent_expanded[idx].split('/')
 
         cn = len(old_codes)
+
+        n_alts_expected = 0
 
         for code in old_codes:
             if code == '.':
                 continue
             if code == '0':
                 continue
+            n_alts_expected += 1
 
             code = int(code)
 
-            allele_old = allele_translator.turn_code2allele(expanded_deletion[col2idx['ID']], code)
-            allele_new = allele_translator.turn_allele2allele(expanded_deletion[col2idx['ID']], allele_old)
+            allele_old = allele_translator.turn_code2allele(parent_expanded[col2idx['ID']], code)
+            allele_new = allele_translator.turn_allele2allele(parent_expanded[col2idx['ID']], allele_old)
 
             alt_alleles.append(allele_new)
 
-        for target in targets:
-            for code in target[idx].split('/'):
+        conflict = False
+        for child in children:
+            n_stars = 0
+            for code in child[idx].split('/'):
                 if code == '.':
                     continue
                 if code == '0':
                     continue
 
                 code = int(code)
-                allele_old = allele_translator.turn_code2allele(target[col2idx['ID']], code)
+                allele_old = allele_translator.turn_code2allele(child[col2idx['ID']], code)
 
                 if allele_old == '*':
+                    n_stars += 1
                     continue
 
-                allele_new = allele_translator.turn_allele2allele(target[col2idx['ID']], allele_old)
+                allele_new = allele_translator.turn_allele2allele(child[col2idx['ID']], allele_old)
 
                 alt_alleles.append(allele_new)
 
+            if n_alts_expected != n_stars:
+                conflict = True
+
         alleles = alt_alleles
-        if len(alleles) < cn:
-            for i in range(cn - len(alleles)):
-                alleles.append(ref_allele)
-        if len(alleles) > cn:
+        if conflict:
             call = './.'
-            print('## multiallelic genotypes', expanded_deletion, alleles)
+            print('## multiallelic genotypes', parent_expanded, alleles)
         else:
+            assert len(alleles) <= cn, f'CN:{cn}\t{alleles}'
+
+            if len(alleles) < cn:
+                for i in range(cn - len(alleles)):
+                    alleles.append(ref_allele)
             codes = list()
             for allele in alleles:
                 code = allele_translator.turn_allele2code(allele)
@@ -314,6 +317,26 @@ def is_prefix(allele_new, alleles):
             return False
     return True
         
+
+
+class SpanFamily:
+    def __init__(self, parent, children, col2idx):
+        self._raw_parent = parent
+        self._raw_children = children
+        self._col2idx = col2idx
+
+    def combine(self):
+        self._parent = set_id(self._raw_parent, self._col2idx)
+        self._children = [set_id(child, self._col2idx) for child in self._raw_children]
+
+        self._parent_expanded = _expand_spandel(self._parent, self._children, self._col2idx)
+
+        at = _new_allele_translator(self._parent, self._parent_expanded, self._children, self._col2idx)
+
+        grouped_record = update_calls(self._parent_expanded, self._children, self._col2idx, at)
+
+        return grouped_record
+
 
 
 

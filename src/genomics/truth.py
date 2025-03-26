@@ -74,28 +74,28 @@ def export_snv_truth(
     samples = load_list(samples_file)
     sample2gender = load_dict(genders_file)
 
-    # log_info('subset samples')
-    # vcf_files = subset_samples(
-    #     vcf_files=vcf_files,
-    #     genome_file=genome_file,
-    #     samples=samples,
-    #     trim_alts = True,
-    #     output_dir=sample_vcf_dir,
-    #     n_threads=n_threads,
-    # )
+    log_info('subset samples')
+    vcf_files = subset_samples(
+        vcf_files=vcf_files,
+        genome_file=genome_file,
+        samples=samples,
+        trim_alts = True,
+        output_dir=sample_vcf_dir,
+        n_threads=n_threads,
+    )
 
     vcf_files = [x for x in sample_vcf_dir.glob('*/*info-norm-uppercase-samples-format-info-trim_alt-norm-uppercase-ex.vcf.bgz')]
 
-    log_info('groupd spanning deletions')
-
-    spandel_dir = output_dir / 'spandels'
-    spandel_dir.mkdir(exist_ok=True)
-
-    vcf_files = group_spanning_deletions(
-            vcf_files = vcf_files,
-            output_dir = spandel_dir,
-            n_threads = n_threads,
-    )
+    # log_info('groupd spanning deletions')
+    #
+    # spandel_dir = output_dir / 'spandels'
+    # spandel_dir.mkdir(exist_ok=True)
+    #
+    # vcf_files = group_spanning_deletions(
+    #         vcf_files = vcf_files,
+    #         output_dir = spandel_dir,
+    #         n_threads = n_threads,
+    # )
 
     log_info('load coordinates')
     coordinates = load_coordinates(coordinates_file)
@@ -117,8 +117,6 @@ def export_snv_truth(
         chrm_missing_as_homref=chrm_missing_as_homref,
         n_threads=n_threads,
     )
-
-    return
 
     if merge_vcf:
         one_vcf = concat(
@@ -369,7 +367,7 @@ def fetch_calls(jobs):
         if len(candidates) == 0:
             record = _new_record(coordinate, coordinate_expanded, None, None, 'MISSING')
         else:
-            candidates = [ x for x in candidates if '*' not in x.alts]
+            assert  len([ x for x in candidates if '*' in x.alts]) == 0
 
             if len(candidates) == 0:
                 record = _new_record(coordinate, coordinate_expanded, None, None, 'COMPLEX')
@@ -649,6 +647,7 @@ def group_spanning_deletions(
 
     def jobs(vcf_files, output_dir):
         for vcf_file in vcf_files:
+            print(vcf_file)
             yield {
                 'vcf_file': vcf_file,
                 'output_dir': output_dir,
