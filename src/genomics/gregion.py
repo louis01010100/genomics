@@ -1,9 +1,78 @@
+from pathlib import Path
+from ncls import NCLS
+
+class GenomicRegions():
+    def __init__(self, regions, idx2name):
+        self.regions = regions
+        self.idx2name = idx2name
+
+    @property
+    def chroms(self):
+        return set([str(x) for x in self.regions.keys()])
+
+    def find_overlap(self, chrom:str, start:int, end:int):
+
+        bag = list()
+        if chrom not in self.regions.keys():
+            return bag
+
+        records = self.regions[chrom].find_overlap(start, end)
+
+        for record in records:
+            start = record[0]
+            end = record[1]
+            idx = record[2]
+            name = self.idx2name[idx]
+            bag.append(GenomicRegion(chrom, start, end, name))
+
+        return bag
+
+
+def create_genomic_regions(genomic_regions_file:Path):
+
+    bag = dict()
+
+    idx2name = dict()
+
+    idx = 0
+
+    with genomic_regions_file.open('rt') as fh:
+
+        c2i = {c: i for i, c in enumerate(next(fh).strip().split('\t'))}
+
+        for line in fh:
+
+            items = line.strip().split('\t')
+
+            name = items[c2i['name']]
+            chrom = items[c2i['chrom']]
+            start = int(items[c2i['start']])
+            end = int(items[c2i['end']])
+
+            if chrom not in bag:
+                bag[chrom] = {'idx': list(), 'starts': list(), 'ends': list()}
+
+            bag[chrom]['idx'].append(idx)
+            bag[chrom]['starts'].append(start)
+            bag[chrom]['ends'].append(end)
+
+            idx2name[idx]= name
+
+    bag2 = dict()
+
+    for k, v in bag.items():
+        bag2[k] = NCLS(v['starts'], v['ends'], v['idx'])
+
+    return GenomicRegions( bag2, idx2name)
+
+
 class GenomicRegion():
 
-    def __init__(self, chrom, start, end):
+    def __init__(self, chrom, start, end, name = None):
         self._chrom = chrom
         self._start = start
         self._stop = end
+        self._name = name
 
     def contains(self, chrom, pos):
         if self.chrom != chrom:
@@ -33,6 +102,9 @@ class GenomicRegion():
     @property
     def end(self):
         return self._stop
+    @property
+    def name(self):
+        return self._name
 
     def __eq__(self, other):
         return self.chrom == other.chrom and self.start == other.start and self.end == other.end

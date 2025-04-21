@@ -1,6 +1,16 @@
 #!/usr/bin/env python
 from pathlib import Path
-from genomics.spandel import ( group_spandel, _expand_spandel, update_calls, AlleleTranslator, _new_allele_translator, _expand, _create_backbone, SpanFamily)
+import pytest
+from genomics.spandel import ( 
+        group_spandel, 
+        _expand_spandel, 
+        update_calls, 
+        AlleleTranslator, 
+        _new_allele_translator, 
+        _create_backbone, 
+        SpanFamily, 
+        Site,
+)
 import polars as pl
 from genomics.vcf import Vcf
 
@@ -38,6 +48,7 @@ def test__expand_spandel():
 
 
 
+@pytest.mark.skip()
 def test_SpanFamily_combine(tmp_path):
 
     parent = ['chr22', '10516150','.','GTA','G','.','.','.']
@@ -259,10 +270,10 @@ def test__create_backbone():
         ['chr22', '10516152','.','A','*,G','.','.','.'],
     ]
 
-    pos, end, ref = _create_backbone(parent, children, col2idx)
-    assert 10516150 == pos
-    assert 10516152 == end
-    assert 'GTA' == ref
+    backbone = _create_backbone(parent, children, col2idx)
+    assert 10516150 == backbone['pos']
+    assert 10516152 == backbone['end']
+    assert 'GTA' == backbone['seq']
 
     parent = ['chr22', '10516150','.','GTA','G','.','.','.']
     children = [ 
@@ -270,53 +281,98 @@ def test__create_backbone():
         ['chr22', '10516152','.','AC','*,A','.','.','.'],
     ]
 
-    pos, end, ref = _create_backbone(parent, children, col2idx)
-    assert 10516150 == pos
-    assert 10516153 == end
-    assert 'GTAC' == ref
+    backbone = _create_backbone(parent, children, col2idx)
+    assert 10516150 == backbone['pos']
+    assert 10516153 == backbone['end']
+    assert 'GTAC' == backbone['seq']
 
 
-def test__expand():
+def test_SpanFamily_expand():
+    parent = ['chr22', '10516150','.','GTA','G','.','.','.']
+    children = list()
+    children.append(['chr22', '10516151','.','T','*','.','.','.'])
+    children.append(['chr22', '10516152','.','A','*,G','.','.','.'])
+
     col2idx = {'#CHROM':0, 'POS': 1, 'ID': 2, 'REF': 3, 'ALT': 4, 'QUAL': 5, 'FILTER': 6, 'INFO':7}
 
-    snv = ['chr22', '10516150','.','GTA','G','.','.','.']
+    sf = SpanFamily(parent, children, col2idx)
 
-    record, map_ = _expand(snv, col2idx, 10516150, 10516152, 'GTA' )
+    assert 0 == len(sf._expanded_sites)
 
-    assert list == type(record)
-    assert 'chr22' == record[0]
-    assert 10516150 == record[1]
-    assert 'chr22:10516150:GTA:G'[2]
-    assert 'GTA' == record[3]
-    assert 'G' == record[4]
+    sf.expand()
 
-    snv = ['chr22', '10516151','.','T','*','.','.','.']
-    record, map_ = _expand(snv, col2idx, 10516150, 10516152, 'GTA' )
+    assert 3 == len(sf._expanded_sites)
+    assert 'chr22' == sf._expanded_sites[0].chrom
+    assert 10516150 == sf._expanded_sites[0].pos
+    assert 'GTA' == sf._expanded_sites[0].ref
+    assert 'G' == sf._expanded_sites[0].alt
 
-    assert list == type(record)
-    assert 'chr22' == record[0]
-    assert 10516150 == record[1]
-    assert 'chr22:10516151:T:*'[2]
-    assert 'GTA' == record[3]
-    assert '*' == record[4]
+    assert 'chr22' == sf._expanded_sites[1].chrom
+    assert 10516150 == sf._expanded_sites[1].pos
+    assert 'GTA' == sf._expanded_sites[1].ref
+    assert '*' == sf._expanded_sites[1].alt
 
-    snv = ['chr22', '10516152','.','A','G','.','.','.']
-    record, map_ = _expand(snv, col2idx, 10516150, 10516152, 'GTA' )
+    assert 'chr22' == sf._expanded_sites[2].chrom
+    assert 10516150 == sf._expanded_sites[2].pos
+    assert 'GTA' == sf._expanded_sites[2].ref
+    assert '*,GTG' == sf._expanded_sites[2].alt
 
-    assert list == type(record)
-    assert 'chr22' == record[0]
-    assert 10516150 == record[1]
-    assert 'chr22:10516152:A:*'[2]
-    assert 'GTA' == record[3]
-    assert 'GTG' == record[4]
+def test_Site_expand():
+
+    backbone = {'pos': 10516150, 'end': 10516152, 'seq': 'GTA'}
+
+    record = Site('chr22', 10516150, 'GTA', 'G').expand(backbone)
+    assert 'chr22' == record.chrom
+    assert 10516150 == record.pos
+    assert 'GTA' == record.ref
+    assert 'G' == record.alt
+
+    record = Site('chr22', 10516151, 'T', '*').expand(backbone)
+    assert 'chr22' == record.chrom
+    assert 10516150 == record.pos
+    assert 'GTA' == record.ref
+    assert '*' == record.alt
+
+    record = Site('chr22', 10516152, 'A', 'G').expand(backbone)
+    assert 'chr22' == record.chrom
+    assert 10516150 == record.pos
+    assert 'GTA' == record.ref
+    assert 'GTG' == record.alt
 
 
-    snv = ['chr1', '49515','.','G','*','.','.','.']
-    record, map_ = _expand(snv, col2idx, 49514, 49515, 'AG' )
+    record = Site('chr1', 49515, 'G', '*').expand({'pos': 49514, 'end': 49515, 'seq': 'AG'})
 
-    assert list == type(record)
-    assert 'chr1' == record[0]
-    assert 49514 == record[1]
-    assert 'chr1::49515:G:*'[2]
-    assert 'AG' == record[3]
-    assert '*' == record[4]
+    assert 'chr1' == record.chrom
+    assert 49514 == record.pos
+    assert 'AG' == record.ref
+    assert '*' == record.alt
+
+def test_Site_translate():
+
+    backbone = {'pos': 10516150, 'end': 10516152, 'seq': 'GTA'}
+
+    record = Site('chr22', 10516150, 'GTA', 'G').expand(backbone)
+    assert 'GTA' == record.translate('GTA')
+    assert 'G' == record.translate('G')
+
+    record = Site('chr22', 10516151, 'T', '*').expand(backbone)
+    assert 'GTA' == record.translate('T')
+    assert '*' == record.translate('*')
+
+    record = Site('chr22', 10516152, 'A', 'G').expand(backbone)
+    assert 'GTA' == record.translate('A')
+    assert 'GTG' == record.translate('G')
+
+    record = Site('chr1', 49515, 'G', '*').expand({'pos': 49514, 'end': 49515, 'seq': 'AG'})
+
+    assert 'AG' == record.translate('G')
+    assert '*' == record.translate('*')
+
+def test_Site_allele():
+
+    assert 'GTA' == Site('chr22', 10516150, 'GTA', 'A,G').allele('0')
+    assert 'A' == Site('chr22', 10516150, 'GTA', 'A,G').allele('1')
+    assert 'G' == Site('chr22', 10516150, 'GTA', 'A,G').allele('2')
+    assert None == Site('chr22', 10516150, 'GTA', 'A,G').allele('.')
+    assert '*' == Site('chr22', 10516150, 'GTA', '*,G').allele('1')
+

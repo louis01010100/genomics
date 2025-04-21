@@ -172,7 +172,7 @@ class AlleleTranslator():
 
 def set_id(record: list, col2idx:dict)-> list:
     if record[col2idx['ID']] == '.':
-        record[col2idx['ID']] = ':'.join([record[0], record[1], record[3], record[4]])
+        record[col2idx['ID']] = ':'.join([str(x) for x in [record[0], record[1], record[3], record[4]]])
 
     return record
 
@@ -311,17 +311,117 @@ def is_prefix(allele_new, alleles):
             return False
     return True
         
+class Site:
+    def __init__(self, chrom, pos, ref, alt, allele_map = list()):
+
+        self._chrom = chrom
+        self._pos = int(pos)
+        self._end = self._pos + len(ref) - 1
+        self._ref = ref
+        self._alt = alt
+        self._alts = alt.split(',')
+        self._allele_map = allele_map
+
+    @property
+    def chrom(self):
+        return self._chrom
+
+    @property
+    def pos(self):
+        return self._pos
+
+    @property
+    def ref(self):
+        return self._ref
+
+    @property
+    def alt(self):
+        return self._alt
+    @property
+    def alts(self):
+        return self._alts
+
+    @property
+    def alt_map(self):
+        return self._alt_map
+
+    def expand(self, backbone:dict):
+        end = self._pos + len(self._ref) - 1
+
+        backbone_seq = backbone['seq']
+        backbone_pos = backbone['pos']
+        backbone_end = backbone['end']
+
+        prefix = backbone_seq[0: (self._pos - backbone_pos + 1 - 1)]
+        suffix = backbone_seq[self._end -backbone_pos + 1:]
+
+        pos_expanded = backbone_pos
+        ref_expanded = prefix + self._ref + suffix
+
+        alts_expanded = list()
+        for alt in self._alts:
+            if alt == '*':
+                alt_new = '*'
+            else:
+                alt_new = prefix + alt + suffix
+            alts_expanded.append(alt_new)
+
+        allele_map = dict()
+        allele_map[self._ref] = ref_expanded
+        for x, y in zip(self._alts, alts_expanded):
+            allele_map[x] = y
+
+        return Site(self._chrom, pos_expanded, ref_expanded, ','.join(alts_expanded), allele_map)
+
+    def translate(self, allele):
+        return self._allele_map[allele]
+
+    def allele(self, code: str):
+        if code == '.':
+            return None
+
+        code = int(code)
+        if code == 0:
+            return self._ref
+        return self._alts[int(code) -1]
+
 
 
 class SpanFamily:
     def __init__(self, parent, children, col2idx):
-        self._parent = parent
         self._col2idx = col2idx
-
         self._parent = set_id(parent, self._col2idx)
         self._children = [set_id(child, self._col2idx) for child in children]
-        self._parent_expanded = None
-        self._children_expanded = list()
+        self._expanded_sites = dict()
+        self._alts = list()
+
+    def expand(self):
+        backbone = _create_backbone(self._parent, self._children, self._col2idx)
+
+        self._expanded_sites[0] = Site(
+                chrom = self._parent[self._col2idx['#CHROM']],
+                pos = self._parent[self._col2idx['POS']],
+                ref = self._parent[self._col2idx['REF']],
+                alt = self._parent[self._col2idx['ALT']],
+        ).expand(backbone)
+
+        for idx, child in enumerate(self._children, start = 1):
+            self._expanded_sites[idx] = Site(
+                    chrom = child[self._col2idx['#CHROM']],
+                    pos = child[self._col2idx['POS']],
+                    ref = child[self._col2idx['REF']],
+                    alt = child[self._col2idx['ALT']],
+            ).expand(backbone)
+        return self
+
+    def allele(self, member_idx, code):
+        assert self._expanded_sites, 'Invoke Expand First'
+
+        if code == 0:
+            return self._expanded_sites[member_idx].ref
+        else:
+            return self._expanded_sites[member_idx].alts[code - 1]
+
 
     def __str__(self):
 
@@ -329,93 +429,74 @@ class SpanFamily:
         data.append('#' * 78)
         data.append('PARENT')
         data.append('\t'.join(self._parent))
-        if self._parent_expanded:
-            data.append('\t'.join([str(x) for x in self._parent_expanded['snv']]))
-        else:
-            data.append('\t'.join(['.' for x in self._parent]))
         data.append('CHILDREN')
 
-        if self._children_expanded:
-            for before, after in zip(self._children, self._children_expanded):
-                data.append( '\t'.join(before))
-                data.append( '\t'.join([str(x) for x in after['snv']]))
-        else:
-            for child in self._children:
-                data.append( '\t'.join(child))
-                data.append( '\t'.join(['.' for x in child]))
+        for child in self._children:
+            data.append( '\t'.join(child))
+            data.append( '\t'.join(['.' for x in child]))
 
         data.pop()
         data.append('#' * 78)
 
         return  '\n'.join(data)
 
+    @property
+    def pos(self):
+        return self._parent_expanded['snv'][self._col2idx['POS']]
+
+
+    @property
+    def ref(self):
+        return self._parent_expanded['snv'][self._col2idx['REF']]
+
+    @property
+    def alt(self):
+        return ','.join(self.alts())
+
+    @property
+    def alts(self):
+        if not self._alts:
+            alts = list()
+            alts.extend(self._parent_expanded['snv'][self._col2idx['ALT']].split(','))
+
+            for item in self._children_expanded:
+                alts.extend(item['snv'][self._col2idx['ALT']].split(','))
+
+            self._alts = sorted(list({x for x in alts if x != '*'}))
+
+        return self._alts
+
+    def _combine(self, idx):
+        pass
+
+        # refs = set()
+        # alts = set()
+        #
+        # for code in self._parent[idx].split(','):
+        #     if code == '0':
+        #         refs = self.allele(0, code)
+        #     else:
+
+
     def combine(self):
+        assert len(self._expanded_sites) > 0, 'Invoke expand before combine'
 
-        pos, end, seq = _create_backbone(self._parent, self._children, self._col2idx)
-        parent_expanded, parent_map = _expand(self._parent, self._col2idx, pos, end, seq)
+        allele2code= {}
 
-        self._parent_expanded = {
-            'snv': parent_expanded,
-            'map': parent_map,
-        }
+        combined_record = list()
 
-        for child in self._children:
-            child_expanded, child_map = _expand(child, self._col2idx, pos, end, seq)
-            self._children_expanded.append({
-                'snv': child_expanded,
-                'map': child_map,
-            })
+        combined_record.extend(self._parent[0:9])
+        combined_record[self._col2idx['POS']] = self.pos
+        combined_record[self._col2idx['REF']] = self.ref
+        combined_record[self._col2idx['ALT']] = self.alt
 
+        for idx in range(9, len(self._parent)):
+            combined_call = self._combine(idx)
+            combined_calls.append(combined_call)
 
-        at = _new_allele_translator(self._parent, parent_expanded, self._children, self._col2idx)
+            combined_record.append(combined_call)
 
-        grouped_record = update_calls(self._parent_expanded['snv'], self._children, self._col2idx, at)
-
-        return grouped_record
-
-
-def _expand(snv, col2idx, backbone_pos, backbone_end, backbone_seq):
-
-    pos = int(snv[col2idx['POS']])
-    ref = snv[col2idx['REF']]
-    alts = snv[col2idx['ALT']].split(',')
-    end = pos + len(ref) - 1
-
-
-    prefix = backbone_seq[0: (pos - backbone_pos + 1 - 1)]
-    suffix = backbone_seq[end -backbone_pos + 1:]
-
-    pos_new = backbone_pos
-    ref_new = prefix + ref + suffix
-
-    alts_new = list()
-    for alt in alts:
-        if alt == '*':
-            alt_new = '*'
-        else:
-            alt_new = prefix + alt + suffix
-        alts_new.append(alt_new)
-
-
-    alt_map = dict()
-    for x, y in zip(alts, alts_new):
-        alt_map[x] = y
-
-    map_ = {
-        'pos': {pos: pos_new},
-        'ref': {ref: ref_new},
-        'alt': alt_map,
-    }
-
-    snv_expanded = list()
-
-    snv_expanded.extend(snv)
-
-    snv_expanded[col2idx['POS']] = pos_new
-    snv_expanded[col2idx['REF']] = ref_new
-    snv_expanded[col2idx['ALT']] = ','.join(alts_new)
-
-    return snv_expanded, map_
+        return '\t'.join([str(x) for x in combined_record])
 
 def _create_backbone(parent, children, col2idx):
     ppos = int(parent[col2idx['POS']])
@@ -438,4 +519,4 @@ def _create_backbone(parent, children, col2idx):
             max_ref = max_ref + suffix
             max_end = cpos + len(cref) -1
 
-    return ppos, max_end, max_ref
+    return {'pos': ppos, 'end': max_end, 'seq': max_ref}
