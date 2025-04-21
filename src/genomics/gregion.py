@@ -28,6 +28,7 @@ class GenomicRegions():
         return bag
 
 
+# 1-based, closed interval
 def create_genomic_regions(df):
 
 
@@ -78,7 +79,7 @@ class GenomicRegion():
     def overlaps(self, other):
         if self.chrom != other.chrom:
             return False
-        return self.start <= other.end and self.end >= other.start
+        return self.start < other.end and self.end > other.start
 
 
     def merge(self, other):
