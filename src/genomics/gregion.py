@@ -29,7 +29,7 @@ class GenomicRegions():
 
 
 # 1-based, closed interval
-def create_genomic_regions(df):
+def create_genomic_regions(bed_df):
 
 
     bag = dict()
@@ -37,7 +37,7 @@ def create_genomic_regions(df):
     idx = 0
     idx2name = dict()
 
-    for record in df.to_dicts():
+    for record in bed_df.to_dicts():
         name = record['name']
         chrom = record['chrom']
         start = int(record['start'])
