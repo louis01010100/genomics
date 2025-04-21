@@ -1,13 +1,19 @@
 from pathlib import Path
+import polars as pl
 import pytest
 
 from genomics.gregion import GenomicRegion, create_genomic_regions
 
 
 def test_GenomicRegions():
-    gregions_file = Path(__file__).parents[0] / 'fixture' / 'gregions.tsv'
+    data = pl.from_dict({
+        'chrom': ['chr1', 'chr1', 'chr2'],
+        'start': [10000, 30000, 30000],
+        'end': [20000, 40000, 40000],
+        'name': ['r1', 'r2', 'r3'],
+    })
 
-    regions = create_genomic_regions(gregions_file)
+    regions = create_genomic_regions(data)
 
     assert {'chr1', 'chr2'} == regions.chroms
 

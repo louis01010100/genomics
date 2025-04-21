@@ -28,35 +28,31 @@ class GenomicRegions():
         return bag
 
 
-def create_genomic_regions(genomic_regions_file:Path):
+def create_genomic_regions(df):
+
 
     bag = dict()
 
+    idx = 0
     idx2name = dict()
 
-    idx = 0
+    for record in df.to_dicts():
+        name = record['name']
+        chrom = record['chrom']
+        start = int(record['start'])
+        end = int(record['end'])
 
-    with genomic_regions_file.open('rt') as fh:
+        if chrom not in bag:
+            bag[chrom] = {'idx': list(), 'starts': list(), 'ends': list()}
 
-        c2i = {c: i for i, c in enumerate(next(fh).strip().split('\t'))}
+        bag[chrom]['idx'].append(idx)
+        bag[chrom]['starts'].append(start)
+        bag[chrom]['ends'].append(end)
 
-        for line in fh:
+        idx2name[idx]= name
+        idx += 1
 
-            items = line.strip().split('\t')
-
-            name = items[c2i['name']]
-            chrom = items[c2i['chrom']]
-            start = int(items[c2i['start']])
-            end = int(items[c2i['end']])
-
-            if chrom not in bag:
-                bag[chrom] = {'idx': list(), 'starts': list(), 'ends': list()}
-
-            bag[chrom]['idx'].append(idx)
-            bag[chrom]['starts'].append(start)
-            bag[chrom]['ends'].append(end)
-
-            idx2name[idx]= name
+    
 
     bag2 = dict()
 
