@@ -83,9 +83,17 @@ class Variant():
     def ref(self):
         return self._ref
 
+    @ref.setter
+    def ref(self, ref):
+        self._ref = ref
+
     @property
     def alt(self):
         return self._alt
+
+    @alt.setter
+    def alt(self, alt):
+        self._alt = alt
 
     @property
     def qual(self):
@@ -332,22 +340,23 @@ class Variant():
 
 
 
+# bed format
 def get_region(chrom, pos, ref, alt):
 
     if is_snv(ref, alt):
-        return GenomicRegion(chrom, pos, pos)
+        return GenomicRegion(chrom, pos -1, pos)
     if is_ins(ref, alt):
         if len(ref) == 1:
             end = pos
         else:
             end = pos + len(ref) - 1
-        return GenomicRegion(chrom, pos, end)
+        return GenomicRegion(chrom, pos - 1, end)
     if is_del(ref, alt):
-        return GenomicRegion(chrom, pos, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos - 1, pos + len(ref) - 1)
     if is_ma(ref, alt):
-        return GenomicRegion(chrom, pos, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos - 1, pos + len(ref) - 1)
     if is_mnv(ref, alt):
-        return GenomicRegion(chrom, pos, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos - 1, pos + len(ref) - 1)
     raise Exception(f'{pos} {ref} {alt}')
 
 
@@ -563,3 +572,5 @@ def get_max_region(variant, chromosome):
             end = current_end
 
     return GenomicRegion(variant.chrom, start, end)
+
+

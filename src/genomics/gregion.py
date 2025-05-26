@@ -2,46 +2,42 @@ from pathlib import Path
 from ncls import NCLS
 
 class GenomicRegions():
-    def __init__(self, regions, idx2name):
-        self.regions = regions
-        self.idx2name = idx2name
+    def __init__(self, regions, registory):
+        self._regions = regions
+        self._registory = registory
 
     @property
     def chroms(self):
-        return set([str(x) for x in self.regions.keys()])
+        return set([str(x) for x in self._regions.keys()])
 
     def find_overlap(self, chrom:str, start:int, end:int):
 
         bag = list()
-        if chrom not in self.regions.keys():
+        if chrom not in self._regions.keys():
             return bag
 
-        records = self.regions[chrom].find_overlap(start, end)
+        records = self._regions[chrom].find_overlap(start, end)
 
         for record in records:
-            start = record[0]
-            end = record[1]
             idx = record[2]
-            name = self.idx2name[idx]
-            bag.append(GenomicRegion(chrom, start, end, name))
+            bag.append(self._registory[idx])
 
         return bag
 
+def create_genomic_regions(records):
 
-# 1-based, closed interval
-def create_genomic_regions(bed_df):
+    registry = dict()
 
+    idx = 0
 
     bag = dict()
 
-    idx = 0
-    idx2name = dict()
-
-    for record in bed_df.to_dicts():
-        name = record['name']
+    for record in records:
         chrom = record['chrom']
-        start = int(record['start'])
-        end = int(record['end'])
+        start = record['start']
+        end = record['end']
+
+        registry[idx] = record
 
         if chrom not in bag:
             bag[chrom] = {'idx': list(), 'starts': list(), 'ends': list()}
@@ -50,18 +46,14 @@ def create_genomic_regions(bed_df):
         bag[chrom]['starts'].append(start)
         bag[chrom]['ends'].append(end)
 
-        idx2name[idx]= name
         idx += 1
-
-    
 
     bag2 = dict()
 
     for k, v in bag.items():
         bag2[k] = NCLS(v['starts'], v['ends'], v['idx'])
 
-    return GenomicRegions( bag2, idx2name)
-
+    return GenomicRegions(bag2, registry)
 
 class GenomicRegion():
 
