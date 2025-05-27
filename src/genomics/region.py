@@ -6,3 +6,9 @@ class Region():
 
     def overlaps(self, other: Region) -> bool:
         return self.start <= other.end and other.start <= self.end
+
+    def intersects(self, other:Region) -> Region:
+        if not self.overlaps(other):
+            reutrn None
+
+

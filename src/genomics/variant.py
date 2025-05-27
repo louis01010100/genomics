@@ -130,10 +130,10 @@ class Variant():
 
     def expand(self, chrom):
         max_region = get_max_region(self, chrom)
-        new_pos = max_region.start
+        new_pos = max_region.start + 1
 
-        ref_prefix = chrom[max_region.start - 1: self.pos - 1]
-        ref_suffix = chrom[self.pos + len(self.ref) - 1:max_region.end]
+        ref_prefix = chrom[max_region.start: self.pos - 1]
+        ref_suffix = chrom[self.pos - 1 + len(self.ref):max_region.end]
 
         new_ref = ref_prefix + self.ref + ref_suffix
         new_alt = ','.join([ref_prefix + alt + ref_suffix for alt in self.alts])
@@ -352,11 +352,11 @@ def get_region(chrom, pos, ref, alt):
             end = pos + len(ref) - 1
         return GenomicRegion(chrom, pos - 1, end)
     if is_del(ref, alt):
-        return GenomicRegion(chrom, pos - 1, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos - 1, pos - 1 + len(ref))
     if is_ma(ref, alt):
-        return GenomicRegion(chrom, pos - 1, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos - 1, pos - 1 + len(ref))
     if is_mnv(ref, alt):
-        return GenomicRegion(chrom, pos - 1, pos + len(ref) - 1)
+        return GenomicRegion(chrom, pos - 1, pos - 1 +  len(ref))
     raise Exception(f'{pos} {ref} {alt}')
 
 
@@ -520,12 +520,12 @@ def sync(vx: Variant, vy: Variant, chromosome: str):
 
     def _sync(var, seq, region):
 
-        prefix = seq[:(var.region.start - region.start)+1 -1]
-        suffix = seq[(var.region.end  - region.start + 1):]
+        prefix = seq[:(var.region.start - region.start)]
+        suffix = seq[(var.region.end  - region.start):]
 
         return Variant(
                 chrom = var.chrom,
-                pos = region.start,
+                pos = region.start + 1,
                 ref = prefix + var.ref + suffix,
                 alt = ','.join([prefix + alt + suffix for alt in var.alts]),
                 id_ = var.id,
@@ -544,7 +544,7 @@ def sync(vx: Variant, vy: Variant, chromosome: str):
     vy_expanded = vy.expand(chromosome)
 
     region = vx_expanded.region.merge(vy_expanded.region)
-    seq = chromosome[region.start -1:region.end]
+    seq = chromosome[region.start:region.end]
 
     vx_synced = _sync(vx_expanded, seq, region)
     vy_synced = _sync(vy_expanded, seq, region)

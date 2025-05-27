@@ -63,6 +63,15 @@ class GenomicRegion():
         self._stop = end
         self._name = name
 
+    def intersects(self, other):
+        if not self.overlaps(other):
+            return None
+
+        start = min(self.start, other.start)
+        end = min(self.end, other.end)
+
+        return GenomicRegion(self.chrom, start, end)
+
     def contains(self, chrom, pos):
         if self.chrom != chrom:
             return False

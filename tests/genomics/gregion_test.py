@@ -4,6 +4,9 @@ import pytest
 
 from genomics.gregion import GenomicRegion, create_genomic_regions
 
+def test_intersects():
+    assert GenomicRegion('chr1', 100, 200).intersects( GenomicRegion('chr2', 100, 200)) is None
+
 
 def test_GenomicRegions():
     data = pl.from_dict({
@@ -11,7 +14,7 @@ def test_GenomicRegions():
         'start': [10000, 30000, 30000],
         'end': [20000, 40000, 40000],
         'name': ['r1', 'r2', 'r3'],
-    })
+    }).to_dicts()
 
     regions = create_genomic_regions(data)
 
@@ -22,11 +25,17 @@ def test_GenomicRegions():
 
     result =  regions.find_overlap('chr1', 10000, 10001)
     assert len(result) == 1
-    assert result[0] == GenomicRegion('chr1', 10000, 20000, 'r1')
+    assert result[0]['chrom'] == 'chr1'
+    assert result[0]['start'] == 10000
+    assert result[0]['end'] == 20000
+    assert result[0]['name'] == 'r1'
 
     result =  regions.find_overlap('chr1', 20000, 30001)
     assert len(result) == 1
-    assert result[0] == GenomicRegion('chr1', 30000, 40000, 'r2')
+    assert result[0]['chrom'] == 'chr1'
+    assert result[0]['start'] == 30000
+    assert result[0]['end'] == 40000
+    assert result[0]['name'] == 'r2'
 
 
 def test_overlaps():
