@@ -6,7 +6,10 @@ from genomics.gregion import GenomicRegion, create_genomic_regions
 
 def test_intersects():
     assert GenomicRegion('chr1', 100, 200).intersects( GenomicRegion('chr2', 100, 200)) is None
+    assert GenomicRegion('chr1', 100, 200) == GenomicRegion('chr1', 100, 200).intersects( GenomicRegion('chr1', 100, 200))
 
+    assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 200))
+    assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 201))
 
 def test_GenomicRegions():
     data = pl.from_dict({

@@ -67,7 +67,7 @@ class GenomicRegion():
         if not self.overlaps(other):
             return None
 
-        start = min(self.start, other.start)
+        start = max(self.start, other.start)
         end = min(self.end, other.end)
 
         return GenomicRegion(self.chrom, start, end)
