@@ -77,7 +77,7 @@ class GenomicRegion():
             return False
         return self.start <= pos and self.end >= pos
 
-    def calculate_reciprocal_overlap(self, other):
+    def get_reciprocal_overlap(self, other):
 
         if self.chrom != other.chrom:
             return None
@@ -88,6 +88,12 @@ class GenomicRegion():
             return 0
 
         return max (len(intersect) / len(self), len(intersect) / len(other))
+
+    def get_max_boundary_difference(self, other):
+        if self.chrom != other.chrom:
+            return None
+
+        return max(abs(self.start - other.start), abs(self.end - other.end))
 
     def overlaps(self, other):
         if self.chrom != other.chrom:

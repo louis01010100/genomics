@@ -61,19 +61,19 @@ def test_merge():
         GenomicRegion('chr1', 100, 150).merge(GenomicRegion('chr2', 110, 160))
 
 
-def test_calculate_reciprocal_overlap():
+def test_get_reciprocal_overlap():
     x = GenomicRegion('chr1', 100, 200)
     y = GenomicRegion('chr1', 100, 200)
-    assert 1.0 == x.calculate_reciprocal_overlap(y)
+    assert 1.0 == x.get_reciprocal_overlap(y)
 
     x = GenomicRegion('chr1', 150, 200)
     y = GenomicRegion('chr1', 100, 200)
-    assert 1.0 == x.calculate_reciprocal_overlap(y)
+    assert 1.0 == x.get_reciprocal_overlap(y)
 
     x = GenomicRegion('chr1', 150, 250)
     y = GenomicRegion('chr1', 100, 200)
-    assert 0.5 == x.calculate_reciprocal_overlap(y)
+    assert 0.5 == x.get_reciprocal_overlap(y)
 
     x = GenomicRegion('chr1', 150, 200)
     y = GenomicRegion('chr1', 100, 150)
-    assert 0.0 == x.calculate_reciprocal_overlap(y)
+    assert 0.0 == x.get_reciprocal_overlap(y)
