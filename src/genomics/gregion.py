@@ -60,7 +60,7 @@ class GenomicRegion():
     def __init__(self, chrom, start, end, name = None):
         self._chrom = chrom
         self._start = start
-        self._stop = end
+        self._end = end
         self._name = name
 
     def intersects(self, other):
@@ -76,6 +76,18 @@ class GenomicRegion():
         if self.chrom != chrom:
             return False
         return self.start <= pos and self.end >= pos
+
+    def calculate_reciprocal_overlap(self, other):
+
+        if self.chrom != other.chrom:
+            return None
+
+        intersect = self.intersects(other)
+
+        if intersect is None:
+            return 0
+
+        return max (len(intersect) / len(self), len(intersect) / len(other))
 
     def overlaps(self, other):
         if self.chrom != other.chrom:
@@ -93,13 +105,16 @@ class GenomicRegion():
     def chrom(self):
         return self._chrom
 
+    def __len__(self):
+        return self._end - self._start
+
     @property
     def start(self):
         return self._start
 
     @property
     def end(self):
-        return self._stop
+        return self._end
     @property
     def name(self):
         return self._name
@@ -112,3 +127,5 @@ class GenomicRegion():
 
     def __repr__(self):
         return self.__str__()
+
+

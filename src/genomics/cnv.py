@@ -1,13 +1,18 @@
 
+from genomics.gregion import GenomicRegion
 def validate_cnv(predictions, truth, reciprocal_overlap_cutoff = 0.5, breakpoint_tolerance_threshold = 10000):
 
     bag = list()
     for p in predictions:
+        region_p = GenomicRegion(x['chrom'], x['start'], x['end'])
         founds = truth.find_overlap(p['chrom'], p['start'], p['end'])
 
         for found in founds:
-            reciprocal_overlap = p.reciprocal_overlap(found)
+            region_t = GenomicRegion(truth['chrom'], truth['start'], truth['end'])
+
+            reciprocal_overlap = region_p.calculate_reciprocal_overlap(region_t)
             breakpoint_delta = p.max_boundary_delta(found)
+
 
             x = p.copy()
 
@@ -28,8 +33,5 @@ def validate_cnv(predictions, truth, reciprocal_overlap_cutoff = 0.5, breakpoint
     return report
 
 
-def calculate_reciprocal_overlap(x, y):
 
-    gregion(x['chrom'], x['start'], x['end']).
-    pass
 

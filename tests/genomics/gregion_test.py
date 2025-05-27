@@ -2,7 +2,8 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from genomics.gregion import GenomicRegion, create_genomic_regions
+from genomics.gregion import GenomicRegion
+from genomics.gregion import create_genomic_regions
 
 def test_intersects():
     assert GenomicRegion('chr1', 100, 200).intersects( GenomicRegion('chr2', 100, 200)) is None
@@ -58,3 +59,21 @@ def test_merge():
 
     with pytest.raises(Exception):
         GenomicRegion('chr1', 100, 150).merge(GenomicRegion('chr2', 110, 160))
+
+
+def test_calculate_reciprocal_overlap():
+    x = GenomicRegion('chr1', 100, 200)
+    y = GenomicRegion('chr1', 100, 200)
+    assert 1.0 == x.calculate_reciprocal_overlap(y)
+
+    x = GenomicRegion('chr1', 150, 200)
+    y = GenomicRegion('chr1', 100, 200)
+    assert 1.0 == x.calculate_reciprocal_overlap(y)
+
+    x = GenomicRegion('chr1', 150, 250)
+    y = GenomicRegion('chr1', 100, 200)
+    assert 0.5 == x.calculate_reciprocal_overlap(y)
+
+    x = GenomicRegion('chr1', 150, 200)
+    y = GenomicRegion('chr1', 100, 150)
+    assert 0.0 == x.calculate_reciprocal_overlap(y)
