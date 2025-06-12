@@ -10,13 +10,13 @@ class GenomicRegions():
     def chroms(self):
         return set([str(x) for x in self._regions.keys()])
 
-    def find_overlap(self, chrom:str, start:int, end:int):
+    def find_overlap(self, region:dict):
 
         bag = list()
-        if chrom not in self._regions.keys():
+        if region['chrom'] not in self._regions.keys():
             return bag
 
-        records = self._regions[chrom].find_overlap(start, end)
+        records = self._regions[region['chrom']].find_overlap(region['start'], region['end'])
 
         for record in records:
             idx = record[2]
@@ -24,7 +24,7 @@ class GenomicRegions():
 
         return bag
 
-def create_genomic_regions(records):
+def create_genomic_regions(records: list[dict]):
 
     registry = dict()
 

@@ -3,9 +3,10 @@
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
+
 import polars as pl
 
-from . import acmg, clinvar, dbsnp, vcf, depth, truth
+from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene
 
 __VERSION__ = '0.5.2'
 
@@ -23,6 +24,14 @@ def main():
             genome_file=Path(args.genome_file),
             genome_index_file=Path(args.genome_index_file),
             output_dir=Path(args.output_dir),
+        )
+
+    elif args.subcommand == 'export-gene':
+        gene.export(
+            data_source = args.data_source,
+            input_file = Path(args.input_file),
+            output_file = Path(args.output_file),
+            one_based = args.one_based,
         )
     elif args.subcommand == 'dbsnp-normalize':
         dbsnp.normalize(
@@ -102,6 +111,7 @@ def config_parsers():
     _config_cram_depth_parser(parsers.add_parser('cram-depth'))
     _config_gvcf_depth_parser(parsers.add_parser('gvcf-depth'))
     _config_snv_truth_parser(parsers.add_parser('snv-truth'))
+    _config_gene_parser(parsers.add_parser('export-gene'))
 
     return parser
 
@@ -166,6 +176,11 @@ def _config_snv_truth_parser(parser):
     parser.add_argument('--n-threads', type=int, default=1)
     parser.add_argument('vcf_files', nargs='*')
 
+def _config_gene_parser(parser):
+    parser.add_argument('--input-file', required=True)
+    parser.add_argument('--output-file', required=False)
+    parser.add_argument('--data-source', type=str, choices = ['UCSC', 'GENCODE'], default = 'GENCODE')
+    parser.add_argument('--one-based', action='store_true', default=False)
 
 def _new_path(file_):
     if file_:
