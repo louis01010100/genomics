@@ -37,6 +37,9 @@ def create_genomic_regions(records: list[dict]):
         start = record['start']
         end = record['end']
 
+        # assert type(start) == int, record
+        # assert type(end) == int, record
+
         registry[idx] = record
 
         if chrom not in bag:
