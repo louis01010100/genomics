@@ -36,14 +36,18 @@ def _validate_cnv(queries, database, qname, dbname, reciprocal_overlap_cutoff, b
         matches = database.find_overlap(query)
         query_region = GenomicRegion(query['chrom'], query['start'], query['end'])
 
-        result = dict()
 
         if len(matches) == 0:
+            result = dict()
             result[f'{qname}_idx'] = query['idx']
+            result[f'chrom'] = query['chrom']
+            result[f'{qname}_start'] = query['start']
+            result[f'{qname}_end'] = query['end']
+            result[f'{qname}_cn_state'] = query['cn_state']
             result[f'{dbname}_idx'] = None
-            result[f'{dbname}_cn_state'] = None
             result[f'{dbname}_start'] = None
             result[f'{dbname}_end'] = None
+            result[f'{dbname}_cn_state'] = None
             result['reciprocal_overlap'] = None
             result['boundary_difference'] = None
             result['reciprocal_overlap_test'] = None
@@ -52,12 +56,15 @@ def _validate_cnv(queries, database, qname, dbname, reciprocal_overlap_cutoff, b
             continue
 
         for match in matches:
+            result = dict()
             db_region = GenomicRegion(match['chrom'], match['start'], match['end'])
-
             reciprocal_overlap = query_region.get_reciprocal_overlap(db_region)
             boundary_difference = query_region.get_max_boundary_difference(db_region)
 
             result[f'{qname}_idx'] = query['idx']
+            result[f'chrom'] = query['chrom']
+            result[f'{qname}_start'] = query['start']
+            result[f'{qname}_end'] = query['end']
             result[f'{dbname}_idx'] = match['idx']
             result[f'{dbname}_cn_state'] = match['cn_state']
             result[f'{dbname}_start'] = match['start']
