@@ -65,6 +65,7 @@ def _validate_cnv(queries, database, qname, dbname, reciprocal_overlap_cutoff, b
             result[f'chrom'] = query['chrom']
             result[f'{qname}_start'] = query['start']
             result[f'{qname}_end'] = query['end']
+            result[f'{qname}_cn_state'] = query['cn_state']
             result[f'{dbname}_idx'] = match['idx']
             result[f'{dbname}_cn_state'] = match['cn_state']
             result[f'{dbname}_start'] = match['start']
