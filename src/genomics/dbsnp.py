@@ -1,5 +1,8 @@
 from datetime import datetime
+import polars as pl
+import json
 import pgzip
+import bz2
 import shutil
 from pathlib import Path
 from .genome import Genome
@@ -424,4 +427,64 @@ def _chop(dbsnp_vcf_file, tmp_dir, n_threads, blocksize = PGZIP_BLOCK_SIZE):
             writer.write('\t'.join(record))
     if writer:
         writer.close()
+
+
+def merged2map(input_json_file, output_tsv_file, n_threads, n_tasks=10000):
+
+    def jobs(input_json_file):
+        bag = list()
+        with bz2.open(input_json_file, 'rt') as fh:
+            for line in fh:
+                line = line.strip()
+                bag.append(line)
+                if len(bag) >= n_tasks:
+                    yield bag
+                    bag = list()
+        if len(bag):
+            yield bag
+
+    def parse(lines):
+        bag = list()
+
+        for line in lines:
+            data = json.loads(line)
+            if 'merged_snapshot_data' not in data:
+                # print(json.dumps(data, indent = 4))
+                continue
+            if 'merged_into' not in data['merged_snapshot_data']:
+                # print(json.dumps(data, indent = 4))
+                continue
+
+            merged_into = data['merged_snapshot_data']['merged_into']
+            if len(merged_into) == 0:
+                continue
+
+            
+            to_rsid = 'rs' + merged_into[0]
+            from_rsid = 'rs' + data['refsnp_id']
+
+            bag.append({'rsid_deprecated':from_rsid, 'rsid_recommended': to_rsid})
+        return bag
+
+    bag = list()
+
+    # for job in jobs(input_json_file):
+    #     result = parse(job)
+    #     if result is None:
+    #         continue
+    #     bag.append(result)
+
+    with ProcessPool(n_threads) as pool:
+        for records in pool.uimap(parse, jobs(input_json_file)):
+            bag.extend(records)
+
+    data = pl.from_dicts(bag)
+
+    if output_tsv_file.suffix != '.tsv.gz':
+        output_tsv_file = output_tsv_file.with_suffix('.tsv.gz')
+
+    with gzip.open(output_tsv_file, 'wt') as fh:
+        fh.write(data.write_csv(include_header = True, separator = '\t'))
+
+
 

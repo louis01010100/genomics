@@ -67,9 +67,9 @@ def _validate_cnv(queries, database, qname, dbname, reciprocal_overlap_cutoff, b
             result[f'{qname}_end'] = query['end']
             result[f'{qname}_cn_state'] = query['cn_state']
             result[f'{dbname}_idx'] = match['idx']
-            result[f'{dbname}_cn_state'] = match['cn_state']
             result[f'{dbname}_start'] = match['start']
             result[f'{dbname}_end'] = match['end']
+            result[f'{dbname}_cn_state'] = match['cn_state']
             result['reciprocal_overlap'] = reciprocal_overlap
             result['boundary_difference'] = boundary_difference
             result['reciprocal_overlap_test'] = 'PASS' if reciprocal_overlap >= reciprocal_overlap_cutoff else 'FAIL'

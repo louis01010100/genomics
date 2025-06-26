@@ -41,6 +41,12 @@ def main():
             output_dir=Path(args.output_dir),
             n_threads=args.n_threads,
         )
+    elif args.subcommand == 'dbsnp-merged2map':
+        dbsnp.merged2map(
+            input_json_file= Path(args.input_json_file),
+            output_tsv_file = Path(args.output_tsv_file),
+            n_threads = args.n_threads,
+        )
     elif args.subcommand == 'dbsnp-createdb':
         dbsnp.create_db(
             dbsnp_vcf_file=Path(args.dbsnp_vcf_file),
@@ -105,6 +111,7 @@ def config_parsers():
     parsers = parser.add_subparsers(dest='subcommand')
 
     _config_clinvar_parser(parsers.add_parser('clinvar'))
+    _config_dbsnp_merged2map_parser(parsers.add_parser('dbsnp-merged2map'))
     _config_dbsnp_normalize_parser(parsers.add_parser('dbsnp-normalize'))
     _config_dbsnp_createdb_parser(parsers.add_parser('dbsnp-createdb'))
     _config_acmg_parser(parsers.add_parser('acmg'))
@@ -115,6 +122,10 @@ def config_parsers():
 
     return parser
 
+def _config_dbsnp_merged2map_parser(parser):
+    parser.add_argument('--input-json-file', required=True)
+    parser.add_argument('--output-tsv-file', required=True)
+    parser.add_argument('--n-threads', type=int, default=1)
 
 def _config_dbsnp_normalize_parser(parser):
     parser.add_argument('--dbsnp-vcf-file', required=True)
