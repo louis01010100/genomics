@@ -304,7 +304,7 @@ def fetch_calls_jobs(coordinates, genome, depths, genders, min_depth, chrm_missi
         job =  {
                 'coordinate': coordinate,
                 'vcf_file': vcf_file,
-                'chrom': genome.chromosome(chrom),
+                'seq': genome.seq(chrom),
                 'depths': depths,
                 'genders': genders,
                 'min_depth': min_depth,
@@ -348,13 +348,13 @@ def fetch_calls(jobs):
     for job in jobs:
         coordinate = job['coordinate']
         vcf_file = job['vcf_file']
-        chromosome = job['chrom']
+        seq = job['seq']
         genders=job['genders']
         depths=job['depths']
         min_depth=job['min_depth']
         chrm_missing_as_homref=job['chrm_missing_as_homref']
 
-        coordinate_expanded = coordinate.expand(chromosome)
+        coordinate_expanded = coordinate.expand(seq)
 
         candidates = fetch_variants(
             chrom = coordinate_expanded.chrom,
@@ -373,7 +373,7 @@ def fetch_calls(jobs):
                 record = _new_record(coordinate, coordinate_expanded, None, None, 'COMPLEX')
             elif len(candidates) == 1:
                 candidate = candidates[0]
-                coordinate_synced, candidate_synced = sync(coordinate, candidate, chromosome)
+                coordinate_synced, candidate_synced = sync(coordinate, candidate, seq)
                 record  = _new_record(coordinate, coordinate_synced, candidate, candidate_synced, 'DONE')
             else:
                 assert len(candidates) > 1
@@ -384,7 +384,7 @@ def fetch_calls(jobs):
                 n_match_alts = None
 
                 for candidate in candidates:
-                    coordinate_synced, candidate_synced = sync(coordinate, candidate, chromosome)
+                    coordinate_synced, candidate_synced = sync(coordinate, candidate, seq)
 
                     n_match_alts_current = len(set(coordinate_synced.alts) & set(candidate_synced.alts))
 

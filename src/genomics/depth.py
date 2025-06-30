@@ -420,7 +420,7 @@ def expand_coordinates(coordinates_vcf_file, genome_file):
         alt = items[4]
 
         v = Variant(chrom = chrom, pos = pos, id_ = id_, ref = ref, alt = alt)
-        region = v.expand(genome.chromosome(chrom)).region
+        region = v.expand(genome.seq(chrom)).region
 
         bag = list()
 

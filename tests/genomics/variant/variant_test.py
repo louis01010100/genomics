@@ -75,10 +75,10 @@ def test_to_vcf():
     assert v == v.to_vcf(genome)
 
     assert Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = 'CG') \
-            == Variant(chrom = 'chr1', pos = 2, ref = '-', alt = 'G').to_vcf(genome.chromosome('chr1'))
+            == Variant(chrom = 'chr1', pos = 2, ref = '-', alt = 'G').to_vcf(genome.seq('chr1'))
 
     assert Variant(chrom = 'chr1', pos = 1, ref = 'AC', alt = 'A') \
-            == Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = '-').to_vcf(genome.chromosome('chr1'))
+            == Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = '-').to_vcf(genome.seq('chr1'))
 
 def test___str__():
 
@@ -115,7 +115,7 @@ def test_get_max_region(tmp_path):
     genome = Genome(genome_file)
     result = Variant('chr5', 2, 'CAG', 'C')
 
-    region = get_max_region(result, genome.chromosome('chr5'))
+    region = get_max_region(result, genome.seq('chr5'))
 
     assert 1 == region.start 
     assert 7 == region.end
@@ -128,7 +128,7 @@ def test_get_max_region(tmp_path):
     genome = Genome(genome_file)
     result = Variant('chr6', 3, 'CAAGA', 'CGT')
 
-    region = get_max_region(result, genome.chromosome('chr5'))
+    region = get_max_region(result, genome.seq('chr5'))
 
     assert 2 == region.start 
     assert 7 == region.end
@@ -141,7 +141,7 @@ def test_denormalize(tmp_path):
     # ACGTAAAAAAAT
     # A
     # T
-    result = Variant('chr1', 1, 'A', 'T').denormalize(genome.chromosome('chr1'))
+    result = Variant('chr1', 1, 'A', 'T').denormalize(genome.seq('chr1'))
     assert 'chr1' == result.chrom
     assert 1 == result.pos
     assert 'A' == result.ref
@@ -151,7 +151,7 @@ def test_denormalize(tmp_path):
     # ACGTAAAAAAAT
     # A
     # T
-    result = Variant('chr1', 1, 'AC', 'TG').denormalize(genome.chromosome('chr1'))
+    result = Variant('chr1', 1, 'AC', 'TG').denormalize(genome.seq('chr1'))
     assert 'chr1' == result.chrom
     assert 1 == result.pos
     assert 'AC' == result.ref
@@ -164,7 +164,7 @@ def test_denormalize(tmp_path):
     #          AA 
     #          A
 
-    result = Variant('chr1', 4, 'TA', 'T').denormalize(genome.chromosome('chr1'))
+    result = Variant('chr1', 4, 'TA', 'T').denormalize(genome.seq('chr1'))
     assert 'chr1' == result.chrom
     assert 10 == result.pos
     assert 'AA' == result.ref
@@ -176,7 +176,7 @@ def test_denormalize(tmp_path):
     #    TA
     #           A 
     #           AA
-    result = Variant('chr1', 4, 'T', 'TA').denormalize(genome.chromosome('chr1'))
+    result = Variant('chr1', 4, 'T', 'TA').denormalize(genome.seq('chr1'))
     assert 'chr1' == result.chrom
     assert 11 == result.pos
     assert 'A' == result.ref
@@ -192,7 +192,7 @@ def test_denormalize(tmp_path):
     #           AA
     #           AAA
 
-    result = Variant('chr1', 4, 'T', 'TA,TAA').denormalize(genome.chromosome('chr1'))
+    result = Variant('chr1', 4, 'T', 'TA,TAA').denormalize(genome.seq('chr1'))
     assert 'chr1' == result.chrom
     assert 11 == result.pos
     assert 'A' == result.ref
@@ -205,7 +205,7 @@ def test_denormalize(tmp_path):
     # G
     #  TT
     #  T
-    result = Variant('chr3', 1, 'GT', 'G').denormalize(genome.chromosome('chr3'))
+    result = Variant('chr3', 1, 'GT', 'G').denormalize(genome.seq('chr3'))
     assert 'chr3' == result.chrom
     assert  2== result.pos
     assert 'TT' == result.ref
@@ -219,7 +219,7 @@ def test_denormalize(tmp_path):
     #     TTCT
     #     T
 
-    result = Variant('chr4', 1, 'ATTC', 'A').denormalize(genome.chromosome('chr4'))
+    result = Variant('chr4', 1, 'ATTC', 'A').denormalize(genome.seq('chr4'))
     assert 'chr4' == result.chrom
     assert 'TTCT' == result.ref
     assert 'T' == result.alt
@@ -230,13 +230,13 @@ def test_normalize(tmp_path):
     genome_file = Path(__file__).parents[0] / 'seq.fa'
     genome = Genome(genome_file)
 
-    result = Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = 'G').normalize(genome.chromosome('chr1'))
+    result = Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = 'G').normalize(genome.seq('chr1'))
     assert 'chr1' == result.chrom
     assert 2 == result.pos
     assert 'C' == result.ref
     assert 'G' == result.alt
 
-    result = Variant(chrom = 'chr1', pos = 5, ref = 'A', alt = 'AA').normalize(genome.chromosome('chr1'))
+    result = Variant(chrom = 'chr1', pos = 5, ref = 'A', alt = 'AA').normalize(genome.seq('chr1'))
 
     assert 'chr1' == result.chrom
     assert 4 == result.pos
@@ -244,21 +244,21 @@ def test_normalize(tmp_path):
     assert 'TA' == result.alt
 
 
-    result = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'A').normalize(genome.chromosome('chr1'))
+    result = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'A').normalize(genome.seq('chr1'))
 
     assert 'chr1' == result.chrom
     assert 4 == result.pos
     assert 'TA' == result.ref
     assert 'T' == result.alt
 
-    result = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'A,AAA').normalize(genome.chromosome('chr1'))
+    result = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'A,AAA').normalize(genome.seq('chr1'))
 
     assert 'chr1' == result.chrom
     assert 4 == result.pos
     assert 'TA' == result.ref
     assert 'T,TAA' == result.alt
 
-    result = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'AAA,A').normalize(genome.chromosome('chr1'))
+    result = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'AAA,A').normalize(genome.seq('chr1'))
 
     assert 'chr1' == result.chrom
     assert 4 == result.pos
@@ -276,19 +276,19 @@ def test_normalize_chrom_name():
 def test_expand():
     genome_file = Path(__file__).parents[0] / 'seq.fa'
     genome = Genome(genome_file)
-    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'C').expand(genome.chromosome('chr2'))
+    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'C').expand(genome.seq('chr2'))
     assert 'chr2' == v.chrom
     assert 3 == v.pos
     assert 'A' == v.ref
     assert 'C' == v.alt
 
-    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'CC').expand(genome.chromosome('chr2'))
+    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'CC').expand(genome.seq('chr2'))
     assert 'chr2' == v.chrom
     assert 3 == v.pos
     assert 'A' == v.ref
     assert 'CC' == v.alt
 
-    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'AA').expand(genome.chromosome('chr2'))
+    v = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'AA').expand(genome.seq('chr2'))
     assert 'chr2' == v.chrom
     assert 2 == v.pos
     assert 'GAAAA' == v.ref
@@ -298,7 +298,7 @@ def test_expand():
     genome = Genome(genome_file)
     v = Variant(chrom = 'chr2', pos = 4, ref = 'A', alt = 'AA,AAC')
 
-    v = v.expand(genome.chromosome('chr2'))
+    v = v.expand(genome.seq('chr2'))
     assert 'chr2' == v.chrom
     assert 2 == v.pos
     assert 'GAAAA' == v.ref
@@ -311,7 +311,7 @@ def test_sync():
 
     # vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
     # vy = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'T')
-    # nvx, nvy = sync(vx,vy, genome.chromosome('chr1'))
+    # nvx, nvy = sync(vx,vy, genome.seq('chr1'))
     # assert nvx.pos == nvy.pos == 3
     # assert nvx.ref == nvy.ref == 'G'
     # assert nvx.alt == 'C'
@@ -319,7 +319,7 @@ def test_sync():
     #
     # vx = Variant(chrom = 'chr1', pos = 3, ref = 'GT', alt = 'CC')
     # vy = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'T')
-    # nvx, nvy = sync(vx,vy, genome.chromosome('chr1'))
+    # nvx, nvy = sync(vx,vy, genome.seq('chr1'))
     # assert 3 == nvx.pos == nvy.pos
     # assert 'GT' == nvx.ref == nvy.ref
     # assert 'CC' == nvx.alt
@@ -328,7 +328,7 @@ def test_sync():
     #
     # vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
     # vy = Variant(chrom = 'chr1', pos = 3, ref = 'GT', alt = 'AA')
-    # nvx, nvy = sync(vx,vy, genome.chromosome('chr1'))
+    # nvx, nvy = sync(vx,vy, genome.seq('chr1'))
     # assert 3 == nvx.pos == nvy.pos
     # assert 'GT' == nvx.ref == nvy.ref
     # assert 'CT' == nvx.alt
@@ -336,7 +336,7 @@ def test_sync():
 
     vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
     vy = Variant(chrom = 'chr1', pos = 4, ref = 'T', alt = 'G')
-    nvx, nvy = sync(vx,vy, genome.chromosome('chr1'))
+    nvx, nvy = sync(vx,vy, genome.seq('chr1'))
     assert 3 == nvx.pos == nvy.pos
     assert 'GT' == nvx.ref
     assert 'GT' == nvy.ref
@@ -345,7 +345,7 @@ def test_sync():
 
     # vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'C')
     # vy = Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = 'A')
-    # nvx, nvy = sync(vx,vy, genome.chromosome('chr1'))
+    # nvx, nvy = sync(vx,vy, genome.seq('chr1'))
     # assert 2 == nvx.pos == nvy.pos
     # assert 'CG' == nvx.ref == nvy.ref
     # assert 'CC' == nvx.alt
@@ -353,7 +353,7 @@ def test_sync():
     #
     # vx = Variant(chrom = 'chr1', pos = 3, ref = 'G', alt = 'A')
     # vy = Variant(chrom = 'chr1', pos = 2, ref = 'CG', alt = 'C')
-    # nvx, nvy = sync(vx,vy, genome.chromosome('chr1'))
+    # nvx, nvy = sync(vx,vy, genome.seq('chr1'))
     # assert 2 == nvx.pos == nvy.pos
     # assert 'CG' == nvx.ref == nvy.ref
     # assert 'CA' == nvx.alt
@@ -362,7 +362,7 @@ def test_sync():
     # vx = Variant(chrom = 'chr2', pos = 4, ref = 'A', alt = 'AA,AAC')
     # vy = Variant(chrom = 'chr2', pos = 3, ref = 'A', alt = 'C')
     #
-    # nvx, nvy = sync(vx,vy, genome.chromosome('chr2'))
+    # nvx, nvy = sync(vx,vy, genome.seq('chr2'))
     # assert 2 == nvx.pos == nvy.pos
     # assert 'GAAAA' == nvx.ref == nvy.ref
     # assert 'GAAAAA,GAAACAA' == nvx.alt

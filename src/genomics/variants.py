@@ -21,9 +21,9 @@ def assign_coord_id(df, genome_file, n_threads = 1):
         ref = record['ref']
         alt = record['alt']
         id_ = record['id']
-        chromosome = genome.chromosome(chrom)
+        seq = genome.seq(chrom)
 
-        v = Variant(chrom, pos, ref, alt, id_ = id_).to_vcf(chromosome).normalize(chromosome)
+        v = Variant(chrom, pos, ref, alt, id_ = id_).to_vcf(seq).normalize(seq)
 
         bag.append({
             'chrom': v.chrom,

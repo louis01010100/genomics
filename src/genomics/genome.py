@@ -48,7 +48,7 @@ class Genome():
     def version(self):
         return self._version
 
-    def chromosome(self, chrom):
+    def seq(self, chrom):
         return self._chroms[chrom]
 
     # zero-based

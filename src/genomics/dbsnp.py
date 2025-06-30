@@ -60,10 +60,10 @@ CHROM_MAP_TEMPLATE = {
 
 class DbSnp():
 
-    def __init__(self, chrom, db_dir, chromosome):
+    def __init__(self, chrom, db_dir, seq):
 
         self._chrom = chrom
-        self.chromosome = chromosome
+        self.seq = seq
         self._db = _load_db(db_dir / chrom / DB_FILENAME)
         self._idxs = _load_idxs(db_dir / chrom/ INDEX_FILENAME)
         self._db_fh = gzip.open(db_dir / chrom / DB_FILENAME, 'rt')
@@ -79,7 +79,7 @@ class DbSnp():
         assert self._chrom == variant.chrom
         chrom = self._chrom
 
-        region = get_max_region(variant, self.chromosome)
+        region = get_max_region(variant, self.seq)
 
         intervals = self._db.find_overlap(region.start -1, region.end)
 
@@ -99,7 +99,7 @@ class DbSnp():
                 alt = snv[self._col2idx['alt']], 
             )
 
-            vx, vy = sync(variant, candidate, self.chromosome)
+            vx, vy = sync(variant, candidate, self.seq)
             if set(vx.alts) & set(vy.alts):
 
                 results.append({
@@ -234,12 +234,12 @@ def _create_db(
 
             yield {
                 'chrom_dir': chrom_dir,
-                'chromosome': genome.chromosome(chrom),
+                'seq': genome.seq(chrom),
             }
 
     def process(job):
         chrom_dir = job['chrom_dir']
-        chromosome = job['chromosome']
+        seq = job['seq']
 
         snvs_file = chrom_dir / SNVS_FILENAME
         db_file = chrom_dir / DB_FILENAME
@@ -267,7 +267,7 @@ def _create_db(
                 if alt == '.':
                     continue
                 
-                result = process_snv(chrom, pos, rsid, ref, alt, chromosome)
+                result = process_snv(chrom, pos, rsid, ref, alt, seq)
                 start = result['start']
                 end = result['end']
                 record = '\t'.join([str(x) for x in [chrom, pos, rsid, ref, alt, start - 1, end, idx]])
@@ -288,14 +288,14 @@ def _create_db(
 
         return chrom_dir.name
 
-    def process_snv(chrom, pos, rsid, ref, alt, chromosome):
+    def process_snv(chrom, pos, rsid, ref, alt, seq):
         start = None
         end = None
 
         for a in alt.split(','):
             v = Variant(chrom = chrom, pos = pos, ref = ref, alt = a)
-            normalized = v.normalize(chromosome)
-            denormalized = v.denormalize(chromosome)
+            normalized = v.normalize(seq)
+            denormalized = v.denormalize(seq)
 
             current_start = normalized.region.start
             current_end = denormalized.region.end
