@@ -178,8 +178,8 @@ class Variant():
 
 
 
-    def denormalize(self, chromosome):
-        result = denormalize(self.pos, self.ref, self.alts, chromosome)
+    def denormalize(self, chrom_seq):
+        result = _denormalize(self.pos, self.ref, self.alts, chrom_seq)
 
         return Variant(
             chrom = self.chrom,
@@ -196,8 +196,8 @@ class Variant():
 
 
 
-    def normalize(self, chromosome):
-        result = normalize(self.pos, self.ref, self.alts, chromosome)
+    def normalize(self, chrom_seq):
+        result = _normalize(self.pos, self.ref, self.alts, chrom_seq)
 
         return Variant(
             chrom = self.chrom,
@@ -253,13 +253,13 @@ class Variant():
                 and self.ref == other.ref 
                 and self.alt == other.alt)
 
-    def to_vcf(self, chromosome):
+    def to_vcf(self, chrom_seq):
         if self.is_vcf:
             return self.clone()
 
         if self.ref == '-':
             pos = self.pos
-            prefix = chromosome[pos -1: pos]
+            prefix = chrom_seq[pos -1: pos]
             ref = prefix
             new_alts = []
             for alt in self.alts:
@@ -268,7 +268,7 @@ class Variant():
             assert '-' in self.alts
 
             pos = self.pos - 1
-            prefix = chromosome[pos -1: pos]
+            prefix = chrom_seq[pos -1: pos]
             ref = prefix + self.ref
 
             new_alts = []
@@ -418,7 +418,7 @@ def is_vcf(ref, alts):
 
 
 
-def denormalize(pos, ref, alts, chromosome):
+def _denormalize(pos, ref, alts, chrom_seq):
     # trim_left
     if all([alt[0] == ref[0] for alt in alts]):
 
@@ -427,16 +427,16 @@ def denormalize(pos, ref, alts, chromosome):
         pos += 1
 
         if len(ref) == 0:
-            base = chromosome[pos-1:pos]
+            base = chrom_seq[pos-1:pos]
             ref = ref + base
             alts = [alt + base for alt in alts]
 
         if any([len(alt) == 0 for alt in alts]):
-            base = chromosome[pos + len(ref) -1: pos + len(ref)]
+            base = chrom_seq[pos + len(ref) -1: pos + len(ref)]
             ref = ref + base
             alts = [alt + base for alt in alts]
 
-        return denormalize(pos, ref, alts, chromosome)
+        return _denormalize(pos, ref, alts, chrom_seq)
 
     # trim right
     if all([alt[-1] == ref[-1] for alt in alts]):
@@ -446,17 +446,17 @@ def denormalize(pos, ref, alts, chromosome):
 
         if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
             pos -= 1
-            base = chromosome[pos -1: pos]
+            base = chrom_seq[pos -1: pos]
             ref = base + ref
             alts = [base + alt for alt in alts]
             return { 'pos': pos, 'ref': ref, 'alts': alts }
 
-        return denormalize(pos, ref, alts, chromosome)
+        return _denormalize(pos, ref, alts, chrom_seq)
 
     return { 'pos': pos, 'ref': ref, 'alts': alts }
     
 
-def normalize(pos, ref, alts, chromosome):
+def _normalize(pos, ref, alts, chrom_seq):
 
     # trim right
     if all([alt[-1] == ref[-1] for alt in alts]):
@@ -466,11 +466,11 @@ def normalize(pos, ref, alts, chromosome):
 
         if len(ref) == 0 or any([len(alt) == 0 for alt in alts]):
             pos -= 1
-            base = chromosome[pos -1: pos]
+            base = chrom_seq[pos -1: pos]
             ref = base + ref
             alts = [base + alt for alt in alts]
 
-        return normalize( pos, ref, alts, chromosome)
+        return _normalize( pos, ref, alts, chrom_seq)
 
     
     # trim left
@@ -485,7 +485,7 @@ def normalize(pos, ref, alts, chromosome):
     alts = [alt[1:] for alt in alts]
     pos += 1
 
-    return normalize(pos, ref, alts, chromosome)
+    return _normalize(pos, ref, alts, chrom_seq)
 
 
 
@@ -516,7 +516,7 @@ def normalize_chrom_name(chrom):
     else:
         return chrom
 
-def sync(vx: Variant, vy: Variant, chromosome: str):
+def sync(vx: Variant, vy: Variant, chrom_seq: str):
 
     def _sync(var, seq, region):
 
@@ -540,18 +540,18 @@ def sync(vx: Variant, vy: Variant, chromosome: str):
         raise Exception(f'{vx.chrom} != {vy.chrom}; {vx.id}, {vy.id}')
 
 
-    vx_expanded = vx.expand(chromosome)
-    vy_expanded = vy.expand(chromosome)
+    vx_expanded = vx.expand(chrom_seq)
+    vy_expanded = vy.expand(chrom_seq)
 
     region = vx_expanded.region.merge(vy_expanded.region)
-    seq = chromosome[region.start:region.end]
+    seq = chrom_seq[region.start:region.end]
 
     vx_synced = _sync(vx_expanded, seq, region)
     vy_synced = _sync(vy_expanded, seq, region)
 
     return vx_synced, vy_synced
 
-def get_max_region(variant, chromosome):
+def get_max_region(variant, chrom_seq):
 
     assert variant.is_vcf, variant
 
@@ -560,8 +560,8 @@ def get_max_region(variant, chromosome):
 
     for a in variant.alts:
         v = Variant(chrom = variant.chrom, pos = variant.pos, ref = variant.ref, alt = a)
-        normalized = v.normalize(chromosome)
-        denormalized = v.denormalize(chromosome)
+        normalized = v.normalize(chrom_seq)
+        denormalized = v.denormalize(chrom_seq)
 
         current_start = normalized.region.start
         current_end = denormalized.region.end

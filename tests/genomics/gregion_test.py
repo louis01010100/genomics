@@ -24,17 +24,17 @@ def test_GenomicRegions():
 
     assert {'chr1', 'chr2'} == regions.chroms
 
-    assert len(regions.find_overlap('chr2', 40001, 40002)) == 0
-    assert len(regions.find_overlap('chr3', 40001, 40002)) == 0
+    assert len(regions.find_overlap({'chrom': 'chr2', 'start': 40001, 'end': 40002})) == 0
+    assert len(regions.find_overlap({'chrom': 'chr3', 'start': 40001, 'end': 40002})) == 0
 
-    result =  regions.find_overlap('chr1', 10000, 10001)
+    result =  regions.find_overlap({'chrom':'chr1', 'start': 10000, 'end': 10001})
     assert len(result) == 1
     assert result[0]['chrom'] == 'chr1'
     assert result[0]['start'] == 10000
     assert result[0]['end'] == 20000
     assert result[0]['name'] == 'r1'
 
-    result =  regions.find_overlap('chr1', 20000, 30001)
+    result =  regions.find_overlap({'chrom': 'chr1', 'start': 20000, 'end': 30001})
     assert len(result) == 1
     assert result[0]['chrom'] == 'chr1'
     assert result[0]['start'] == 30000

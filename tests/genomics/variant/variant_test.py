@@ -1,4 +1,4 @@
-from genomics.variant import is_vcf, Variant, normalize, denormalize, normalize_chrom_name, sync, get_max_region
+from genomics.variant import is_vcf, Variant, normalize_chrom_name, sync, get_max_region
 from genomics.gregion import GenomicRegion
 from genomics.genome import Genome
 from pathlib import Path
