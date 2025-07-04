@@ -149,15 +149,15 @@ def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_
                 snv_overlap.extend(bag['overlap'])
 
             if snv_same:
-                if len(snv_same) != 1:
-                    logging.info(snv_same)
-                matched_snv = snv_same[0]['matched_snv']
-                record['matched_id'] = matched_snv.id
-                record['matched_pos'] = matched_snv.pos
-                record['matched_ref'] = matched_snv.ref
-                record['matched_alt'] = matched_snv.alt
+                snv_same = [x['matched_snv'] for x in snv_same]
+                snv_same = concat_snv(snv_same)
+
+                record['matched_id'] = snv_same['id']
+                record['matched_pos'] = snv_same['pos']
+                record['matched_ref'] = snv_same['ref']
+                record['matched_alt'] = snv_same['alt']
             else:
-                record['id'] = None
+                record['matched_id'] = None
                 record['matched_pos'] = None
                 record['matched_ref'] = None
                 record['matched_alt'] = None
@@ -199,7 +199,8 @@ def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_
                       end='\r',
                       flush=True)
 
-    return pl.from_dicts(bag, infer_schema_length=None)
+    result =  pl.from_dicts(bag, infer_schema_length=None)
+    result.write_csv(output_file, include_header = True, separator = '\t')
 
 
 def concat_snv(snv: list):
