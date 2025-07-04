@@ -7,7 +7,6 @@ from pathlib import Path
 import polars as pl
 from subprocess import PIPE, STDOUT, Popen
 from typing import TextIO, Tuple, Union
-from .gregion import create_genomic_regions
 import sys
 
 import pandas as pd

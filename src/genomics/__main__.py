@@ -4,9 +4,10 @@ import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
+
 import polars as pl
 
-from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene
+from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene, variants
 
 __VERSION__ = '0.5.2'
 
@@ -24,6 +25,15 @@ def main():
             genome_file=Path(args.genome_file),
             genome_index_file=Path(args.genome_index_file),
             output_dir=Path(args.output_dir),
+        )
+    elif args.subcommand == 'varmatch':
+        variants.match(
+            data1_file = Path(args.data1_file),
+            data2_file = Path(args.data2_file),
+            genome_file = Path(args.genome_file),
+            output_file = Path(args.output_file),
+            n_threads=args.n_threads,
+            batch_size=args.batch_size,
         )
 
     elif args.subcommand == 'export-gene':
@@ -110,6 +120,7 @@ def config_parsers():
 
     parsers = parser.add_subparsers(dest='subcommand')
 
+    _config_varmatch_arser(parsers.add_parser('varmatch'))
     _config_clinvar_parser(parsers.add_parser('clinvar'))
     _config_dbsnp_merged2map_parser(parsers.add_parser('dbsnp-merged2map'))
     _config_dbsnp_normalize_parser(parsers.add_parser('dbsnp-normalize'))
@@ -121,6 +132,14 @@ def config_parsers():
     _config_gene_parser(parsers.add_parser('export-gene'))
 
     return parser
+
+def _config_varmatch_parser(parser):
+    parser.add_argument('--data1-file', required=True, help='must contain the VCF 4-tuple')
+    parser.add_argument('--data2-file', required=True, help='must be an indexed VCF file with the ID column populated')
+    parser.add_argument('--genome-file', required=True)
+    parser.add_argument('--output-file', required=True)
+    parser.add_argument('--n-threads', type=int, default=1)
+    parser.add_argument('--batch-size', type=int, default=1)
 
 def _config_dbsnp_merged2map_parser(parser):
     parser.add_argument('--input-json-file', required=True)

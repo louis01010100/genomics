@@ -1,7 +1,7 @@
 from pathlib import Path
 from ncls import NCLS
 
-class GenomicRegions():
+class GenomicRegionDatabase():
     def __init__(self, regions, registory):
         self._regions = regions
         self._registory = registory
@@ -24,7 +24,7 @@ class GenomicRegions():
 
         return bag
 
-def create_genomic_regions(records: list[dict]):
+def create_database(records: list[dict]):
 
     registry = dict()
 
@@ -56,7 +56,7 @@ def create_genomic_regions(records: list[dict]):
     for k, v in bag.items():
         bag2[k] = NCLS(v['starts'], v['ends'], v['idx'])
 
-    return GenomicRegions(bag2, registry)
+    return GenomicRegionDatabase(bag2, registry)
 
 class GenomicRegion():
 
@@ -81,16 +81,7 @@ class GenomicRegion():
         return self.start <= pos and self.end >= pos
 
     def get_reciprocal_overlap(self, other):
-
-        if self.chrom != other.chrom:
-            return None
-
-        intersect = self.intersects(other)
-
-        if intersect is None:
-            return 0
-
-        return max (len(intersect) / len(self), len(intersect) / len(other))
+        return _get_reciprocal_overlap(self, other)
 
     def get_max_boundary_difference(self, other):
         if self.chrom != other.chrom:
@@ -138,3 +129,16 @@ class GenomicRegion():
         return self.__str__()
 
 
+
+
+def _get_reciprocal_overlap(region_1, region_2):
+
+    if region_1.chrom != region_2.chrom:
+        return None
+
+    intersect = region_1.intersects(region_2)
+
+    if intersect is None:
+        return 0
+
+    return max (len(intersect) / len(region_1), len(intersect) / len(region_2))

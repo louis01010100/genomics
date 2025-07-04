@@ -1,12 +1,12 @@
 import polars as pl
 from genomics.gregion import GenomicRegion
-from genomics.gregion import create_genomic_regions
+from genomics.gregion import create_database
 
 def validate_cnv(predictions, truths, reciprocal_overlap_cutoff = 0.5, boundary_difference_cutoff = 10000):
 
     data_ppv = _validate_cnv(
             predictions, 
-            create_genomic_regions(truths), 
+            create_database(truths), 
             'prediction', 
             'truth', 
             reciprocal_overlap_cutoff, 
@@ -15,7 +15,7 @@ def validate_cnv(predictions, truths, reciprocal_overlap_cutoff = 0.5, boundary_
 
     data_sensitivity = _validate_cnv(
             truths, 
-            create_genomic_regions(predictions), 
+            create_database(predictions), 
             'truth', 
             'prediction', 
             reciprocal_overlap_cutoff,
@@ -43,10 +43,12 @@ def _validate_cnv(queries, database, qname, dbname, reciprocal_overlap_cutoff, b
             result[f'chrom'] = query['chrom']
             result[f'{qname}_start'] = query['start']
             result[f'{qname}_end'] = query['end']
+            result[f'{qname}_length'] = query['end'] - query['start']
             result[f'{qname}_cn_state'] = query['cn_state']
             result[f'{dbname}_idx'] = None
             result[f'{dbname}_start'] = None
             result[f'{dbname}_end'] = None
+            result[f'{dbname}_length'] = None
             result[f'{dbname}_cn_state'] = None
             result['reciprocal_overlap'] = None
             result['boundary_difference'] = None
@@ -65,16 +67,17 @@ def _validate_cnv(queries, database, qname, dbname, reciprocal_overlap_cutoff, b
             result[f'chrom'] = query['chrom']
             result[f'{qname}_start'] = query['start']
             result[f'{qname}_end'] = query['end']
+            result[f'{qname}_length'] = query['end'] - query['start']
             result[f'{qname}_cn_state'] = query['cn_state']
             result[f'{dbname}_idx'] = match['idx']
             result[f'{dbname}_start'] = match['start']
             result[f'{dbname}_end'] = match['end']
+            result[f'{dbname}_length'] = match['end'] - match['start']
             result[f'{dbname}_cn_state'] = match['cn_state']
             result['reciprocal_overlap'] = reciprocal_overlap
             result['boundary_difference'] = boundary_difference
             result['reciprocal_overlap_test'] = 'PASS' if reciprocal_overlap >= reciprocal_overlap_cutoff else 'FAIL'
             result['breakpoint_tolerance_test'] = 'PASS' if boundary_difference <= boundary_difference_cutoff else 'FAIL'
-
 
             bag.append(result)
 

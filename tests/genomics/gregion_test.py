@@ -3,7 +3,7 @@ import polars as pl
 import pytest
 
 from genomics.gregion import GenomicRegion
-from genomics.gregion import create_genomic_regions
+from genomics.gregion import create_database
 
 def test_intersects():
     assert GenomicRegion('chr1', 100, 200).intersects( GenomicRegion('chr2', 100, 200)) is None
@@ -12,7 +12,7 @@ def test_intersects():
     assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 200))
     assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 201))
 
-def test_GenomicRegions():
+def test_GenomicRegionDatabase():
     data = pl.from_dict({
         'chrom': ['chr1', 'chr1', 'chr2'],
         'start': [10000, 30000, 30000],
@@ -20,7 +20,7 @@ def test_GenomicRegions():
         'name': ['r1', 'r2', 'r3'],
     }).to_dicts()
 
-    regions = create_genomic_regions(data)
+    regions = create_database(data)
 
     assert {'chr1', 'chr2'} == regions.chroms
 

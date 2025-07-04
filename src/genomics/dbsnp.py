@@ -429,7 +429,7 @@ def _chop(dbsnp_vcf_file, tmp_dir, n_threads, blocksize = PGZIP_BLOCK_SIZE):
         writer.close()
 
 
-def merged2map(input_json_file, output_tsv_file, n_threads, n_tasks=10000):
+def merged2map(input_json_file, output_tsv_file, n_threads, batch_size=100000):
 
     def jobs(input_json_file):
         bag = list()
@@ -437,7 +437,7 @@ def merged2map(input_json_file, output_tsv_file, n_threads, n_tasks=10000):
             for line in fh:
                 line = line.strip()
                 bag.append(line)
-                if len(bag) >= n_tasks:
+                if len(bag) >= batch_size:
                     yield bag
                     bag = list()
         if len(bag):
@@ -480,8 +480,8 @@ def merged2map(input_json_file, output_tsv_file, n_threads, n_tasks=10000):
 
     data = pl.from_dicts(bag)
 
-    if output_tsv_file.suffix != '.tsv.gz':
-        output_tsv_file = output_tsv_file.with_suffix('.tsv.gz')
+    if output_tsv_file.suffix != '.gz':
+        output_tsv_file = output_tsv_file.with_suffix('.gz')
 
     with gzip.open(output_tsv_file, 'wt') as fh:
         fh.write(data.write_csv(include_header = True, separator = '\t'))
