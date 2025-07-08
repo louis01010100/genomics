@@ -265,7 +265,7 @@ class Variant():
             for alt in self.alts:
                 new_alts.append(prefix + alt)
         else:
-            assert '-' in self.alts
+            assert '-' in self.alts, self
 
             pos = self.pos - 1
             prefix = chrom_seq[pos -1: pos]
