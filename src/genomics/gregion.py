@@ -33,6 +33,7 @@ def create_database(records: list[dict]):
     bag = dict()
 
     for record in records:
+
         chrom = record['chrom']
         start = record['start']
         end = record['end']
