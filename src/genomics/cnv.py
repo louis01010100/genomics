@@ -1,5 +1,6 @@
 from importlib import resources
 from pathos.multiprocessing import ProcessPool
+import karyopype.karyopype as kp
 
 import polars as pl
 
@@ -24,7 +25,7 @@ def validate(
     output_dir,
     reciprocal_overlap_cutoff=0.5,
     boundary_difference_cutoff=10000,
-    window_size=100000,
+    window_size=10000,
     step_size=1000,
     concordance_cutoff = 0.9,
     n_threads = 32,
@@ -136,21 +137,29 @@ def validate(
     #
     # ppv_moving_average.write_csv(output_dir / 'ppv_moving_average.tsv', include_header = True, separator = '\t')
     # sensitivity_moving_average.write_csv(output_dir / 'sensitivity_moving_average.tsv', include_header = True, separator = '\t')
+    #
+    # ppv_moving_average = pl.read_csv(
+    #         output_dir / 'ppv_moving_average.tsv', 
+    #         has_header = True, 
+    #         separator = '\t',
+    #         schema_overrides = {'concordance': pl.Float64},
+    # )
+    # sensitivity_moving_average = pl.read_csv(
+    #         output_dir / 'sensitivity_moving_average.tsv', 
+    #         has_header = True, 
+    #         separator = '\t',
+    #         schema_overrides = {'concordance': pl.Float64},
+    # )
+    #
+    # ppv_high_concordance_regions = create_high_concordance_region(ppv_moving_average, concordance_cutoff)
+    # ppv_high_concordance_regions.write_csv(output_dir / f'regions_ppv-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
+    # ppv_high_concordance_regions.write_csv(output_dir / f'regions_ppv-{concordance_cutoff}.bed', include_header = False, separator = ' ')
+    kp.plot_karyopype("hg38", str(output_dir / f'regions_ppv-{concordance_cutoff}.bed'), savefig = True)
 
-    ppv_moving_average = pl.read_csv(output_dir / 'ppv_moving_average.tsv', has_header = True, separator = '\t')
-    sensitivity_moving_average = pl.read_csv(output_dir / 'sensitivity_moving_average.tsv', has_header = True, separator = '\t')
-    
-    ppv_high_concordance_regions = create_high_concordance_region(ppv_moving_average, concordance_cutoff)
     # sensitivity_high_concordance_regions = create_high_concordance_region(sensitivity_moving_average , concordance_cutoff)
-
-    ppv_high_concordance_regions.write_csv(output_dir / f'regions_ppv-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
+    # ppv_high_concordance_regions.write_csv(output_dir / f'regions_ppv-{concordance_cutoff}.bed', include_header = False, separator = ' ')
     # sensitivity_high_concordance_regions.write_csv(output_dir / f'regions_sensitivity-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
 
-    return {
-        "ppv": ppv,
-        "data_ppv": data_ppv,
-        "data_sensitivity": data_sensitivity,
-    }
 
 def create_high_concordance_region(moving_average_data, concordance_cutoff):
 
@@ -268,6 +277,9 @@ def moving_average(data, chrom_length_file, window_size, step_size, reciprocal_o
                     continue
                 if match['reciprocal_overlap'] < reciprocal_overlap_cutoff:
                     continue
+                if match['cn_state_test'] == 'FAIL':
+                    continue
+
                 n_same += 1
             if n_detected == 0:
                 concordance = None
@@ -296,7 +308,7 @@ def moving_average(data, chrom_length_file, window_size, step_size, reciprocal_o
         for result in pool.uimap(process, jobs(data, chrom_lengths, window_size, step_size, reciprocal_overlap_cutoff)):
             bag.extend(result)
 
-    result = pl.from_dicts(bag)
+    result = pl.from_dicts(bag, infer_schema_length = None)
 
     return result
 
@@ -363,6 +375,7 @@ def _validate_cnv(
             result["boundary_difference"] = None
             result["reciprocal_overlap_test"] = None
             result["breakpoint_tolerance_test"] = None
+            result["cn_state_test"] = None
             bag.append(result)
             continue
 
@@ -385,12 +398,14 @@ def _validate_cnv(
             result[f"{dbname}_cn_state"] = match["cn_state"]
             result["reciprocal_overlap"] = reciprocal_overlap
             result["boundary_difference"] = boundary_difference
+
             result["reciprocal_overlap_test"] = (
                 "PASS" if reciprocal_overlap >= reciprocal_overlap_cutoff else "FAIL"
             )
             result["breakpoint_tolerance_test"] = (
                 "PASS" if boundary_difference <= boundary_difference_cutoff else "FAIL"
             )
+            result["cn_state_test"] = "PASS" if query['cn_state'] == match['cn_state'] else 'FAIL'
 
             bag.append(result)
 
