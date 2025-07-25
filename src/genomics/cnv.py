@@ -29,10 +29,10 @@ def validate(
     truths_file,
     sample_map_file,
     output_dir,
+    cnvmix_regions_file,
     reciprocal_overlap_cutoff=0.5,
     boundary_difference_cutoff=10000,
-    window_size=1000000,
-    step_size=1000,
+    bin_size=1000000,
     concordance_cutoff=0.9,
     n_threads=32,
 ):
@@ -150,49 +150,53 @@ def validate(
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
-    ppv_moving_average = moving_average(
-        prediction_vs_truth,
-        CHROM_LENGTH_HG38_FILE,
-        window_size,
-        step_size,
-        reciprocal_overlap_cutoff,
-        n_threads,
+    ppv_summary = summarize(
+        data=prediction_vs_truth,
+        chrom_length_file=CHROM_LENGTH_HG38_FILE,
+        bin_size=bin_size,
+        reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
+        n_threads=n_threads,
     )
 
-    sensitivity_moving_average = moving_average(
-        truth_vs_prediction,
-        CHROM_LENGTH_HG38_FILE,
-        window_size,
-        step_size,
-        reciprocal_overlap_cutoff,
-        n_threads,
+    sensitivity_summary = summarize(
+        data=truth_vs_prediction,
+        chrom_length_file=CHROM_LENGTH_HG38_FILE,
+        bin_size=bin_size,
+        reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
+        n_threads=n_threads,
     )
 
-    ppv_moving_average.write_csv(
-        output_dir / "ppv_moving_average.tsv", include_header=True, separator="\t"
+    ppv_summary.write_csv(
+        output_dir / "ppv_summary.tsv", include_header=True, separator="\t"
     )
-    sensitivity_moving_average.write_csv(
-        output_dir / "sensitivity_moving_average.tsv",
+    sensitivity_summary.write_csv(
+        output_dir / "sensitivity_summary.tsv",
         include_header=True,
         separator="\t",
     )
 
-    ppv_moving_average = pl.read_csv(
-        output_dir / "ppv_moving_average.tsv",
+    ppv_summary = pl.read_csv(
+        output_dir / "ppv_summary.tsv",
         has_header=True,
         separator="\t",
         schema_overrides={"concordance": pl.Float64},
     )
 
-    sensitivity_moving_average = pl.read_csv(
-        output_dir / "sensitivity_moving_average.tsv",
+    ppv_summary.filter(pl.col("chrom") == "chr3").filter(
+        pl.col("concordance") >= 0.5
+    ).write_csv(
+        output_dir / "ppv_summary_chr3.tsv", include_header=True, separator="\t"
+    )
+
+    sensitivity_summary = pl.read_csv(
+        output_dir / "sensitivity_summary.tsv",
         has_header=True,
         separator="\t",
         schema_overrides={"concordance": pl.Float64},
     )
 
     ppv_high_concordance_regions = create_high_concordance_region(
-        ppv_moving_average, concordance_cutoff
+        ppv_summary, concordance_cutoff
     )
     ppv_high_concordance_regions.write_csv(
         output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
@@ -200,13 +204,24 @@ def validate(
         separator="\t",
     )
 
-    kp.plot_karyopype(
-        [output_dir / f"regions_ppv-{concordance_cutoff}.tsv"],
-        [f"concordance_{concordance_cutoff}"],
-        output_dir / f"regions_ppv-{concordance_cutoff}.png",
-    )
+    if cnvmix_regions_file is not None:
+        kp.plot_karyopype(
+            [
+                cnvmix_regions_file,
+                output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
+            ],
+            ["cnvmix_regions", f"concordance_{concordance_cutoff}"],
+            output_dir / f"regions_ppv-{concordance_cutoff}.png",
+        )
+    else:
+        kp.plot_karyopype(
+            [output_dir / f"regions_ppv-{concordance_cutoff}.tsv"],
+            [f"concordance_{concordance_cutoff}"],
+            output_dir / f"regions_ppv-{concordance_cutoff}.png",
+        )
 
-    # sensitivity_high_concordance_regions = create_high_concordance_region(sensitivity_moving_average , concordance_cutoff)
+    # sensitivity_high_concordance_regions =
+    # create_high_concordance_region(sensitivity_summary , concordance_cutoff)
     # ppv_high_concordance_regions.write_csv(output_dir / f'regions_ppv-{concordance_cutoff}.bed', include_header = False, separator = ' ')
     # sensitivity_high_concordance_regions.write_csv(output_dir / f'regions_sensitivity-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
 
@@ -235,7 +250,7 @@ def create_high_concordance_region(moving_average_data, concordance_cutoff):
             region = fragment
             continue
 
-        if not region.overlaps(fragment):
+        if not region.is_close_to(fragment, 1):
 
             regions.append(
                 {
@@ -267,11 +282,10 @@ def create_high_concordance_region(moving_average_data, concordance_cutoff):
     return pl.from_dicts(regions)
 
 
-def moving_average(
+def summarize(
     data,
     chrom_length_file,
-    window_size,
-    step_size,
+    bin_size,
     reciprocal_overlap_cutoff,
     n_threads,
 ):
@@ -280,8 +294,7 @@ def moving_average(
         data,
         chrom_orders,
         chrom_lengths,
-        window_size,
-        step_size,
+        bin_size,
         reciprocal_overlap_cutoff,
     ):
 
@@ -295,8 +308,7 @@ def moving_average(
                 "chrom": chrom,
                 "chrom_length": chrom_lengths[chrom],
                 "data": df.to_dicts(),
-                "window_size": window_size,
-                "step_size": step_size,
+                "bin_size": bin_size,
                 "reciprocal_overlap_cutoff": reciprocal_overlap_cutoff,
             }
 
@@ -304,20 +316,21 @@ def moving_average(
         chrom = job["chrom"]
         chrom_length = job["chrom_length"]
         data = job["data"]
-        window_size = job["window_size"]
-        step_size = job["step_size"]
+        bin_size = job["bin_size"]
         reciprocal_overlap_cutoff = job["reciprocal_overlap_cutoff"]
 
         database = create_database(data)
 
         bag = list()
 
-        for i in range(0, chrom_length, step_size):
+        for start in range(0, chrom_length, bin_size):
 
-            window = GenomicRegion(chrom, i, i + window_size)
+            end = min(start + bin_size, chrom_length)
+
+            bin = GenomicRegion(chrom, start, end)
 
             matches = database.find_overlap(
-                {"chrom": window.chrom, "start": window.start, "end": window.end}
+                {"chrom": bin.chrom, "start": bin.start, "end": bin.end}
             )
 
             if len(matches) == 0:
@@ -345,9 +358,9 @@ def moving_average(
 
             bag.append(
                 {
-                    "chrom": window.chrom,
-                    "start": window.start,
-                    "end": window.end,
+                    "chrom": bin.chrom,
+                    "start": bin.start,
+                    "end": bin.end,
                     "concordance": concordance,
                     "n_detected": n_detected,
                     "n_same": n_same,
@@ -358,9 +371,7 @@ def moving_average(
     bag = list()
 
     chrom_lengths = load_chrom_lengths(chrom_length_file)
-    chrom_orders = sorted(
-        load_chrom_lengths(chrom_length_file).keys(), key=chrom_sort_key
-    )
+    chrom_orders = sorted(chrom_lengths.keys(), key=chrom_sort_key)
 
     # for job in jobs(data, chrom_orders, chrom_lengths, window_size, step_size, reciprocal_overlap_cutoff):
     #     result = process(job)
@@ -373,8 +384,7 @@ def moving_average(
                 data,
                 chrom_orders,
                 chrom_lengths,
-                window_size,
-                step_size,
+                bin_size,
                 reciprocal_overlap_cutoff,
             ),
         ):
