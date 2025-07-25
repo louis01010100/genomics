@@ -7,6 +7,8 @@ import polars as pl
 from matplotlib.collections import PolyCollection
 from matplotlib.lines import Line2D
 
+from .utils import chrom_sort_key
+
 CHROM_LENGTHS_FILE = (
     resources.files("genomics") / "resources" / "chrom_lengths-hg38.tsv"
 )
@@ -35,23 +37,6 @@ def add_chromsize_colors(sizes_dict, color):
     return {k: (v, color) for k, v in sizes_dict.items()}
 
 
-def chrom_sort_key(chrom):
-    match = re.match(r"chr(\d+|X|Y|M)$", chrom)
-    if not match:
-        return (1000,)
-    val = match.group(1)
-    if val.isdigit():
-        return (int(val),)
-    elif val == "X":
-        return (23,)
-    elif val == "Y":
-        return (24,)
-    elif val == "M":
-        return (25,)
-    else:
-        return (999,)
-
-
 def chromosome_collections(df: pl.DataFrame, y_positions, height, **kwargs):
     if "width" not in df.columns:
         df = df.with_columns((pl.col("end") - pl.col("start")).alias("width"))
@@ -77,7 +62,7 @@ def chromosome_collections(df: pl.DataFrame, y_positions, height, **kwargs):
         yield poly
 
 
-def add_regions(ax, chromsizes, region_files):
+def add_regions(ax, chromsizes, region_files, labels):
     chromsize_colors = add_chromsize_colors(chromsizes, color="whitesmoke")
     chrom_height = 1
     chrom_spacing = 1
@@ -113,12 +98,14 @@ def add_regions(ax, chromsizes, region_files):
     leg = []
     leg_lab = []
 
-    for i, r in enumerate(region_files):
-        print(i, r)
+    for i, data in enumerate(zip(region_files, labels)):
+        region = data[0]
+        label = data[1]
+        print(i, region)
         color = f"C{i}"
-        leg_lab.append(f"regionss_file{i+1}")
+        leg_lab.append(label)
         leg.append(Line2D([0], [0], color=color, lw=4))
-        rdf = parse_regions(r)
+        rdf = parse_regions(region)
 
         rdf = rdf.with_columns(pl.lit(color).alias("colors"))
         for collection in chromosome_collections(
@@ -133,14 +120,15 @@ def add_regions(ax, chromsizes, region_files):
     return ax
 
 
-def plot_karyopype(region_files, output_file, figsize=(10, 7)):
+def plot_karyopype(region_files, labels, output_file, figsize=(10, 7)):
+    assert len(region_files) == len(labels)
     chromsizes = get_chromsizes(CHROM_LENGTHS_FILE)
     fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-    add_regions(ax=ax, chromsizes=chromsizes, region_files=region_files)
+    add_regions(ax=ax, chromsizes=chromsizes, region_files=region_files, labels=labels)
 
     ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, n: int(x / 1e6)))
-    ax.set_title(f"Human GRCh38 Karyopype", fontsize=14)
-    plt.xlabel("Chromosome Position (Mbp)", fontsize=14)
+    ax.set_title(f"Human Genome GRCh38", fontsize=14)
+    plt.xlabel("Position (Mbp)", fontsize=14)
     plt.ylabel(f"Chromosome", fontsize=14)
     plt.savefig(output_file)

@@ -6,6 +6,7 @@ from pathos.multiprocessing import ProcessPool
 from genomics.gregion import GenomicRegion, create_database
 
 from . import karyopype as kp
+from .utils import chrom_sort_key
 
 COMPLEX_REGIONS_FILE = (
     resources.files("genomics") / "resources" / "complex_regions-hg38.tsv"
@@ -30,7 +31,7 @@ def validate(
     output_dir,
     reciprocal_overlap_cutoff=0.5,
     boundary_difference_cutoff=10000,
-    window_size=10000,
+    window_size=1000000,
     step_size=1000,
     concordance_cutoff=0.9,
     n_threads=32,
@@ -182,6 +183,7 @@ def validate(
         separator="\t",
         schema_overrides={"concordance": pl.Float64},
     )
+
     sensitivity_moving_average = pl.read_csv(
         output_dir / "sensitivity_moving_average.tsv",
         has_header=True,
@@ -197,13 +199,11 @@ def validate(
         include_header=True,
         separator="\t",
     )
-    ppv_high_concordance_regions.write_csv(
-        output_dir / f"regions_ppv-{concordance_cutoff}.bed",
-        include_header=False,
-        separator=" ",
-    )
+
     kp.plot_karyopype(
-        "hg38", str(output_dir / f"regions_ppv-{concordance_cutoff}.bed"), savefig=True
+        [output_dir / f"regions_ppv-{concordance_cutoff}.tsv"],
+        [f"concordance_{concordance_cutoff}"],
+        output_dir / f"regions_ppv-{concordance_cutoff}.png",
     )
 
     # sensitivity_high_concordance_regions = create_high_concordance_region(sensitivity_moving_average , concordance_cutoff)
@@ -225,20 +225,15 @@ def create_high_concordance_region(moving_average_data, concordance_cutoff):
     region = None
 
     for record in moving_average_data.to_dicts():
-        if region is None:
-            region = GenomicRegion(
-                chrom=record["chrom"],
-                start=record["start"],
-                end=record["end"],
-            )
-
-            continue
-
         fragment = GenomicRegion(
             chrom=record["chrom"],
             start=record["start"],
             end=record["end"],
         )
+
+        if region is None:
+            region = fragment
+            continue
 
         if not region.overlaps(fragment):
 
@@ -280,11 +275,17 @@ def moving_average(
     reciprocal_overlap_cutoff,
     n_threads,
 ):
-    chrom_lengths = load_chrom_lengths(chrom_length_file)
 
-    def jobs(data, chrom_lengths, window_size, step_size, reciprocal_overlap_cutoff):
+    def jobs(
+        data,
+        chrom_orders,
+        chrom_lengths,
+        window_size,
+        step_size,
+        reciprocal_overlap_cutoff,
+    ):
 
-        for chrom, length in chrom_lengths.items():
+        for chrom in chrom_orders:
 
             df = data.filter(pl.col("chrom") == chrom)
             if len(df) == 0:
@@ -326,15 +327,6 @@ def moving_average(
             n_same = 0
 
             for match in matches:
-                match_region = GenomicRegion(
-                    match["chrom"], match["start"], match["end"]
-                )
-
-                if (
-                    window.get_reciprocal_overlap(match_region)
-                    < reciprocal_overlap_cutoff
-                ):
-                    continue
 
                 n_detected += 1
 
@@ -365,7 +357,12 @@ def moving_average(
 
     bag = list()
 
-    # for job in jobs(data, chrom_lengths, window_size, step_size, reciprocal_overlap_cutoff):
+    chrom_lengths = load_chrom_lengths(chrom_length_file)
+    chrom_orders = sorted(
+        load_chrom_lengths(chrom_length_file).keys(), key=chrom_sort_key
+    )
+
+    # for job in jobs(data, chrom_orders, chrom_lengths, window_size, step_size, reciprocal_overlap_cutoff):
     #     result = process(job)
     #     bag.extend(result)
 
@@ -373,7 +370,12 @@ def moving_average(
         for result in pool.uimap(
             process,
             jobs(
-                data, chrom_lengths, window_size, step_size, reciprocal_overlap_cutoff
+                data,
+                chrom_orders,
+                chrom_lengths,
+                window_size,
+                step_size,
+                reciprocal_overlap_cutoff,
             ),
         ):
             bag.extend(result)
@@ -427,13 +429,13 @@ def _validate_cnv(
 
         if len(matches) == 0:
             result = dict()
-            result[f"{qname}_idx"] = query["idx"]
+            result[f"{qname}_fragment_idx"] = query["fragment_idx"]
             result[f"chrom"] = query["chrom"]
             result[f"{qname}_start"] = query["start"]
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            result[f"{dbname}_idx"] = None
+            result[f"{dbname}_fragment_idx"] = None
             result[f"{dbname}_start"] = None
             result[f"{dbname}_end"] = None
             result[f"{dbname}_length"] = None
@@ -452,13 +454,13 @@ def _validate_cnv(
             reciprocal_overlap = query_region.get_reciprocal_overlap(db_region)
             boundary_difference = query_region.get_max_boundary_difference(db_region)
 
-            result[f"{qname}_idx"] = query["idx"]
+            result[f"{qname}_fragment_idx"] = query["fragment_idx"]
             result[f"chrom"] = query["chrom"]
             result[f"{qname}_start"] = query["start"]
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            result[f"{dbname}_idx"] = match["idx"]
+            result[f"{dbname}_fragment_idx"] = match["fragment_idx"]
             result[f"{dbname}_start"] = match["start"]
             result[f"{dbname}_end"] = match["end"]
             result[f"{dbname}_length"] = match["end"] - match["start"]
@@ -533,10 +535,10 @@ def annotate_complex_regions(cnvs, complex_regions):
             bag_region.append(record)
 
             fragment = record.copy()
-            fragment["idx"] = record["region_idx"]
+            fragment["fragment_idx"] = record["region_idx"]
             bag_fragment.append(fragment)
         else:
-            idx = record["region_idx"]
+            region_idx = record["region_idx"]
             frag_idx = 0
 
             for match in matches:
@@ -559,14 +561,14 @@ def annotate_complex_regions(cnvs, complex_regions):
                 if record["start"] < match["start"]:
                     fragment["start"] = record["start"]
                     fragment["end"] = match["start"]
-                    fragment["idx"] = f"{idx}_{frag_idx}"
+                    fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
                     bag_fragment.append(fragment)
                     frag_idx += 1
 
                 if record["end"] > match["end"]:
                     fragment["start"] = match["end"]
                     fragment["end"] = record["end"]
-                    fragment["idx"] = f"{idx}_{frag_idx}"
+                    fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
                     bag_fragment.append(fragment)
                     frag_idx += 1
     regions = pl.from_dicts(bag_region, infer_schema_length=None)
