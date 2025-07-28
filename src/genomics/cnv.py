@@ -29,7 +29,7 @@ def validate(
     truths_file,
     sample_map_file,
     output_dir,
-    cnvmix_regions_file,
+    cnvmix_regions_file = None,
     reciprocal_overlap_cutoff=0.5,
     boundary_difference_cutoff=10000,
     bin_size=1000000,
@@ -517,10 +517,10 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
 
         bag.append(
             {
-                "sample_name_prediction": sample_name,
-                "sample_name_truth": sample_name,
+                "sample_name_prediction": sample_name_prediction,
+                "sample_name_truth": sample_name_truth,
                 "prediction_fragments": df,
-                "truth_fragments": truth_bag[sample_map[sample_name]],
+                "truth_fragments": truth_bag[sample_name_truth],
             }
         )
 
