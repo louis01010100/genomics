@@ -182,12 +182,6 @@ def validate(
         schema_overrides={"concordance": pl.Float64},
     )
 
-    ppv_summary.filter(pl.col("chrom") == "chr3").filter(
-        pl.col("concordance") >= 0.5
-    ).write_csv(
-        output_dir / "ppv_summary_chr3.tsv", include_header=True, separator="\t"
-    )
-
     sensitivity_summary = pl.read_csv(
         output_dir / "sensitivity_summary.tsv",
         has_header=True,
@@ -203,6 +197,7 @@ def validate(
         include_header=True,
         separator="\t",
     )
+
 
     if cnvmix_regions_file is not None:
         kp.plot_karyopype(
@@ -220,10 +215,31 @@ def validate(
             output_dir / f"regions_ppv-{concordance_cutoff}.png",
         )
 
-    # sensitivity_high_concordance_regions =
-    # create_high_concordance_region(sensitivity_summary , concordance_cutoff)
-    # ppv_high_concordance_regions.write_csv(output_dir / f'regions_ppv-{concordance_cutoff}.bed', include_header = False, separator = ' ')
-    # sensitivity_high_concordance_regions.write_csv(output_dir / f'regions_sensitivity-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
+    sensitivity_high_concordance_regions = create_high_concordance_region(
+            sensitivity_summary , concordance_cutoff)
+
+    ppv_high_concordance_regions.write_csv(
+            output_dir / f'regions_sensitivity-{concordance_cutoff}.bed', include_header = False, separator = ' ')
+
+    sensitivity_high_concordance_regions.write_csv(
+            output_dir / f'regions_sensitivity-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
+
+    if cnvmix_regions_file is not None:
+        kp.plot_karyopype(
+            [
+                cnvmix_regions_file,
+                output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
+            ],
+            ["cnvmix_regions", f"concordance_{concordance_cutoff}"],
+            output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
+        )
+    else:
+        kp.plot_karyopype(
+            [output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv"],
+            [f"concordance_{concordance_cutoff}"],
+            output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
+        )
+
 
 
 def create_high_concordance_region(moving_average_data, concordance_cutoff):
