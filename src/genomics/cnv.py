@@ -367,9 +367,11 @@ def summarize_sliding(
 
                 n_detected += 1
 
-                if match["reciprocal_overlap"] is None:
+                # if match["reciprocal_overlap_test"] is None:
+                #     continue
+                if match["reciprocal_overlap_test"] == "FAIL":
                     continue
-                if match["reciprocal_overlap"] < reciprocal_overlap_cutoff:
+                if match["breakpoint_tolerance_test"] == "FAIL":
                     continue
                 if match["cn_state_test"] == "FAIL":
                     continue
