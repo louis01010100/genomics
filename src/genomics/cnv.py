@@ -30,12 +30,11 @@ def validate(
     truths_file,
     sample_map_file,
     output_dir,
-    cnvmix_regions_file = None,
+    cnvmix_regions_file=None,
     reciprocal_overlap_cutoff=0.5,
     boundary_difference_cutoff=10000,
-    # bin_size=1000000,
-    window_size = 1000000,
-    step_size = 1000,
+    window_size=10000000,
+    step_size=1000,
     concordance_cutoff=0.8,
     n_threads=32,
 ):
@@ -65,9 +64,9 @@ def validate(
 
     complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
 
-
     prediction_regions, prediction_fragments = annotate_complex_regions(
-        predictions, complex_region_db,
+        predictions,
+        complex_region_db,
     )
 
     prediction_regions.write_csv(
@@ -155,10 +154,10 @@ def validate(
     ppv_summary = summarize_sliding(
         data=prediction_vs_truth,
         chrom_length_file=CHROM_LENGTH_HG38_FILE,
-        complex_regions_file = COMPLEX_REGIONS_FILE,
+        complex_regions_file=COMPLEX_REGIONS_FILE,
         # bin_size=bin_size,
-        window_size = window_size,
-        step_size = step_size,
+        window_size=window_size,
+        step_size=step_size,
         reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
         n_threads=n_threads,
     )
@@ -166,10 +165,10 @@ def validate(
     sensitivity_summary = summarize_sliding(
         data=truth_vs_prediction,
         chrom_length_file=CHROM_LENGTH_HG38_FILE,
-        complex_regions_file = COMPLEX_REGIONS_FILE,
+        complex_regions_file=COMPLEX_REGIONS_FILE,
         # bin_size=bin_size,
-        window_size = window_size,
-        step_size = step_size,
+        window_size=window_size,
+        step_size=step_size,
         reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
         n_threads=n_threads,
     )
@@ -206,22 +205,24 @@ def validate(
         separator="\t",
     )
 
-
     kp.plot_karyopype(
         [
             COMPLEX_REGIONS_FILE,
             output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
         ],
-        ["complex_regions",  f"concordance_{concordance_cutoff}"],
+        ["complex_regions", f"concordance_{concordance_cutoff}"],
         output_dir / f"regions_ppv-{concordance_cutoff}.png",
     )
 
     sensitivity_high_concordance_regions = create_high_concordance_region(
-            sensitivity_summary , concordance_cutoff)
-
+        sensitivity_summary, concordance_cutoff
+    )
 
     sensitivity_high_concordance_regions.write_csv(
-            output_dir / f'regions_sensitivity-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
+        output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
+        include_header=True,
+        separator="\t",
+    )
 
     kp.plot_karyopype(
         [
@@ -231,7 +232,6 @@ def validate(
         ["complex_regions", f"concordance_{concordance_cutoff}"],
         output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
     )
-
 
 
 def create_high_concordance_region(moving_average_data, concordance_cutoff):
@@ -289,6 +289,7 @@ def create_high_concordance_region(moving_average_data, concordance_cutoff):
 
     return pl.from_dicts(regions)
 
+
 def summarize_sliding(
     data,
     chrom_length_file,
@@ -308,7 +309,6 @@ def summarize_sliding(
         step_size,
         reciprocal_overlap_cutoff,
     ):
-
 
         for chrom in chrom_orders:
 
@@ -335,7 +335,6 @@ def summarize_sliding(
         reciprocal_overlap_cutoff = job["reciprocal_overlap_cutoff"]
         complex_regions = job["complex_regions"]
 
-
         database = create_database(data)
         complex_region_db = create_database(complex_regions)
 
@@ -345,10 +344,11 @@ def summarize_sliding(
 
             end = min(start + window_size, chrom_length)
 
-
             query = GenomicRegion(chrom, start, end)
 
-            matches = complex_region_db.find_overlap( {"chrom": query.chrom, "start": query.start, "end": query.end})
+            matches = complex_region_db.find_overlap(
+                {"chrom": query.chrom, "start": query.start, "end": query.end}
+            )
 
             if len(matches) > 0:
                 continue
@@ -367,12 +367,12 @@ def summarize_sliding(
 
                 n_detected += 1
 
-                # if match["reciprocal_overlap_test"] is None:
-                #     continue
+                if match["reciprocal_overlap"] is None:
+                    continue
                 if match["reciprocal_overlap_test"] == "FAIL":
                     continue
-                if match["breakpoint_tolerance_test"] == "FAIL":
-                    continue
+                # if match["breakpoint_tolerance_test"] == "FAIL":
+                #     continue
                 if match["cn_state_test"] == "FAIL":
                     continue
 
@@ -409,12 +409,12 @@ def summarize_sliding(
             process,
             jobs(
                 data,
-                chrom_orders = chrom_orders,
-                chrom_lengths = chrom_lengths,
-                complex_regions = complex_regions,
-                window_size = window_size,
-                step_size = step_size,
-                reciprocal_overlap_cutoff = reciprocal_overlap_cutoff,
+                chrom_orders=chrom_orders,
+                chrom_lengths=chrom_lengths,
+                complex_regions=complex_regions,
+                window_size=window_size,
+                step_size=step_size,
+                reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
             ),
         ):
             bag.extend(result)
@@ -422,7 +422,6 @@ def summarize_sliding(
     result = pl.from_dicts(bag, infer_schema_length=None)
 
     return result
-
 
 
 def load_sample_map(input_file):
