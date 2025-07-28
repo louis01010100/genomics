@@ -15,6 +15,10 @@ CHROM_LENGTH_HG38_FILE = (
     resources.files("genomics") / "resources" / "chrom_lengths-hg38.tsv"
 )
 
+HYPERVARIABLE_REGIONS_FILE = (
+    resources.files("genomics") / "resources" / "hypervariable_regions-hg38.tsv"
+)
+
 REQUIRED_COLUMNS = {
     "sample_name",
     "chrom",
@@ -32,8 +36,10 @@ def validate(
     cnvmix_regions_file = None,
     reciprocal_overlap_cutoff=0.5,
     boundary_difference_cutoff=10000,
-    bin_size=1000000,
-    concordance_cutoff=0.9,
+    # bin_size=1000000,
+    window_size = 1000000,
+    step_size = 1000,
+    concordance_cutoff=0.8,
     n_threads=32,
 ):
 
@@ -60,12 +66,11 @@ def validate(
         pl.arange(0, len(truths)).alias("region_idx"),
     )
 
-    complex_regions = create_database(
-        pl.read_csv(COMPLEX_REGIONS_FILE, has_header=True, separator="\t").to_dicts()
-    )
+    complex_regions = load_complex_regions(COMPLEX_REGIONS_FILE, HYPERVARIABLE_REGIONS_FILE)
+
 
     prediction_regions, prediction_fragments = annotate_complex_regions(
-        predictions, complex_regions
+        predictions, complex_regions,
     )
 
     prediction_regions.write_csv(
@@ -150,18 +155,22 @@ def validate(
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
-    ppv_summary = summarize(
+    ppv_summary = summarize_sliding(
         data=prediction_vs_truth,
         chrom_length_file=CHROM_LENGTH_HG38_FILE,
-        bin_size=bin_size,
+        # bin_size=bin_size,
+        window_size = window_size,
+        step_size = step_size,
         reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
         n_threads=n_threads,
     )
 
-    sensitivity_summary = summarize(
+    sensitivity_summary = summarize_sliding(
         data=truth_vs_prediction,
         chrom_length_file=CHROM_LENGTH_HG38_FILE,
-        bin_size=bin_size,
+        # bin_size=bin_size,
+        window_size = window_size,
+        step_size = step_size,
         reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
         n_threads=n_threads,
     )
@@ -199,52 +208,38 @@ def validate(
     )
 
 
-    if cnvmix_regions_file is not None:
-        kp.plot_karyopype(
-            [
-                cnvmix_regions_file,
-                output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
-            ],
-            ["cnvmix_regions", f"concordance_{concordance_cutoff}"],
-            output_dir / f"regions_ppv-{concordance_cutoff}.png",
-        )
-    else:
-        kp.plot_karyopype(
-            [output_dir / f"regions_ppv-{concordance_cutoff}.tsv"],
-            [f"concordance_{concordance_cutoff}"],
-            output_dir / f"regions_ppv-{concordance_cutoff}.png",
-        )
+    kp.plot_karyopype(
+        [
+            COMPLEX_REGIONS_FILE,
+            HYPERVARIABLE_REGIONS_FILE,
+            output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
+        ],
+        ["complex_regions", "hypervariable_regions", f"concordance_{concordance_cutoff}"],
+        output_dir / f"regions_ppv-{concordance_cutoff}.png",
+    )
 
     sensitivity_high_concordance_regions = create_high_concordance_region(
             sensitivity_summary , concordance_cutoff)
 
-    ppv_high_concordance_regions.write_csv(
-            output_dir / f'regions_sensitivity-{concordance_cutoff}.bed', include_header = False, separator = ' ')
 
     sensitivity_high_concordance_regions.write_csv(
             output_dir / f'regions_sensitivity-{concordance_cutoff}.tsv', include_header = True, separator = '\t')
 
-    if cnvmix_regions_file is not None:
-        kp.plot_karyopype(
-            [
-                cnvmix_regions_file,
-                output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
-            ],
-            ["cnvmix_regions", f"concordance_{concordance_cutoff}"],
-            output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
-        )
-    else:
-        kp.plot_karyopype(
-            [output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv"],
-            [f"concordance_{concordance_cutoff}"],
-            output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
-        )
+    kp.plot_karyopype(
+        [
+            COMPLEX_REGIONS_FILE,
+            HYPERVARIABLE_REGIONS_FILE,
+            output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
+        ],
+        ["complex_regions", "hypervariable_regions", f"concordance_{concordance_cutoff}"],
+        output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
+    )
 
 
 
 def create_high_concordance_region(moving_average_data, concordance_cutoff):
 
-    print(moving_average_data["concordance"].max())
+    # print(moving_average_data["concordance"].max())
 
     moving_average_data = moving_average_data.filter(
         pl.col("concordance") >= concordance_cutoff
@@ -297,8 +292,126 @@ def create_high_concordance_region(moving_average_data, concordance_cutoff):
 
     return pl.from_dicts(regions)
 
+def summarize_sliding(
+    data,
+    chrom_length_file,
+    window_size,
+    step_size,
+    reciprocal_overlap_cutoff,
+    n_threads,
+):
 
-def summarize(
+    def jobs(
+        data,
+        chrom_orders,
+        chrom_lengths,
+        window_size,
+        step_size,
+        reciprocal_overlap_cutoff,
+    ):
+
+        for chrom in chrom_orders:
+
+            df = data.filter(pl.col("chrom") == chrom)
+            if len(df) == 0:
+                continue
+
+            yield {
+                "chrom": chrom,
+                "chrom_length": chrom_lengths[chrom],
+                "data": df.to_dicts(),
+                "window_size": window_size,
+                "step_size": step_size,
+                "reciprocal_overlap_cutoff": reciprocal_overlap_cutoff,
+            }
+
+    def process(job):
+        chrom = job["chrom"]
+        chrom_length = job["chrom_length"]
+        data = job["data"]
+        window_size = job["window_size"]
+        step_size = job["step_size"]
+        reciprocal_overlap_cutoff = job["reciprocal_overlap_cutoff"]
+
+        database = create_database(data)
+
+        bag = list()
+
+        for start in range(0, chrom_length, step_size):
+
+            end = min(start + window_size, chrom_length)
+
+
+            bin = GenomicRegion(chrom, start, end)
+
+            matches = database.find_overlap(
+                {"chrom": bin.chrom, "start": bin.start, "end": bin.end}
+            )
+
+            if len(matches) == 0:
+                continue
+
+            n_detected = 0
+            n_same = 0
+
+            for match in matches:
+
+                n_detected += 1
+
+                if match["reciprocal_overlap"] is None:
+                    continue
+                if match["reciprocal_overlap"] < reciprocal_overlap_cutoff:
+                    continue
+                if match["cn_state_test"] == "FAIL":
+                    continue
+
+                n_same += 1
+            if n_detected == 0:
+                concordance = None
+            else:
+                concordance = n_same / n_detected
+
+            bag.append(
+                {
+                    "chrom": bin.chrom,
+                    "start": bin.start,
+                    "end": bin.end,
+                    "concordance": concordance,
+                    "n_detected": n_detected,
+                    "n_same": n_same,
+                }
+            )
+        return bag
+
+    bag = list()
+
+    chrom_lengths = load_chrom_lengths(chrom_length_file)
+    chrom_orders = sorted(chrom_lengths.keys(), key=chrom_sort_key)
+
+    # for job in jobs(data, chrom_orders, chrom_lengths, window_size, step_size, reciprocal_overlap_cutoff):
+    #     result = process(job)
+    #     bag.extend(result)
+
+    with ProcessPool(n_threads) as pool:
+        for result in pool.uimap(
+            process,
+            jobs(
+                data,
+                chrom_orders = chrom_orders,
+                chrom_lengths = chrom_lengths,
+                window_size = window_size,
+                step_size = step_size,
+                reciprocal_overlap_cutoff = reciprocal_overlap_cutoff,
+            ),
+        ):
+            bag.extend(result)
+
+    result = pl.from_dicts(bag, infer_schema_length=None)
+
+    return result
+
+
+def summarize_binning(
     data,
     chrom_length_file,
     bin_size,
@@ -542,6 +655,17 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
 
     return bag
 
+
+def load_complex_regions(complex_regions_file, hypervariable_regions_file):
+
+    data = pl.read_csv(complex_regions_file, has_header=True, separator="\t").to_dicts()
+    data2 = pl.read_csv(hypervariable_regions_file, has_header=True, separator="\t").to_dicts()
+
+    data.extend(data2)
+
+    complex_regions = create_database(data2)
+
+    return complex_regions
 
 def annotate_complex_regions(cnvs, complex_regions):
 
