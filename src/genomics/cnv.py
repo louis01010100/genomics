@@ -1,4 +1,5 @@
 from importlib import resources
+import numpy as np
 
 import polars as pl
 from pathos.multiprocessing import ProcessPool
@@ -31,9 +32,11 @@ def validate(
     sample_map_file,
     output_dir,
     cnvmix_regions_file=None,
+    n_markers_cutoff = 50,
+    cnv_lenght_cutoff = 50000,
     reciprocal_overlap_cutoff=0.5,
-    boundary_difference_cutoff=10000,
-    window_size=10000000,
+    breakpoint_tolerance_cutoff=100000,
+    window_size=1000000,
     step_size=1000,
     concordance_cutoff=0.8,
     n_threads=32,
@@ -54,13 +57,24 @@ def validate(
     predictions = predictions.with_columns(
         pl.col("start").cast(pl.Int64),
         pl.col("end").cast(pl.Int64),
+        pl.col("n_markers").cast(pl.Int64),
         pl.arange(0, len(predictions)).alias("region_idx"),
     )
+
+    predictions = predictions\
+            .filter(pl.col('n_markers') >= n_markers_cutoff)\
+            .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
+
     truths = truths.with_columns(
         pl.col("start").cast(pl.Int64),
         pl.col("end").cast(pl.Int64),
+        pl.col("n_markers").cast(pl.Int64),
         pl.arange(0, len(truths)).alias("region_idx"),
     )
+
+    truths = truths\
+            .filter(pl.col('n_markers') >= n_markers_cutoff)\
+            .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
 
     complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
 
@@ -85,6 +99,7 @@ def validate(
         output_dir / "truth_fragments.tsv", include_header=True, separator="\t"
     )
 
+
     samples = group_by_sample(prediction_fragments, truth_fragments, sample_map)
 
     prediction_vs_truth = list()
@@ -101,7 +116,7 @@ def validate(
             "prediction",
             "truth",
             reciprocal_overlap_cutoff,
-            boundary_difference_cutoff,
+            breakpoint_tolerance_cutoff,
         )
 
         prediction_vs_truth.append(data_ppv)
@@ -112,7 +127,7 @@ def validate(
             "truth",
             "prediction",
             reciprocal_overlap_cutoff,
-            boundary_difference_cutoff,
+            breakpoint_tolerance_cutoff,
         )
 
         truth_vs_prediction.append(data_sensitivity)
@@ -128,28 +143,36 @@ def validate(
     )
 
     prediction_vs_truth = pl.read_csv(
-        output_dir / "prediction_vs_truth.tsv",
-        has_header=True,
-        separator="\t",
-        infer_schema=False,
+        output_dir / "prediction_vs_truth.tsv", has_header=True, separator="\t",
+        infer_schema = False,
+        
     )
     truth_vs_prediction = pl.read_csv(
-        output_dir / "truth_vs_prediction.tsv",
-        has_header=True,
-        separator="\t",
-        infer_schema=False,
+        output_dir / "truth_vs_prediction.tsv", has_header=True, separator="\t",
+        infer_schema = False,
     )
+
     prediction_vs_truth = prediction_vs_truth.with_columns(
         pl.col("prediction_start").cast(pl.Int64).alias("start"),
         pl.col("prediction_end").cast(pl.Int64).alias("end"),
+        pl.col("prediction_length").cast(pl.Int64),
+        pl.col("prediction_n_markers").cast(pl.Int64),
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
     truth_vs_prediction = truth_vs_prediction.with_columns(
         pl.col("truth_start").cast(pl.Int64).alias("start"),
         pl.col("truth_end").cast(pl.Int64).alias("end"),
+        pl.col("truth_length").cast(pl.Int64),
+        pl.col("truth_n_markers").cast(pl.Int64),
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
+
+    report(prediction_vs_truth, 'prediction')\
+            .write_csv(output_dir / 'ppv_by_cn_length.tsv', include_header = True, separator = '\t')
+    report(truth_vs_prediction, 'truth')\
+            .write_csv(output_dir / 'sensitivity_by_cn_length.tsv', include_header = True, separator = '\t')
+
 
     ppv_summary = summarize_sliding(
         data=prediction_vs_truth,
@@ -162,39 +185,11 @@ def validate(
         n_threads=n_threads,
     )
 
-    sensitivity_summary = summarize_sliding(
-        data=truth_vs_prediction,
-        chrom_length_file=CHROM_LENGTH_HG38_FILE,
-        complex_regions_file=COMPLEX_REGIONS_FILE,
-        # bin_size=bin_size,
-        window_size=window_size,
-        step_size=step_size,
-        reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
-        n_threads=n_threads,
-    )
-
     ppv_summary.write_csv(
         output_dir / "ppv_summary.tsv", include_header=True, separator="\t"
     )
-    sensitivity_summary.write_csv(
-        output_dir / "sensitivity_summary.tsv",
-        include_header=True,
-        separator="\t",
-    )
 
-    ppv_summary = pl.read_csv(
-        output_dir / "ppv_summary.tsv",
-        has_header=True,
-        separator="\t",
-        schema_overrides={"concordance": pl.Float64},
-    )
 
-    sensitivity_summary = pl.read_csv(
-        output_dir / "sensitivity_summary.tsv",
-        has_header=True,
-        separator="\t",
-        schema_overrides={"concordance": pl.Float64},
-    )
 
     ppv_high_concordance_regions = create_high_concordance_region(
         ppv_summary, concordance_cutoff
@@ -212,6 +207,23 @@ def validate(
         ],
         ["complex_regions", f"concordance_{concordance_cutoff}"],
         output_dir / f"regions_ppv-{concordance_cutoff}.png",
+    )
+
+    sensitivity_summary = summarize_sliding(
+        data=truth_vs_prediction,
+        chrom_length_file=CHROM_LENGTH_HG38_FILE,
+        complex_regions_file=COMPLEX_REGIONS_FILE,
+        # bin_size=bin_size,
+        window_size=window_size,
+        step_size=step_size,
+        reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
+        n_threads=n_threads,
+    )
+
+    sensitivity_summary.write_csv(
+        output_dir / "sensitivity_summary.tsv",
+        include_header=True,
+        separator="\t",
     )
 
     sensitivity_high_concordance_regions = create_high_concordance_region(
@@ -234,9 +246,9 @@ def validate(
     )
 
 
+
 def create_high_concordance_region(moving_average_data, concordance_cutoff):
 
-    # print(moving_average_data["concordance"].max())
 
     moving_average_data = moving_average_data.filter(
         pl.col("concordance") >= concordance_cutoff
@@ -361,26 +373,22 @@ def summarize_sliding(
                 continue
 
             n_detected = 0
-            n_same = 0
+            n_matched = 0
 
             for match in matches:
 
                 n_detected += 1
 
-                if match["reciprocal_overlap"] is None:
+                if match["matched"] is None:
                     continue
-                if match["reciprocal_overlap_test"] == "FAIL":
-                    continue
-                # if match["breakpoint_tolerance_test"] == "FAIL":
-                #     continue
-                if match["cn_state_test"] == "FAIL":
+                if match["matched"] is False:
                     continue
 
-                n_same += 1
+                n_matched += 1
             if n_detected == 0:
                 concordance = None
             else:
-                concordance = n_same / n_detected
+                concordance = n_matched / n_detected
 
             bag.append(
                 {
@@ -389,7 +397,7 @@ def summarize_sliding(
                     "end": query.end,
                     "concordance": concordance,
                     "n_detected": n_detected,
-                    "n_same": n_same,
+                    "n_matched": n_matched,
                 }
             )
         return bag
@@ -459,7 +467,7 @@ def _validate_cnv(
     qname,
     dbname,
     reciprocal_overlap_cutoff,
-    boundary_difference_cutoff,
+    breakpoint_tolerance_cutoff,
 ):
     bag = list()
     for query in queries:
@@ -474,24 +482,27 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
+            result[f"{qname}_n_markers"] = query["n_markers"]
             result[f"{dbname}_fragment_idx"] = None
             result[f"{dbname}_start"] = None
             result[f"{dbname}_end"] = None
             result[f"{dbname}_length"] = None
             result[f"{dbname}_cn_state"] = None
+            result[f"{dbname}_n_markers"] = None
             result["reciprocal_overlap"] = None
-            result["boundary_difference"] = None
+            result["breakpoint_difference"] = None
             result["reciprocal_overlap_test"] = None
             result["breakpoint_tolerance_test"] = None
             result["cn_state_test"] = None
+            result["matched"] = None
             bag.append(result)
             continue
 
         for match in matches:
             result = dict()
             db_region = GenomicRegion(match["chrom"], match["start"], match["end"])
-            reciprocal_overlap = query_region.get_reciprocal_overlap(db_region)
-            boundary_difference = query_region.get_max_boundary_difference(db_region)
+            reciprocal_overlap, intersetct_length, min_region_length = query_region.get_reciprocal_overlap(db_region)
+            breakpoint_difference = query_region.get_max_boundary_difference(db_region)
 
             result[f"{qname}_fragment_idx"] = query["fragment_idx"]
             result[f"chrom"] = query["chrom"]
@@ -499,27 +510,39 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
+            result[f"{qname}_n_markers"] = query["n_markers"]
             result[f"{dbname}_fragment_idx"] = match["fragment_idx"]
             result[f"{dbname}_start"] = match["start"]
             result[f"{dbname}_end"] = match["end"]
             result[f"{dbname}_length"] = match["end"] - match["start"]
             result[f"{dbname}_cn_state"] = match["cn_state"]
+            result[f"{dbname}_n_markers"] = match["n_markers"]
             result["reciprocal_overlap"] = reciprocal_overlap
-            result["boundary_difference"] = boundary_difference
+            result["breakpoint_difference"] = breakpoint_difference
 
             result["reciprocal_overlap_test"] = (
                 "PASS" if reciprocal_overlap >= reciprocal_overlap_cutoff else "FAIL"
             )
             result["breakpoint_tolerance_test"] = (
-                "PASS" if boundary_difference <= boundary_difference_cutoff else "FAIL"
+                "PASS" if breakpoint_difference <= breakpoint_tolerance_cutoff else "FAIL"
             )
             result["cn_state_test"] = (
                 "PASS" if query["cn_state"] == match["cn_state"] else "FAIL"
             )
 
+            if result["reciprocal_overlap_test"] == "FAIL":
+                result["matched"] = False
+            elif result["breakpoint_tolerance_test"] == "FAIL":
+                result["matched"] = False
+            elif result["cn_state_test"] == "FAIL":
+                result["matched"] = False
+            else:
+                result["matched"] = True
+
             bag.append(result)
 
     report = pl.from_dicts(bag, infer_schema_length=None)
+
 
     return report
 
@@ -536,6 +559,8 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
         sample_name = keys[0]
         truth_bag[sample_name] = df
 
+
+
     bag = list()
 
     for sample_name_prediction, df in prediction_bag.items():
@@ -543,6 +568,9 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
             continue
 
         sample_name_truth = sample_map[sample_name_prediction]
+
+        if sample_name_truth not in truth_bag:
+            continue
 
         bag.append(
             {
@@ -562,6 +590,57 @@ def load_complex_regions(complex_regions_file):
 
     return data
 
+
+def report(data, label):
+
+    if label == 'prediction': 
+        metric = 'ppv'
+    elif label == 'truth':
+        metric = 'sensitivity'
+
+    lengths =  [0, 50000,100000,500000,1000000, np.inf]
+    n_markers = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 
+                    1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, np.inf]
+
+    bag = list()
+
+    for i in range(0, len(lengths) - 1):
+        min_length = lengths[i]
+        max_length = lengths[i + 1]
+        target = data.filter(
+            (pl.col(f'{label}_length') >= min_length) & 
+            (pl.col(f'{label}_length') < max_length)
+        )
+
+        for j in range(0, len(n_markers) - 1):
+
+            min_n_markers = n_markers[j]
+            max_n_markers = n_markers[j + 1]
+
+            target2 = target.filter(
+                (pl.col(f'{label}_n_markers') >= min_n_markers) & 
+                (pl.col(f'{label}_n_markers') < max_n_markers)
+            )
+
+            n_detected = len(target2)
+            n_matched = len(target2.filter(pl.col('matched') == True))
+
+            if n_detected == 0:
+                value = None
+            else:
+                value = n_matched / n_detected
+
+            bag.append({
+                'min_length': min_length,
+                'max_length': max_length,
+                'min_n_markers': min_n_markers,
+                'max_n_markers': max_n_markers,
+                'n_detected': n_detected,
+                'n_matched': n_matched,
+                f'{metric}': value,
+            })
+
+    return pl.from_dicts(bag)
 
 def annotate_complex_regions(cnvs, complex_region_db):
 
@@ -597,13 +676,15 @@ def annotate_complex_regions(cnvs, complex_region_db):
                 )
 
                 query["complex_region"] = match["category"]
-                query["reciprocal_overlap"] = query_region.get_reciprocal_overlap(
+
+                query["reciprocal_overlap"], _, _ = query_region.get_reciprocal_overlap(
                     match_region
                 )
 
                 bag_region.append(query)
 
                 fragment = record.copy()
+
                 if record["start"] < match["start"]:
                     fragment["start"] = record["start"]
                     fragment["end"] = match["start"]
@@ -617,6 +698,7 @@ def annotate_complex_regions(cnvs, complex_region_db):
                     fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
                     bag_fragment.append(fragment)
                     frag_idx += 1
+
     regions = pl.from_dicts(bag_region, infer_schema_length=None)
     fragments = pl.from_dicts(bag_fragment, infer_schema_length=None)
 

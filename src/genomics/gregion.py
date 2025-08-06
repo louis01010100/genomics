@@ -153,8 +153,10 @@ def _get_reciprocal_overlap(region_1, region_2):
         return None
 
     intersect = region_1.intersects(region_2)
+    min_region_length = min(len(region_1), len(region_2))
 
     if intersect is None:
-        return 0
+        return 0, min_region_length
 
-    return max(len(intersect) / len(region_1), len(intersect) / len(region_2))
+
+    return len(intersect) / min_region_length, len(intersect), min_region_length
