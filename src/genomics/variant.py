@@ -253,6 +253,12 @@ class Variant():
                 and self.ref == other.ref 
                 and self.alt == other.alt)
 
+    def validate(self, chrom_seq):
+        ref = chrom_seq[self.pos -1: self.pos -1 + len(self.ref)]
+        if self.ref == ref:
+            return True
+        return False
+
     def to_vcf(self, chrom_seq):
         if self.is_vcf:
             return self.clone()

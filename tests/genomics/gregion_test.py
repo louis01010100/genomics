@@ -1,5 +1,6 @@
 from pathlib import Path
 import polars as pl
+from importlib import resources
 import pytest
 
 from genomics.gregion import GenomicRegion
@@ -11,6 +12,31 @@ def test_intersects():
 
     assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 200))
     assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 201))
+
+# def test_GenomicRegionDatabase_complex_regions():
+#     complex_regions_file = (
+#         resources.files("genomics") / "resources" / "complex_regions-hg38.tsv"
+#     )
+#
+#     db = create_database(pl.read_csv(complex_regions_file, has_header = True, separator = '\t').to_dicts())
+#
+#     matches = db.find_overlap({'chrom': 'chr6', 'start': 32478823, 'end': 32605693})
+#
+#     print('####')
+#     print(matches)
+#     print('####')
+# {'sample_name': '20230615_GT1_ARRAY_2247_G02_TPM1.CEL', 'chrom': 'chr6', 'start': 32478823, 'end': 32605693, 'cn_state': '3', 'n_markers': 555, 'barcode': '5509754473359122124058', 'region_idx': 736}
+# [{'chrom': 'chr6', 'start': 28510119, 'end': 29972223, 'category': 'MHC;HYPERVARIABLE', 'note': ''}]
+#
+#     data = pl.from_dict({
+#         'chrom': ['chr6'],
+#         'start': [28510119,],
+#         'end': [29972223],
+#         'name': ['r1', 'r2', 'r3'],
+#     }).to_dicts()
+#
+#     regions = create_database(data)
+
 
 def test_GenomicRegionDatabase():
     data = pl.from_dict({
@@ -24,6 +50,7 @@ def test_GenomicRegionDatabase():
 
     assert {'chr1', 'chr2'} == regions.chroms
 
+    print(regions.find_overlap({'chrom': 'chr2', 'start': 40001, 'end': 40002}))
     assert len(regions.find_overlap({'chrom': 'chr2', 'start': 40001, 'end': 40002})) == 0
     assert len(regions.find_overlap({'chrom': 'chr3', 'start': 40001, 'end': 40002})) == 0
 
@@ -40,6 +67,9 @@ def test_GenomicRegionDatabase():
     assert result[0]['start'] == 30000
     assert result[0]['end'] == 40000
     assert result[0]['name'] == 'r2'
+
+
+
 
 
 def test_overlaps():

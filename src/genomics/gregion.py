@@ -1,4 +1,5 @@
 from pathlib import Path
+from copy import deepcopy
 
 from ncls import NCLS
 
@@ -24,7 +25,7 @@ class GenomicRegionDatabase:
 
         for record in records:
             idx = record[2]
-            bag.append(self._registory[idx])
+            bag.append(deepcopy(self._registory[idx]))
 
         return bag
 
@@ -46,7 +47,7 @@ def create_database(records: list[dict]):
         # assert type(start) == int, record
         # assert type(end) == int, record
 
-        registry[idx] = record
+        registry[idx] = deepcopy(record)
 
         if chrom not in bag:
             bag[chrom] = {"idx": list(), "starts": list(), "ends": list()}

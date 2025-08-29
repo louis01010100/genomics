@@ -3,6 +3,20 @@ from genomics.gregion import GenomicRegion
 from genomics.genome import Genome
 from pathlib import Path
 
+def test_validate():
+    genome_file = Path(__file__).parents[0] / 'seq.fa'
+    genome = Genome(genome_file)
+
+    v = Variant(chrom = 'chr1', pos = 2, ref = 'C', alt = 'G')
+    assert v.validate(genome.seq('chr1')) == True
+
+    v = Variant(chrom = 'chr1', pos = 6, ref = 'AA', alt = 'A')
+    assert v.validate(genome.seq('chr1'))
+
+    v = Variant(chrom = 'chr1', pos = 6, ref = 'CA', alt = 'A')
+    assert not v.validate(genome.seq('chr1'))
+
+
 
 def test_region():
 

@@ -1,5 +1,6 @@
 from importlib import resources
 import numpy as np
+from copy import deepcopy
 
 import polars as pl
 from pathos.multiprocessing import ProcessPool
@@ -61,22 +62,23 @@ def validate(
         pl.arange(0, len(predictions)).alias("region_idx"),
     )
 
-    predictions = predictions\
-            .filter(pl.col('n_markers') >= n_markers_cutoff)\
-            .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
+    # predictions = predictions\
+    #         .filter(pl.col('n_markers') >= n_markers_cutoff)\
+    #         .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
 
     truths = truths.with_columns(
         pl.col("start").cast(pl.Int64),
         pl.col("end").cast(pl.Int64),
-        pl.col("n_markers").cast(pl.Int64),
+        # pl.col("n_markers").cast(pl.Int64),
         pl.arange(0, len(truths)).alias("region_idx"),
     )
 
-    truths = truths\
-            .filter(pl.col('n_markers') >= n_markers_cutoff)\
-            .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
+    # truths = truths\
+    #         .filter(pl.col('n_markers') >= n_markers_cutoff)\
+    #         .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
 
     complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
+
 
     prediction_regions, prediction_fragments = annotate_complex_regions(
         predictions,
@@ -86,6 +88,7 @@ def validate(
     prediction_regions.write_csv(
         output_dir / "prediction_regions.tsv", include_header=True, separator="\t"
     )
+
     prediction_fragments.write_csv(
         output_dir / "prediction_fragments.tsv", include_header=True, separator="\t"
     )
@@ -99,8 +102,8 @@ def validate(
         output_dir / "truth_fragments.tsv", include_header=True, separator="\t"
     )
 
-
     samples = group_by_sample(prediction_fragments, truth_fragments, sample_map)
+
 
     prediction_vs_truth = list()
     truth_vs_prediction = list()
@@ -135,6 +138,9 @@ def validate(
     prediction_vs_truth = pl.concat(prediction_vs_truth, how="vertical_relaxed")
     truth_vs_prediction = pl.concat(truth_vs_prediction, how="vertical_relaxed")
 
+
+    print(prediction_vs_truth['matched'].value_counts())
+
     prediction_vs_truth.write_csv(
         output_dir / "prediction_vs_truth.tsv", include_header=True, separator="\t"
     )
@@ -168,10 +174,16 @@ def validate(
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
-    report(prediction_vs_truth, 'prediction')\
-            .write_csv(output_dir / 'ppv_by_cn_length.tsv', include_header = True, separator = '\t')
-    report(truth_vs_prediction, 'truth')\
-            .write_csv(output_dir / 'sensitivity_by_cn_length.tsv', include_header = True, separator = '\t')
+    report_ppv(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir / 'ppv.tsv')
+
+
+
+
+    # report(prediction_vs_truth, 'prediction')\
+    #         .write_csv(output_dir / 'ppv.tsv', include_header = True, separator = '\t')
+
+    # report(truth_vs_prediction, 'truth')\
+    #         .write_csv(output_dir / 'sensitivity.tsv', include_header = True, separator = '\t')
 
 
     ppv_summary = summarize_sliding(
@@ -482,7 +494,7 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            result[f"{qname}_n_markers"] = query["n_markers"]
+            result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
             result[f"{dbname}_fragment_idx"] = None
             result[f"{dbname}_start"] = None
             result[f"{dbname}_end"] = None
@@ -510,13 +522,13 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            result[f"{qname}_n_markers"] = query["n_markers"]
+            result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
             result[f"{dbname}_fragment_idx"] = match["fragment_idx"]
             result[f"{dbname}_start"] = match["start"]
             result[f"{dbname}_end"] = match["end"]
             result[f"{dbname}_length"] = match["end"] - match["start"]
             result[f"{dbname}_cn_state"] = match["cn_state"]
-            result[f"{dbname}_n_markers"] = match["n_markers"]
+            result[f"{dbname}_n_markers"] = match["n_markers"] if 'n_markers' in match else None
             result["reciprocal_overlap"] = reciprocal_overlap
             result["breakpoint_difference"] = breakpoint_difference
 
@@ -532,8 +544,8 @@ def _validate_cnv(
 
             if result["reciprocal_overlap_test"] == "FAIL":
                 result["matched"] = False
-            elif result["breakpoint_tolerance_test"] == "FAIL":
-                result["matched"] = False
+            # elif result["breakpoint_tolerance_test"] == "FAIL":
+            #     result["matched"] = False
             elif result["cn_state_test"] == "FAIL":
                 result["matched"] = False
             else:
@@ -560,7 +572,6 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
         truth_bag[sample_name] = df
 
 
-
     bag = list()
 
     for sample_name_prediction, df in prediction_bag.items():
@@ -569,8 +580,10 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
 
         sample_name_truth = sample_map[sample_name_prediction]
 
+
         if sample_name_truth not in truth_bag:
             continue
+
 
         bag.append(
             {
@@ -586,61 +599,110 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
 
 def load_complex_regions(complex_regions_file):
 
-    data = pl.read_csv(complex_regions_file, has_header=True, separator="\t").to_dicts()
+    data = pl.read_csv(complex_regions_file, has_header=True, separator="\t")
 
-    return data
+    return data.to_dicts()
 
+def report_ppv(prediction_vs_truth, prediction_fragments_file, output_file):
+    prediction_fragments = pl.read_csv(
+            prediction_fragments_file, has_header = True, separator = '\t', 
+            infer_schema = False,)
+            # schema_overrides = {'barcode': pl.Utf8, 'fragment_idx': pl.Utf8})
 
-def report(data, label):
-
-    if label == 'prediction': 
-        metric = 'ppv'
-    elif label == 'truth':
-        metric = 'sensitivity'
-
-    lengths =  [0, 50000,100000,500000,1000000, np.inf]
-    n_markers = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 
-                    1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, np.inf]
+    data = prediction_vs_truth.join(
+            prediction_fragments, 
+            left_on = 'prediction_fragment_idx', 
+            right_on = 'fragment_idx', 
+            how = 'right'
+    )
 
     bag = list()
 
-    for i in range(0, len(lengths) - 1):
-        min_length = lengths[i]
-        max_length = lengths[i + 1]
-        target = data.filter(
-            (pl.col(f'{label}_length') >= min_length) & 
-            (pl.col(f'{label}_length') < max_length)
-        )
+    for keys, df in data.group_by(['barcode']):
 
-        for j in range(0, len(n_markers) - 1):
+        bag.append({
+            'barcode': keys[0],
+            'n_total': len(df),
+            'n_matched': len(df.filter(pl.col('matched') == True)),
+            'ppv': len(df.filter(pl.col('matched') == True)) / len(df),
+        })
 
-            min_n_markers = n_markers[j]
-            max_n_markers = n_markers[j + 1]
+    bag.append({
+        'barcode': 'overall',
+        'n_total' : len(data),
+        'n_matched' : len(data.filter(pl.col('matched') == True)),
+        'ppv': len(data.filter(pl.col('matched') == True)) / len(data),
+    })
 
-            target2 = target.filter(
-                (pl.col(f'{label}_n_markers') >= min_n_markers) & 
-                (pl.col(f'{label}_n_markers') < max_n_markers)
-            )
+    pl.from_dicts(bag).sort('barcode').write_csv(output_file, include_header = True, separator = '\t')
 
-            n_detected = len(target2)
-            n_matched = len(target2.filter(pl.col('matched') == True))
 
-            if n_detected == 0:
-                value = None
-            else:
-                value = n_matched / n_detected
 
-            bag.append({
-                'min_length': min_length,
-                'max_length': max_length,
-                'min_n_markers': min_n_markers,
-                'max_n_markers': max_n_markers,
-                'n_detected': n_detected,
-                'n_matched': n_matched,
-                f'{metric}': value,
-            })
 
-    return pl.from_dicts(bag)
+
+# def report(data, label):
+#
+#     lengths =  [0, 50000,100000,500000,1000000, np.inf]
+#     n_markers = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 
+#                     1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, np.inf]
+#
+#     bag = list()
+#
+#     for i in range(0, len(lengths) - 1):
+#         min_length = lengths[i]
+#         max_length = lengths[i + 1]
+#         target = data.filter(
+#             (pl.col(f'prediction_length') >= min_length) & (pl.col(f'prediction_length') < max_length)
+#         )
+#
+#         for j in range(0, len(n_markers) - 1):
+#
+#             min_n_markers = n_markers[j]
+#             max_n_markers = n_markers[j + 1]
+#
+#             target2 = target.filter(
+#                 (pl.col(f'prediction_n_markers') >= min_n_markers) & 
+#                 (pl.col(f'prediction_n_markers') < max_n_markers)
+#             )
+#
+#             n_detected = len(target2)
+#             n_matched = len(target2.filter(pl.col('matched') == True))
+#
+#             if n_detected == 0:
+#                 value = None
+#             else:
+#                 value = n_matched / n_detected
+#
+#             bag.append({
+#                 'min_length': min_length,
+#                 'max_length': max_length,
+#                 'min_n_markers': min_n_markers,
+#                 'max_n_markers': max_n_markers,
+#                 'n_detected': n_detected,
+#                 'n_matched': n_matched,
+#                 'ppv': value,
+#             })
+#
+#     return pl.from_dicts(bag)
+
+def sort_matches(data):
+    data.sort(key = lambda x: x['start'])
+
+    bag = list()
+    for record in data:
+        if not bag:
+            bag.append(record)
+            continue
+        if bag[-1]['end'] > record['start']:
+
+            bag[-1]['end'] = max(bag[-1]['end'], record['end'])
+            bag[-1]['category'] = bag[-1]['category'] + ';' + record['category']
+
+        else:
+            bag.append(record)
+
+    return bag
+
 
 def annotate_complex_regions(cnvs, complex_region_db):
 
@@ -652,54 +714,67 @@ def annotate_complex_regions(cnvs, complex_region_db):
     bag_region = list()
     bag_fragment = list()
 
+
     for record in cnvs.to_dicts():
+
         matches = complex_region_db.find_overlap(record)
 
         if len(matches) == 0:
-            record["complex_region"] = None
-            bag_region.append(record)
-
+            region = record.copy()
             fragment = record.copy()
-            fragment["fragment_idx"] = record["region_idx"]
+
+            region["complex_region"] = None
+            bag_region.append(region)
+
+            fragment["fragment_idx"] = fragment["region_idx"]
             bag_fragment.append(fragment)
         else:
-            region_idx = record["region_idx"]
-            frag_idx = 0
+            matches = sort_matches(matches)
 
-            for match in matches:
-                query = record.copy()
-                match_region = GenomicRegion(
-                    match["chrom"], match["start"], match["end"]
-                )
-                query_region = GenomicRegion(
-                    query["chrom"], query["start"], query["end"]
-                )
+            region = deepcopy(record)
+            region['complex_region'] = ';'.join([x['category'] for x in matches])
+            bag_region.append(region)
 
-                query["complex_region"] = match["category"]
+            fragments = chop_region(record, matches)
 
-                query["reciprocal_overlap"], _, _ = query_region.get_reciprocal_overlap(
-                    match_region
-                )
+            bag_fragment.extend(fragments)
 
-                bag_region.append(query)
-
-                fragment = record.copy()
-
-                if record["start"] < match["start"]:
-                    fragment["start"] = record["start"]
-                    fragment["end"] = match["start"]
-                    fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
-                    bag_fragment.append(fragment)
-                    frag_idx += 1
-
-                if record["end"] > match["end"]:
-                    fragment["start"] = match["end"]
-                    fragment["end"] = record["end"]
-                    fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
-                    bag_fragment.append(fragment)
-                    frag_idx += 1
 
     regions = pl.from_dicts(bag_region, infer_schema_length=None)
     fragments = pl.from_dicts(bag_fragment, infer_schema_length=None)
 
     return regions, fragments
+
+
+def chop_region(record, matches):
+
+    bag = list()
+
+    region_idx = record["region_idx"]
+    start = record['start']
+    end = record['end']
+    frag_idx = 0
+
+    for match in matches:
+        if start < match['start']:
+            fragment = deepcopy(record)
+            fragment['start'] = start
+            fragment['end'] = match['start']
+            fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
+            bag.append(fragment)
+            frag_idx += 1
+            start = match['end']
+        elif match['start'] <= start <= match['end']:
+            start = match['end']
+        else:
+            assert False, f'{start}-{end}-{record}-{match}'
+
+    if start < end:
+        fragment = deepcopy(record)
+        fragment['start'] = start
+        fragment['end'] = match['start']
+        fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
+        bag.append(fragment)
+
+    return bag
+
