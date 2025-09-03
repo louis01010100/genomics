@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene, variants
+from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene, variants, genome
 
 __VERSION__ = '0.5.2'
 

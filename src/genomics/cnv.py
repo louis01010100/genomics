@@ -35,7 +35,7 @@ def validate(
     cnvmix_regions_file=None,
     n_markers_cutoff = 50,
     cnv_lenght_cutoff = 50000,
-    reciprocal_overlap_cutoff=0.5,
+    reciprocal_overlap_cutoff=0.6,
     breakpoint_tolerance_cutoff=100000,
     window_size=1000000,
     step_size=1000,
@@ -50,10 +50,18 @@ def validate(
         truths_file, has_header=True, separator="\t", infer_schema=False
     )
 
-    sample_map = load_sample_map(sample_map_file)
-
     assert REQUIRED_COLUMNS.issubset(predictions.columns), predictions.columns
     assert REQUIRED_COLUMNS.issubset(truths.columns), truths.columns
+
+    sample_map = load_sample_map(sample_map_file)
+
+    common_samples_prediction, common_samples_truth = find_common_samples(
+            predictions['sample_name'], truths['sample_name'], sample_map)
+
+
+    predictions = predictions.filter(pl.col('sample_name').is_in(common_samples_prediction))
+    truths = truths.filter(pl.col('sample_name').is_in(common_samples_truth))
+
 
     predictions = predictions.with_columns(
         pl.col("start").cast(pl.Int64),
@@ -109,7 +117,8 @@ def validate(
     truth_vs_prediction = list()
 
     for sample in samples:
-        sample_name = sample["sample_name_prediction"]
+        sample_name_prediction = sample["sample_name_prediction"]
+        sample_name_truth = sample["sample_name_prediction"]
         prediction_fragments = sample["prediction_fragments"].to_dicts()
         truth_fragments = sample["truth_fragments"].to_dicts()
 
@@ -120,7 +129,11 @@ def validate(
             "truth",
             reciprocal_overlap_cutoff,
             breakpoint_tolerance_cutoff,
+        ).with_columns(
+                pl.lit(sample_name_prediction).alias('sample_name'),
         )
+
+        data_ppv = data_ppv.select(['sample_name'] + data_ppv.columns[:-1])
 
         prediction_vs_truth.append(data_ppv)
 
@@ -131,7 +144,10 @@ def validate(
             "prediction",
             reciprocal_overlap_cutoff,
             breakpoint_tolerance_cutoff,
+        ).with_columns(
+                pl.lit(sample_name_truth).alias('sample_name'),
         )
+        data_sensitivity = data_sensitivity.select(['sample_name'] + data_sensitivity.columns[:-1])
 
         truth_vs_prediction.append(data_sensitivity)
 
@@ -139,11 +155,10 @@ def validate(
     truth_vs_prediction = pl.concat(truth_vs_prediction, how="vertical_relaxed")
 
 
-    print(prediction_vs_truth['matched'].value_counts())
-
     prediction_vs_truth.write_csv(
         output_dir / "prediction_vs_truth.tsv", include_header=True, separator="\t"
     )
+
     truth_vs_prediction.write_csv(
         output_dir / "truth_vs_prediction.tsv", include_header=True, separator="\t"
     )
@@ -174,8 +189,8 @@ def validate(
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
-    report_ppv(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir / 'ppv.tsv')
-
+    report(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir , 'ppv')
+    report(truth_vs_prediction, output_dir / 'truth_fragments.tsv', output_dir , 'sensitivity')
 
 
 
@@ -483,6 +498,7 @@ def _validate_cnv(
 ):
     bag = list()
     for query in queries:
+
         matches = database.find_overlap(query)
         query_region = GenomicRegion(query["chrom"], query["start"], query["end"])
 
@@ -575,15 +591,12 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
     bag = list()
 
     for sample_name_prediction, df in prediction_bag.items():
-        if sample_name_prediction not in sample_map:
-            continue
+
+        assert sample_name_prediction in sample_map
 
         sample_name_truth = sample_map[sample_name_prediction]
 
-
-        if sample_name_truth not in truth_bag:
-            continue
-
+        assert sample_name_truth in truth_bag
 
         bag.append(
             {
@@ -603,38 +616,78 @@ def load_complex_regions(complex_regions_file):
 
     return data.to_dicts()
 
-def report_ppv(prediction_vs_truth, prediction_fragments_file, output_file):
-    prediction_fragments = pl.read_csv(
-            prediction_fragments_file, has_header = True, separator = '\t', 
+def report(a_vs_b, fragments_file, output_dir, _type):
+
+    def _report(data, _type, label, output_file):
+        bag = list()
+
+        if label == 'overall':
+            bag = list()
+
+            bag.append({
+                'n_total' : len(data),
+                'n_matched' : len(data.filter(pl.col('matched') == True)),
+                _type: len(data.filter(pl.col('matched') == True)) / len(data),
+            })
+
+            pl.from_dicts(bag).write_csv(
+                    output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
+
+            return
+
+
+        for keys, df in data.group_by([label]):
+
+            record = {
+                label: keys[0],
+                'n_total': len(df),
+                'n_matched': len(df.filter(pl.col('matched') == True)),
+                _type: len(df.filter(pl.col('matched') == True)) / len(df),
+            }
+
+            if label == 'barcode':
+                record['n_samples'] = len(df['sample_name'].unique())
+
+            bag.append(record)
+
+        pl.from_dicts(bag).sort(_type).write_csv(
+            output_dir / f'{_type}_by_{label}.tsv', include_header = True, separator = '\t')
+
+    fragments = pl.read_csv(
+            fragments_file, has_header = True, separator = '\t', 
             infer_schema = False,)
             # schema_overrides = {'barcode': pl.Utf8, 'fragment_idx': pl.Utf8})
+    if _type == 'ppv':
+        frag_idx = 'prediction_fragment_idx'
+    elif _type == 'sensitivity':
+        frag_idx = 'truth_fragment_idx'
 
-    data = prediction_vs_truth.join(
-            prediction_fragments, 
-            left_on = 'prediction_fragment_idx', 
-            right_on = 'fragment_idx', 
-            how = 'right'
-    )
+
+    data = fragments.join(a_vs_b, left_on = 'fragment_idx', right_on = frag_idx, how = 'left')
 
     bag = list()
 
-    for keys, df in data.group_by(['barcode']):
+    for keys, df in data.group_by(['fragment_idx']):
+        if len(df) == 1:
+            bag.append(df.row(0, named = True))
+            continue
 
-        bag.append({
-            'barcode': keys[0],
-            'n_total': len(df),
-            'n_matched': len(df.filter(pl.col('matched') == True)),
-            'ppv': len(df.filter(pl.col('matched') == True)) / len(df),
-        })
+        if len(set(df['matched'])) == 1:
+            bag.append(df.row(0, named = True))
+            continue
+        else:
 
-    bag.append({
-        'barcode': 'overall',
-        'n_total' : len(data),
-        'n_matched' : len(data.filter(pl.col('matched') == True)),
-        'ppv': len(data.filter(pl.col('matched') == True)) / len(data),
-    })
+            record = df.row(0, named = True)
+            record['matched'] = False
+            bag.append(record)
 
-    pl.from_dicts(bag).sort('barcode').write_csv(output_file, include_header = True, separator = '\t')
+    data = pl.from_dicts(bag)
+
+    if 'barcode' in data.columns:
+        _report(data, _type, 'barcode', output_dir)
+    _report(data, _type, 'sample_name', output_dir)
+    _report(data, _type, 'overall', output_dir)
+
 
 
 
@@ -777,4 +830,21 @@ def chop_region(record, matches):
         bag.append(fragment)
 
     return bag
+
+def find_common_samples(prediction_samples, truth_samples, sample_map):
+    common_samples_p = list()
+    common_samples_t = list()
+
+
+    for p, t in sample_map.items():
+        if p not in prediction_samples:
+            continue
+
+        if t not in truth_samples:
+            continue
+
+        common_samples_p.append(p)
+        common_samples_t.append(t)
+
+    return common_samples_p, common_samples_t
 

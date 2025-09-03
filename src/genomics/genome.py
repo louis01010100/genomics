@@ -74,10 +74,6 @@ class Genome():
                     begin_pos = end_pos
                     end_pos = begin_pos + width
 
-                    # python handles exceeding end_pos well
-
-    # def ploidy(self, chrom, pos):
-    #     v = GenomicRegion(chrom.upper, pos, pos)
 
 def load_chroms(fh):
     chroms = dict()
@@ -98,3 +94,4 @@ def load_chroms(fh):
         chroms[id_] = seq
 
     return chroms
+
