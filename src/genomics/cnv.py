@@ -32,7 +32,7 @@ def validate(
     truths_file,
     sample_map_file,
     output_dir,
-    cnvmix_regions_file=None,
+    hotspot_regions_file=None,
     n_markers_cutoff = 50,
     cnv_lenght_cutoff = 50000,
     reciprocal_overlap_cutoff=0.6,
@@ -59,8 +59,8 @@ def validate(
             predictions['sample_name'], truths['sample_name'], sample_map)
 
 
-    predictions = predictions.filter(pl.col('sample_name').is_in(common_samples_prediction))
-    truths = truths.filter(pl.col('sample_name').is_in(common_samples_truth))
+    predictions = predictions.filter(pl.col('sample_name').is_in(common_samples_prediction)).sort(REQUIRED_COLUMNS)
+    truths = truths.filter(pl.col('sample_name').is_in(common_samples_truth)).sort(REQUIRED_COLUMNS)
 
 
     predictions = predictions.with_columns(
@@ -70,9 +70,6 @@ def validate(
         pl.arange(0, len(predictions)).alias("region_idx"),
     )
 
-    # predictions = predictions\
-    #         .filter(pl.col('n_markers') >= n_markers_cutoff)\
-    #         .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
 
     truths = truths.with_columns(
         pl.col("start").cast(pl.Int64),
@@ -81,12 +78,7 @@ def validate(
         pl.arange(0, len(truths)).alias("region_idx"),
     )
 
-    # truths = truths\
-    #         .filter(pl.col('n_markers') >= n_markers_cutoff)\
-    #         .filter((pl.col('end') - pl.col('start')) >= n_markers_cutoff)
-
     complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
-
 
     prediction_regions, prediction_fragments = annotate_complex_regions(
         predictions,
@@ -192,13 +184,6 @@ def validate(
     report(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir , 'ppv')
     report(truth_vs_prediction, output_dir / 'truth_fragments.tsv', output_dir , 'sensitivity')
 
-
-
-    # report(prediction_vs_truth, 'prediction')\
-    #         .write_csv(output_dir / 'ppv.tsv', include_header = True, separator = '\t')
-
-    # report(truth_vs_prediction, 'truth')\
-    #         .write_csv(output_dir / 'sensitivity.tsv', include_header = True, separator = '\t')
 
 
     ppv_summary = summarize_sliding(
@@ -665,6 +650,8 @@ def report(a_vs_b, fragments_file, output_dir, _type):
 
     data = fragments.join(a_vs_b, left_on = 'fragment_idx', right_on = frag_idx, how = 'left')
 
+    print(_type, len(data.filter(pl.col('matched') == True)))
+
     bag = list()
 
     for keys, df in data.group_by(['fragment_idx']):
@@ -676,12 +663,14 @@ def report(a_vs_b, fragments_file, output_dir, _type):
             bag.append(df.row(0, named = True))
             continue
         else:
-
             record = df.row(0, named = True)
-            record['matched'] = False
+            record['matched'] = True
             bag.append(record)
 
-    data = pl.from_dicts(bag)
+    data = pl.from_dicts(bag, infer_schema_length = None)
+
+    print(_type, len(data.filter(pl.col('matched') == True)))
+
 
     if 'barcode' in data.columns:
         _report(data, _type, 'barcode', output_dir)
@@ -693,7 +682,7 @@ def report(a_vs_b, fragments_file, output_dir, _type):
 
 
 
-# def report(data, label):
+# def report_by_cn_segments(data, label):
 #
 #     lengths =  [0, 50000,100000,500000,1000000, np.inf]
 #     n_markers = [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 
