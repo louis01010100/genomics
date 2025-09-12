@@ -26,7 +26,14 @@ REQUIRED_COLUMNS = {
     "cn_state",
 }
 
+HOTSPOT_COLUMNS = {
+    'region_name',
+    'chrom',
+    'start',
+    'end',
+}
 
+# 0-based, half-open interval
 def validate(
     predictions_file,
     truths_file,
@@ -78,12 +85,21 @@ def validate(
         pl.arange(0, len(truths)).alias("region_idx"),
     )
 
+    if hotspot_regions_file:
+        hotspot_region_db = create_database(load_hotspot_regions(hotspot_regions_file))
+        predictions = annotate_hotspot_regions(predictions, hotspot_region_db)
+        truths = annotate_hotspot_regions(truths, hotspot_region_db)
+
+
     complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
+
+
 
     prediction_regions, prediction_fragments = annotate_complex_regions(
         predictions,
         complex_region_db,
     )
+
 
     prediction_regions.write_csv(
         output_dir / "prediction_regions.tsv", include_header=True, separator="\t"
@@ -186,76 +202,76 @@ def validate(
 
 
 
-    ppv_summary = summarize_sliding(
-        data=prediction_vs_truth,
-        chrom_length_file=CHROM_LENGTH_HG38_FILE,
-        complex_regions_file=COMPLEX_REGIONS_FILE,
-        # bin_size=bin_size,
-        window_size=window_size,
-        step_size=step_size,
-        reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
-        n_threads=n_threads,
-    )
-
-    ppv_summary.write_csv(
-        output_dir / "ppv_summary.tsv", include_header=True, separator="\t"
-    )
-
-
-
-    ppv_high_concordance_regions = create_high_concordance_region(
-        ppv_summary, concordance_cutoff
-    )
-    ppv_high_concordance_regions.write_csv(
-        output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
-        include_header=True,
-        separator="\t",
-    )
-
-    kp.plot_karyopype(
-        [
-            COMPLEX_REGIONS_FILE,
-            output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
-        ],
-        ["complex_regions", f"concordance_{concordance_cutoff}"],
-        output_dir / f"regions_ppv-{concordance_cutoff}.png",
-    )
-
-    sensitivity_summary = summarize_sliding(
-        data=truth_vs_prediction,
-        chrom_length_file=CHROM_LENGTH_HG38_FILE,
-        complex_regions_file=COMPLEX_REGIONS_FILE,
-        # bin_size=bin_size,
-        window_size=window_size,
-        step_size=step_size,
-        reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
-        n_threads=n_threads,
-    )
-
-    sensitivity_summary.write_csv(
-        output_dir / "sensitivity_summary.tsv",
-        include_header=True,
-        separator="\t",
-    )
-
-    sensitivity_high_concordance_regions = create_high_concordance_region(
-        sensitivity_summary, concordance_cutoff
-    )
-
-    sensitivity_high_concordance_regions.write_csv(
-        output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
-        include_header=True,
-        separator="\t",
-    )
-
-    kp.plot_karyopype(
-        [
-            COMPLEX_REGIONS_FILE,
-            output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
-        ],
-        ["complex_regions", f"concordance_{concordance_cutoff}"],
-        output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
-    )
+    # ppv_summary = summarize_sliding(
+    #     data=prediction_vs_truth,
+    #     chrom_length_file=CHROM_LENGTH_HG38_FILE,
+    #     complex_regions_file=COMPLEX_REGIONS_FILE,
+    #     # bin_size=bin_size,
+    #     window_size=window_size,
+    #     step_size=step_size,
+    #     reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
+    #     n_threads=n_threads,
+    # )
+    #
+    # ppv_summary.write_csv(
+    #     output_dir / "ppv_summary.tsv", include_header=True, separator="\t"
+    # )
+    #
+    #
+    #
+    # ppv_high_concordance_regions = create_high_concordance_region(
+    #     ppv_summary, concordance_cutoff
+    # )
+    # ppv_high_concordance_regions.write_csv(
+    #     output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
+    #     include_header=True,
+    #     separator="\t",
+    # )
+    #
+    # kp.plot_karyopype(
+    #     [
+    #         COMPLEX_REGIONS_FILE,
+    #         output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
+    #     ],
+    #     ["complex_regions", f"concordance_{concordance_cutoff}"],
+    #     output_dir / f"regions_ppv-{concordance_cutoff}.png",
+    # )
+    #
+    # sensitivity_summary = summarize_sliding(
+    #     data=truth_vs_prediction,
+    #     chrom_length_file=CHROM_LENGTH_HG38_FILE,
+    #     complex_regions_file=COMPLEX_REGIONS_FILE,
+    #     # bin_size=bin_size,
+    #     window_size=window_size,
+    #     step_size=step_size,
+    #     reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
+    #     n_threads=n_threads,
+    # )
+    #
+    # sensitivity_summary.write_csv(
+    #     output_dir / "sensitivity_summary.tsv",
+    #     include_header=True,
+    #     separator="\t",
+    # )
+    #
+    # sensitivity_high_concordance_regions = create_high_concordance_region(
+    #     sensitivity_summary, concordance_cutoff
+    # )
+    #
+    # sensitivity_high_concordance_regions.write_csv(
+    #     output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
+    #     include_header=True,
+    #     separator="\t",
+    # )
+    #
+    # kp.plot_karyopype(
+    #     [
+    #         COMPLEX_REGIONS_FILE,
+    #         output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
+    #     ],
+    #     ["complex_regions", f"concordance_{concordance_cutoff}"],
+    #     output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
+    # )
 
 
 
@@ -594,6 +610,13 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
 
     return bag
 
+def load_hotspot_regions(hotspot_regions_file):
+    hotspot_regions = pl.read_csv(hotspot_regions_file, has_header = True, separator = '\t')
+    assert HOTSPOT_COLUMNS.issubset(hotspot_regions.columns)
+
+    return hotspot_regions.to_dicts()
+
+
 
 def load_complex_regions(complex_regions_file):
 
@@ -609,11 +632,21 @@ def report(a_vs_b, fragments_file, output_dir, _type):
         if label == 'overall':
             bag = list()
 
-            bag.append({
+            record = {
                 'n_total' : len(data),
                 'n_matched' : len(data.filter(pl.col('matched') == True)),
                 _type: len(data.filter(pl.col('matched') == True)) / len(data),
-            })
+            }
+
+            if 'hotspot_overlap_ratio' in data.columns:
+                on_hotspot = data.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0)
+
+                record['n_total_hotspot'] = len(on_hotspot)
+                record['n_matched_hotspot'] = len(on_hotspot.filter(pl.col('matched') == True))
+                record[f'{_type}_hotspot'] = np.nan if len(on_hotspot) == 0 \
+                        else record['n_matched_hotspot'] / record['n_total_hotspot']
+
+            bag.append(record)
 
             pl.from_dicts(bag).write_csv(
                     output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
@@ -630,12 +663,24 @@ def report(a_vs_b, fragments_file, output_dir, _type):
                 _type: len(df.filter(pl.col('matched') == True)) / len(df),
             }
 
+            if 'hotspot_overlap_ratio' in df.columns:
+                on_hotspot = df.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0)
+
+                record['n_total_hotspot'] = len(on_hotspot)
+                record['n_matched_hotspot'] = len(on_hotspot.filter(pl.col('matched') == True))
+                record[f'{_type}_hotspot'] = np.nan if len(on_hotspot) == 0 \
+                        else record['n_matched_hotspot'] / record['n_total_hotspot']
+
+
+
             if label == 'barcode':
                 record['n_samples'] = len(df['sample_name'].unique())
 
             bag.append(record)
 
-        pl.from_dicts(bag).sort(_type).write_csv(
+        data = pl.from_dicts(bag).sort(_type)
+        print(data)
+        data.write_csv(
             output_dir / f'{_type}_by_{label}.tsv', include_header = True, separator = '\t')
 
     fragments = pl.read_csv(
@@ -746,11 +791,49 @@ def sort_matches(data):
     return bag
 
 
+def annotate_hotspot_regions(cnvs, hotspot_region_db):
+    cnvs = cnvs.with_columns(
+        pl.col("start").cast(pl.Int64).alias("start"),
+        pl.col("end").cast(pl.Int64).alias("end"),
+    )
+
+    bag = list()
+
+    for record in cnvs.to_dicts():
+        matches = hotspot_region_db.find_overlap(record)
+
+        tmp_record = deepcopy(record)
+
+        if len(matches) == 0:
+            overlap_ratio = 0
+            hotspot_name = None
+        else:
+
+            x = GenomicRegion(record['chrom'], record['start'], record['end'])
+
+            hotspot_names = list()
+
+            overlap_length = 0
+
+            for match in matches:
+                overlap_length += len(x.intersects(GenomicRegion(match['chrom'], record['start'], record['end'])))
+                hotspot_names.append(match['region_name'])
+
+            overlap_ratio = overlap_length / len(x)
+            hotspot_name = ','.join(hotspot_names)
+
+        tmp_record['hotspot_overlap_ratio'] = overlap_ratio
+        tmp_record['hotspot_name'] = hotspot_name
+        bag.append(tmp_record)
+
+    return pl.from_dicts(bag, infer_schema_length = None)
+
+
 def annotate_complex_regions(cnvs, complex_region_db):
 
     cnvs = cnvs.with_columns(
         pl.col("start").cast(pl.Int64).alias("start"),
-        pl.col("end").cast(pl.Int64).alias("end"),
+       pl.col("end").cast(pl.Int64).alias("end"),
     )
 
     bag_region = list()
