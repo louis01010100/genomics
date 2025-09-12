@@ -40,13 +40,13 @@ def validate(
     sample_map_file,
     output_dir,
     hotspot_regions_file=None,
-    n_markers_cutoff = 50,
-    cnv_lenght_cutoff = 50000,
+    # n_markers_cutoff = 50,
+    # cnv_lenght_cutoff = 50000,
     reciprocal_overlap_cutoff=0.6,
     breakpoint_tolerance_cutoff=100000,
-    window_size=1000000,
-    step_size=1000,
-    concordance_cutoff=0.8,
+    # window_size=1000000,
+    # step_size=1000,
+    # concordance_cutoff=0.8,
     n_threads=32,
 ):
 
@@ -78,6 +78,7 @@ def validate(
     )
 
 
+
     truths = truths.with_columns(
         pl.col("start").cast(pl.Int64),
         pl.col("end").cast(pl.Int64),
@@ -85,15 +86,14 @@ def validate(
         pl.arange(0, len(truths)).alias("region_idx"),
     )
 
+    # print(truths[['sample_name', 'start', 'end']])
+
     if hotspot_regions_file:
         hotspot_region_db = create_database(load_hotspot_regions(hotspot_regions_file))
         predictions = annotate_hotspot_regions(predictions, hotspot_region_db)
         truths = annotate_hotspot_regions(truths, hotspot_region_db)
 
-
     complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
-
-
 
     prediction_regions, prediction_fragments = annotate_complex_regions(
         predictions,
@@ -126,7 +126,7 @@ def validate(
 
     for sample in samples:
         sample_name_prediction = sample["sample_name_prediction"]
-        sample_name_truth = sample["sample_name_prediction"]
+        sample_name_truth = sample["sample_name_truth"]
         prediction_fragments = sample["prediction_fragments"].to_dicts()
         truth_fragments = sample["truth_fragments"].to_dicts()
 
@@ -200,78 +200,9 @@ def validate(
     report(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir , 'ppv')
     report(truth_vs_prediction, output_dir / 'truth_fragments.tsv', output_dir , 'sensitivity')
 
+    report_by_size(prediction_vs_truth, output_dir / 'ppv-markers_vs_len.tsv', 'prediction')
+    report_by_size(truth_vs_prediction, output_dir / 'sensitivity-markers_vs_len.tsv', 'truth')
 
-
-    # ppv_summary = summarize_sliding(
-    #     data=prediction_vs_truth,
-    #     chrom_length_file=CHROM_LENGTH_HG38_FILE,
-    #     complex_regions_file=COMPLEX_REGIONS_FILE,
-    #     # bin_size=bin_size,
-    #     window_size=window_size,
-    #     step_size=step_size,
-    #     reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
-    #     n_threads=n_threads,
-    # )
-    #
-    # ppv_summary.write_csv(
-    #     output_dir / "ppv_summary.tsv", include_header=True, separator="\t"
-    # )
-    #
-    #
-    #
-    # ppv_high_concordance_regions = create_high_concordance_region(
-    #     ppv_summary, concordance_cutoff
-    # )
-    # ppv_high_concordance_regions.write_csv(
-    #     output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
-    #     include_header=True,
-    #     separator="\t",
-    # )
-    #
-    # kp.plot_karyopype(
-    #     [
-    #         COMPLEX_REGIONS_FILE,
-    #         output_dir / f"regions_ppv-{concordance_cutoff}.tsv",
-    #     ],
-    #     ["complex_regions", f"concordance_{concordance_cutoff}"],
-    #     output_dir / f"regions_ppv-{concordance_cutoff}.png",
-    # )
-    #
-    # sensitivity_summary = summarize_sliding(
-    #     data=truth_vs_prediction,
-    #     chrom_length_file=CHROM_LENGTH_HG38_FILE,
-    #     complex_regions_file=COMPLEX_REGIONS_FILE,
-    #     # bin_size=bin_size,
-    #     window_size=window_size,
-    #     step_size=step_size,
-    #     reciprocal_overlap_cutoff=reciprocal_overlap_cutoff,
-    #     n_threads=n_threads,
-    # )
-    #
-    # sensitivity_summary.write_csv(
-    #     output_dir / "sensitivity_summary.tsv",
-    #     include_header=True,
-    #     separator="\t",
-    # )
-    #
-    # sensitivity_high_concordance_regions = create_high_concordance_region(
-    #     sensitivity_summary, concordance_cutoff
-    # )
-    #
-    # sensitivity_high_concordance_regions.write_csv(
-    #     output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
-    #     include_header=True,
-    #     separator="\t",
-    # )
-    #
-    # kp.plot_karyopype(
-    #     [
-    #         COMPLEX_REGIONS_FILE,
-    #         output_dir / f"regions_sensitivity-{concordance_cutoff}.tsv",
-    #     ],
-    #     ["complex_regions", f"concordance_{concordance_cutoff}"],
-    #     output_dir / f"regions_sensitivity-{concordance_cutoff}.png",
-    # )
 
 
 
@@ -648,8 +579,11 @@ def report(a_vs_b, fragments_file, output_dir, _type):
 
             bag.append(record)
 
-            pl.from_dicts(bag).write_csv(
-                    output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
+            data = pl.from_dicts(bag)
+
+            print(data)
+
+            data.write_csv(output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
 
             return
 
@@ -679,7 +613,6 @@ def report(a_vs_b, fragments_file, output_dir, _type):
             bag.append(record)
 
         data = pl.from_dicts(bag).sort(_type)
-        print(data)
         data.write_csv(
             output_dir / f'{_type}_by_{label}.tsv', include_header = True, separator = '\t')
 
@@ -771,6 +704,57 @@ def report(a_vs_b, fragments_file, output_dir, _type):
 #             })
 #
 #     return pl.from_dicts(bag)
+
+def report_by_size(data, output_file, label):
+
+    if label == 'prediction': 
+        metric = 'ppv'
+    elif label == 'truth':
+        metric = 'sensitivity'
+
+    lengths =  [0, 50000,100000,250000, 500000,1000000, np.inf]
+    n_markers = [0, 50, 100, 500, 1000, 2000, 4000, 8000, 10000, np.inf]
+
+    bag = list()
+
+    for i in range(0, len(lengths) - 1):
+        min_length = lengths[i]
+        max_length = lengths[i + 1]
+        target = data.filter(
+            (pl.col(f'{label}_length') >= min_length) & 
+            (pl.col(f'{label}_length') < max_length)
+        )
+
+        for j in range(0, len(n_markers) - 1):
+
+            min_n_markers = n_markers[j]
+            max_n_markers = n_markers[j + 1]
+
+            target2 = target.filter(
+                (pl.col(f'{label}_n_markers') >= min_n_markers) & 
+                (pl.col(f'{label}_n_markers') < max_n_markers)
+            )
+
+            n_detected = len(target2)
+            n_matched = len(target2.filter(pl.col('matched') == True))
+
+            if n_detected == 0:
+                value = None
+            else:
+                value = n_matched / n_detected
+
+            bag.append({
+                'min_length': min_length,
+                'max_length': max_length,
+                'min_n_markers': min_n_markers,
+                'max_n_markers': max_n_markers,
+                'n_detected': n_detected,
+                'n_matched': n_matched,
+                f'{metric}': value,
+            })
+
+    data = pl.from_dicts(bag)
+    data.write_csv(output_file, include_header = True, separator = '\t')
 
 def sort_matches(data):
     data.sort(key = lambda x: x['start'])
