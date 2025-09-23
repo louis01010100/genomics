@@ -598,7 +598,6 @@ def report(a_vs_b, fragments_file, output_dir, _type):
 
             data = pl.from_dicts(bag)
 
-            print(data)
 
             data.write_csv(output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
 
@@ -798,7 +797,6 @@ def annotate_hotspot_regions(cnvs, hotspot_region_db):
         pl.col("end").cast(pl.Int64).alias("end"),
     )
 
-    debug = False
 
     bag = list()
 
@@ -853,11 +851,6 @@ def annotate_complex_regions(cnvs, complex_region_db):
 
     for record in cnvs.to_dicts():
 
-        if record['region_idx'] == 65:
-            debug = True
-        else:
-            debug = False
-
         matches = complex_region_db.find_overlap(record)
 
         if len(matches) == 0:
@@ -880,25 +873,6 @@ def annotate_complex_regions(cnvs, complex_region_db):
 
             bag_fragment.extend(fragments)
 
-            if debug:
-
-                print(
-                        record['sample_name'], 
-                        record['region_idx'], 
-                        record['start_position'], 
-                        record['stop_position'],
-                )
-
-                for fragment in fragments:
-                    print(
-                            fragment['sample_name'], 
-                            fragment['region_idx'], 
-                            fragment['start'], 
-                            fragment['end'],
-                    )
-
-
-
 
     regions = pl.from_dicts(bag_region, infer_schema_length=None)
     fragments = pl.from_dicts(bag_fragment, infer_schema_length=None)
@@ -915,13 +889,6 @@ def chop_region(record, matches):
     end = record['end']
     frag_idx = 0
 
-    if record['region_idx'] == 65:
-        print(start, end)
-        debug = True
-
-    else:
-        debug = False
-
 
     for match in matches:
         if start < match['start']:
@@ -937,9 +904,6 @@ def chop_region(record, matches):
         else:
             assert False, f'{start}-{end}-{record}-{match}'
 
-        if debug:
-            print('match', match)
-            print(fragment)
 
     if start < end:
         fragment = deepcopy(record)
@@ -947,8 +911,6 @@ def chop_region(record, matches):
         fragment['end'] = end
         fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
         bag.append(fragment)
-        if debug:
-            print(fragment)
 
     return bag
 
