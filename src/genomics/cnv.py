@@ -598,6 +598,7 @@ def report(a_vs_b, fragments_file, output_dir, _type):
 
             data = pl.from_dicts(bag)
 
+            print(data)
 
             data.write_csv(output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
 
@@ -850,6 +851,7 @@ def annotate_complex_regions(cnvs, complex_region_db):
 
 
     for record in cnvs.to_dicts():
+
 
         matches = complex_region_db.find_overlap(record)
 
