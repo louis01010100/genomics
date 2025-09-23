@@ -13,6 +13,10 @@ def test_intersects():
     assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 200))
     assert GenomicRegion('chr1', 150, 200) == GenomicRegion('chr1', 150, 200).intersects( GenomicRegion('chr1', 100, 201))
 
+    assert GenomicRegion('chr14', 21385192,22829820) == GenomicRegion('chr14', 18967499, 23423741).intersects( GenomicRegion('chr14', 21385192, 22829820))
+
+
+
 # def test_GenomicRegionDatabase_complex_regions():
 #     complex_regions_file = (
 #         resources.files("genomics") / "resources" / "complex_regions-hg38.tsv"
@@ -94,16 +98,16 @@ def test_merge():
 def test_get_reciprocal_overlap():
     x = GenomicRegion('chr1', 100, 200)
     y = GenomicRegion('chr1', 100, 200)
-    assert 1.0 == x.get_reciprocal_overlap(y)
+    assert 1.0 == x.get_reciprocal_overlap(y)['ratio']
 
     x = GenomicRegion('chr1', 150, 200)
     y = GenomicRegion('chr1', 100, 200)
-    assert 1.0 == x.get_reciprocal_overlap(y)
+    assert 1.0 == x.get_reciprocal_overlap(y)['ratio']
 
     x = GenomicRegion('chr1', 150, 250)
     y = GenomicRegion('chr1', 100, 200)
-    assert 0.5 == x.get_reciprocal_overlap(y)
+    assert 0.5 == x.get_reciprocal_overlap(y)['ratio']
 
     x = GenomicRegion('chr1', 150, 200)
     y = GenomicRegion('chr1', 100, 150)
-    assert 0.0 == x.get_reciprocal_overlap(y)
+    assert 0.0 == x.get_reciprocal_overlap(y)['ratio']

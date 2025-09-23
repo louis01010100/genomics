@@ -151,13 +151,18 @@ class GenomicRegion:
 def _get_reciprocal_overlap(region_1, region_2):
 
     if region_1.chrom != region_2.chrom:
-        return None
+        return {'ratio': None, 'overlap_length': None, 'min_region_length': None}
 
     intersect = region_1.intersects(region_2)
     min_region_length = min(len(region_1), len(region_2))
 
     if intersect is None:
-        return 0, min_region_length
+        return {'ratio': 0, 'overlap_length': 0, 'min_region_length': min_region_length}
 
 
-    return len(intersect) / min_region_length, len(intersect), min_region_length
+    # return len(intersect) / min_region_length, len(intersect), min_region_length
+    return {
+            'ratio': len(intersect) / min_region_length,
+            'overlap_length': len(intersect),
+            'min_region_length': min_region_length,
+    }

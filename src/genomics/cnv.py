@@ -62,8 +62,17 @@ def validate(
 
     sample_map = load_sample_map(sample_map_file)
 
+    # assert '20191223_GT23_ARRAY_726_H02_TPMI.CEL' in sample_map
+    # assert '00051461_HTCMA.CEL' == sample_map['20191223_GT23_ARRAY_726_H02_TPMI.CEL']
+    # assert '20191223_GT23_ARRAY_726_H02_TPMI.CEL' in predictions['sample_name']
+    # assert '00051461_HTCMA.CEL' in truths['sample_name']
+
     common_samples_prediction, common_samples_truth = find_common_samples(
             predictions['sample_name'], truths['sample_name'], sample_map)
+
+    # assert '20191223_GT23_ARRAY_726_H02_TPMI.CEL' in common_samples_prediction
+    # assert '00051461_HTCMA.CEL' in common_samples_truth
+    # return
 
 
     predictions = predictions.filter(pl.col('sample_name').is_in(common_samples_prediction)).sort(REQUIRED_COLUMNS)
@@ -73,20 +82,28 @@ def validate(
     predictions = predictions.with_columns(
         pl.col("start").cast(pl.Int64),
         pl.col("end").cast(pl.Int64),
-        pl.col("n_markers").cast(pl.Int64),
+        # pl.col("n_markers").cast(pl.Int64),
+    )
+    predictions = predictions.sort(['sample_name', 'chrom', 'start'])
+    predictions = predictions.with_columns(
         pl.arange(0, len(predictions)).alias("region_idx"),
     )
-
-
 
     truths = truths.with_columns(
         pl.col("start").cast(pl.Int64),
         pl.col("end").cast(pl.Int64),
         # pl.col("n_markers").cast(pl.Int64),
+    )
+
+    truths = truths.sort(['sample_name', 'chrom', 'start'])
+    truths = truths.with_columns(
         pl.arange(0, len(truths)).alias("region_idx"),
     )
 
+
     # print(truths[['sample_name', 'start', 'end']])
+
+
 
     if hotspot_regions_file:
         hotspot_region_db = create_database(load_hotspot_regions(hotspot_regions_file))
@@ -163,11 +180,11 @@ def validate(
     truth_vs_prediction = pl.concat(truth_vs_prediction, how="vertical_relaxed")
 
 
-    prediction_vs_truth.write_csv(
+    prediction_vs_truth.sort(['sample_name', 'chrom', 'prediction_start']).write_csv(
         output_dir / "prediction_vs_truth.tsv", include_header=True, separator="\t"
     )
 
-    truth_vs_prediction.write_csv(
+    truth_vs_prediction.sort(['sample_name', 'chrom', 'truth_start']).write_csv(
         output_dir / "truth_vs_prediction.tsv", include_header=True, separator="\t"
     )
 
@@ -185,7 +202,7 @@ def validate(
         pl.col("prediction_start").cast(pl.Int64).alias("start"),
         pl.col("prediction_end").cast(pl.Int64).alias("end"),
         pl.col("prediction_length").cast(pl.Int64),
-        pl.col("prediction_n_markers").cast(pl.Int64),
+        # pl.col("prediction_n_markers").cast(pl.Int64),
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
@@ -193,15 +210,15 @@ def validate(
         pl.col("truth_start").cast(pl.Int64).alias("start"),
         pl.col("truth_end").cast(pl.Int64).alias("end"),
         pl.col("truth_length").cast(pl.Int64),
-        pl.col("truth_n_markers").cast(pl.Int64),
+        # pl.col("truth_n_markers").cast(pl.Int64),
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
     report(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir , 'ppv')
     report(truth_vs_prediction, output_dir / 'truth_fragments.tsv', output_dir , 'sensitivity')
 
-    report_by_size(prediction_vs_truth, output_dir / 'ppv-markers_vs_len.tsv', 'prediction')
-    report_by_size(truth_vs_prediction, output_dir / 'sensitivity-markers_vs_len.tsv', 'truth')
+    # report_by_size(prediction_vs_truth, output_dir / 'ppv-markers_vs_len.tsv', 'prediction')
+    # report_by_size(truth_vs_prediction, output_dir / 'sensitivity-markers_vs_len.tsv', 'truth')
 
 
 
@@ -442,13 +459,13 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
+            # result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
             result[f"{dbname}_fragment_idx"] = None
             result[f"{dbname}_start"] = None
             result[f"{dbname}_end"] = None
             result[f"{dbname}_length"] = None
             result[f"{dbname}_cn_state"] = None
-            result[f"{dbname}_n_markers"] = None
+            # result[f"{dbname}_n_markers"] = None
             result["reciprocal_overlap"] = None
             result["breakpoint_difference"] = None
             result["reciprocal_overlap_test"] = None
@@ -461,7 +478,7 @@ def _validate_cnv(
         for match in matches:
             result = dict()
             db_region = GenomicRegion(match["chrom"], match["start"], match["end"])
-            reciprocal_overlap, intersetct_length, min_region_length = query_region.get_reciprocal_overlap(db_region)
+            reciprocal_overlap = query_region.get_reciprocal_overlap(db_region)['ratio']
             breakpoint_difference = query_region.get_max_boundary_difference(db_region)
 
             result[f"{qname}_fragment_idx"] = query["fragment_idx"]
@@ -470,13 +487,13 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
+            # result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
             result[f"{dbname}_fragment_idx"] = match["fragment_idx"]
             result[f"{dbname}_start"] = match["start"]
             result[f"{dbname}_end"] = match["end"]
             result[f"{dbname}_length"] = match["end"] - match["start"]
             result[f"{dbname}_cn_state"] = match["cn_state"]
-            result[f"{dbname}_n_markers"] = match["n_markers"] if 'n_markers' in match else None
+            # result[f"{dbname}_n_markers"] = match["n_markers"] if 'n_markers' in match else None
             result["reciprocal_overlap"] = reciprocal_overlap
             result["breakpoint_difference"] = breakpoint_difference
 
@@ -781,12 +798,19 @@ def annotate_hotspot_regions(cnvs, hotspot_region_db):
         pl.col("end").cast(pl.Int64).alias("end"),
     )
 
+    debug = False
+
     bag = list()
 
     for record in cnvs.to_dicts():
+
+
+        # if record['sample_name'] == '20200915_GT3_ARRAY_435_H02_TPMI.CEL'and record['start_position'] == '18967500':
+
         matches = hotspot_region_db.find_overlap(record)
 
         tmp_record = deepcopy(record)
+
 
         if len(matches) == 0:
             overlap_ratio = 0
@@ -800,7 +824,10 @@ def annotate_hotspot_regions(cnvs, hotspot_region_db):
             overlap_length = 0
 
             for match in matches:
-                overlap_length += len(x.intersects(GenomicRegion(match['chrom'], record['start'], record['end'])))
+                intersect = x.intersects(GenomicRegion(match['chrom'], int(match['start']), int(match['end'])))
+
+
+                overlap_length += len(intersect)
                 hotspot_names.append(match['region_name'])
 
             overlap_ratio = overlap_length / len(x)
@@ -826,6 +853,11 @@ def annotate_complex_regions(cnvs, complex_region_db):
 
     for record in cnvs.to_dicts():
 
+        if record['region_idx'] == 65:
+            debug = True
+        else:
+            debug = False
+
         matches = complex_region_db.find_overlap(record)
 
         if len(matches) == 0:
@@ -848,6 +880,25 @@ def annotate_complex_regions(cnvs, complex_region_db):
 
             bag_fragment.extend(fragments)
 
+            if debug:
+
+                print(
+                        record['sample_name'], 
+                        record['region_idx'], 
+                        record['start_position'], 
+                        record['stop_position'],
+                )
+
+                for fragment in fragments:
+                    print(
+                            fragment['sample_name'], 
+                            fragment['region_idx'], 
+                            fragment['start'], 
+                            fragment['end'],
+                    )
+
+
+
 
     regions = pl.from_dicts(bag_region, infer_schema_length=None)
     fragments = pl.from_dicts(bag_fragment, infer_schema_length=None)
@@ -864,6 +915,14 @@ def chop_region(record, matches):
     end = record['end']
     frag_idx = 0
 
+    if record['region_idx'] == 65:
+        print(start, end)
+        debug = True
+
+    else:
+        debug = False
+
+
     for match in matches:
         if start < match['start']:
             fragment = deepcopy(record)
@@ -878,12 +937,18 @@ def chop_region(record, matches):
         else:
             assert False, f'{start}-{end}-{record}-{match}'
 
+        if debug:
+            print('match', match)
+            print(fragment)
+
     if start < end:
         fragment = deepcopy(record)
         fragment['start'] = start
-        fragment['end'] = match['start']
+        fragment['end'] = end
         fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
         bag.append(fragment)
+        if debug:
+            print(fragment)
 
     return bag
 
