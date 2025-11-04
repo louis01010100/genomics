@@ -101,10 +101,6 @@ def validate(
     )
 
 
-    # print(truths[['sample_name', 'start', 'end']])
-
-
-
     if hotspot_regions_file:
         hotspot_region_db = create_database(load_hotspot_regions(hotspot_regions_file))
         predictions = annotate_hotspot_regions(predictions, hotspot_region_db)
@@ -179,7 +175,6 @@ def validate(
     prediction_vs_truth = pl.concat(prediction_vs_truth, how="vertical_relaxed")
     truth_vs_prediction = pl.concat(truth_vs_prediction, how="vertical_relaxed")
 
-
     prediction_vs_truth.sort(['sample_name', 'chrom', 'prediction_start']).write_csv(
         output_dir / "prediction_vs_truth.tsv", include_header=True, separator="\t"
     )
@@ -214,11 +209,12 @@ def validate(
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
 
+
     report(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir , 'ppv')
     report(truth_vs_prediction, output_dir / 'truth_fragments.tsv', output_dir , 'sensitivity')
 
-    # report_by_size(prediction_vs_truth, output_dir / 'ppv-markers_vs_len.tsv', 'prediction')
-    # report_by_size(truth_vs_prediction, output_dir / 'sensitivity-markers_vs_len.tsv', 'truth')
+    report_by_size(prediction_vs_truth, output_dir / 'ppv-markers_vs_len.tsv', 'prediction')
+    report_by_size(truth_vs_prediction, output_dir / 'sensitivity-markers_vs_len.tsv', 'truth')
 
 
 
@@ -545,7 +541,9 @@ def group_by_sample(prediction_fragments, truth_fragments, sample_map):
 
         sample_name_truth = sample_map[sample_name_prediction]
 
-        assert sample_name_truth in truth_bag
+        if sample_name_truth not in truth_bag:
+            print(f'{sample_name_truth} has no CNV after filtering')
+            continue
 
         bag.append(
             {
@@ -572,66 +570,66 @@ def load_complex_regions(complex_regions_file):
 
     return data.to_dicts()
 
-def report(a_vs_b, fragments_file, output_dir, _type):
+def _report(data, _type, label, output_dir):
+    bag = list()
 
-    def _report(data, _type, label, output_file):
+    if label == 'overall':
         bag = list()
 
-        if label == 'overall':
-            bag = list()
+        record = {
+            'n_total' : len(data),
+            'n_matched' : len(data.filter(pl.col('matched') == True)),
+            _type: len(data.filter(pl.col('matched') == True)) / len(data),
+        }
 
-            record = {
-                'n_total' : len(data),
-                'n_matched' : len(data.filter(pl.col('matched') == True)),
-                _type: len(data.filter(pl.col('matched') == True)) / len(data),
-            }
+        if 'hotspot_overlap_ratio' in data.columns:
+            on_hotspot = data.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0)
 
-            if 'hotspot_overlap_ratio' in data.columns:
-                on_hotspot = data.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0)
+            record['n_total_hotspot'] = len(on_hotspot)
+            record['n_matched_hotspot'] = len(on_hotspot.filter(pl.col('matched') == True))
+            record[f'{_type}_hotspot'] = np.nan if len(on_hotspot) == 0 \
+                    else record['n_matched_hotspot'] / record['n_total_hotspot']
 
-                record['n_total_hotspot'] = len(on_hotspot)
-                record['n_matched_hotspot'] = len(on_hotspot.filter(pl.col('matched') == True))
-                record[f'{_type}_hotspot'] = np.nan if len(on_hotspot) == 0 \
-                        else record['n_matched_hotspot'] / record['n_total_hotspot']
+        bag.append(record)
 
-            bag.append(record)
+        data = pl.from_dicts(bag)
 
-            data = pl.from_dicts(bag)
+        print(data)
 
-            print(data)
+        data.write_csv(output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
 
-            data.write_csv(output_dir / f'{_type}.tsv', include_header = True, separator = '\t')
-
-            return
+        return
 
 
-        for keys, df in data.group_by([label]):
+    for keys, df in data.group_by([label]):
 
-            record = {
-                label: keys[0],
-                'n_total': len(df),
-                'n_matched': len(df.filter(pl.col('matched') == True)),
-                _type: len(df.filter(pl.col('matched') == True)) / len(df),
-            }
+        record = {
+            label: keys[0],
+            'n_total': len(df),
+            'n_matched': len(df.filter(pl.col('matched') == True)),
+            _type: len(df.filter(pl.col('matched') == True)) / len(df),
+        }
 
-            if 'hotspot_overlap_ratio' in df.columns:
-                on_hotspot = df.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0)
+        if 'hotspot_overlap_ratio' in df.columns:
+            on_hotspot = df.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0)
 
-                record['n_total_hotspot'] = len(on_hotspot)
-                record['n_matched_hotspot'] = len(on_hotspot.filter(pl.col('matched') == True))
-                record[f'{_type}_hotspot'] = np.nan if len(on_hotspot) == 0 \
-                        else record['n_matched_hotspot'] / record['n_total_hotspot']
+            record['n_total_hotspot'] = len(on_hotspot)
+            record['n_matched_hotspot'] = len(on_hotspot.filter(pl.col('matched') == True))
+            record[f'{_type}_hotspot'] = np.nan if len(on_hotspot) == 0 \
+                    else record['n_matched_hotspot'] / record['n_total_hotspot']
 
 
 
-            if label == 'barcode':
-                record['n_samples'] = len(df['sample_name'].unique())
+        if label == 'barcode':
+            record['n_samples'] = len(df['sample_name'].unique())
 
-            bag.append(record)
+        bag.append(record)
 
-        data = pl.from_dicts(bag).sort(_type)
-        data.write_csv(
-            output_dir / f'{_type}_by_{label}.tsv', include_header = True, separator = '\t')
+    data = pl.from_dicts(bag).sort(_type)
+    data.write_csv(
+        output_dir / f'{_type}_by_{label}.tsv', include_header = True, separator = '\t')
+
+def report(a_vs_b, fragments_file, output_dir, _type):
 
     fragments = pl.read_csv(
             fragments_file, has_header = True, separator = '\t', 
@@ -643,9 +641,24 @@ def report(a_vs_b, fragments_file, output_dir, _type):
         frag_idx = 'truth_fragment_idx'
 
 
-    data = fragments.join(a_vs_b, left_on = 'fragment_idx', right_on = frag_idx, how = 'left')
+    data = a_vs_b.rename({frag_idx: 'fragment_idx'})
 
-    print(_type, len(data.filter(pl.col('matched') == True)))
+    # x = data.unique(subset = ['fragment_idx'])
+    #
+    # duplicates = x.filter(x.select(['sample_name', 'chrom', 'prediction_start', 'prediction_end']).is_duplicated())\
+    #         .sort(['sample_name', 'chrom', 'prediction_start'])
+    #
+    # print('#' * 50)
+    # print(duplicates)
+    #
+    # print('unique fragments' , len(data['fragment_idx'].unique()))
+    # print('unique record', len(data.unique(subset=['sample_name', 'chrom', 'prediction_start', 'prediction_end'])))
+    # print('unique record', len(data.unique(subset=['sample_name', 'chrom', 'truth_start', 'truth_end'])))
+
+
+    # data = fragments.join(a_vs_b, left_on = 'fragment_idx', right_on = frag_idx, how = 'left')
+    #
+    # print(_type, len(data.filter(pl.col('matched') == True)))
 
     bag = list()
 
