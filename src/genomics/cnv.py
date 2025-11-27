@@ -62,17 +62,9 @@ def validate(
 
     sample_map = load_sample_map(sample_map_file)
 
-    # assert '20191223_GT23_ARRAY_726_H02_TPMI.CEL' in sample_map
-    # assert '00051461_HTCMA.CEL' == sample_map['20191223_GT23_ARRAY_726_H02_TPMI.CEL']
-    # assert '20191223_GT23_ARRAY_726_H02_TPMI.CEL' in predictions['sample_name']
-    # assert '00051461_HTCMA.CEL' in truths['sample_name']
 
     common_samples_prediction, common_samples_truth = find_common_samples(
             predictions['sample_name'], truths['sample_name'], sample_map)
-
-    # assert '20191223_GT23_ARRAY_726_H02_TPMI.CEL' in common_samples_prediction
-    # assert '00051461_HTCMA.CEL' in common_samples_truth
-    # return
 
 
     predictions = predictions.filter(pl.col('sample_name').is_in(common_samples_prediction)).sort(REQUIRED_COLUMNS)
@@ -210,8 +202,8 @@ def validate(
     )
 
 
-    report(prediction_vs_truth, output_dir / 'prediction_fragments.tsv', output_dir , 'ppv')
-    report(truth_vs_prediction, output_dir / 'truth_fragments.tsv', output_dir , 'sensitivity')
+    report(prediction_vs_truth, output_dir , 'ppv')
+    report(truth_vs_prediction, output_dir , 'sensitivity')
 
     report_by_size(prediction_vs_truth, output_dir / 'ppv-markers_vs_len.tsv', 'prediction')
     report_by_size(truth_vs_prediction, output_dir / 'sensitivity-markers_vs_len.tsv', 'truth')
@@ -455,13 +447,13 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            # result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
+            result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
             result[f"{dbname}_fragment_idx"] = None
             result[f"{dbname}_start"] = None
             result[f"{dbname}_end"] = None
             result[f"{dbname}_length"] = None
             result[f"{dbname}_cn_state"] = None
-            # result[f"{dbname}_n_markers"] = None
+            result[f"{dbname}_n_markers"] = None
             result["reciprocal_overlap"] = None
             result["breakpoint_difference"] = None
             result["reciprocal_overlap_test"] = None
@@ -483,13 +475,13 @@ def _validate_cnv(
             result[f"{qname}_end"] = query["end"]
             result[f"{qname}_length"] = query["end"] - query["start"]
             result[f"{qname}_cn_state"] = query["cn_state"]
-            # result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
+            result[f"{qname}_n_markers"] = query["n_markers"] if 'n_markers' in query else None
             result[f"{dbname}_fragment_idx"] = match["fragment_idx"]
             result[f"{dbname}_start"] = match["start"]
             result[f"{dbname}_end"] = match["end"]
             result[f"{dbname}_length"] = match["end"] - match["start"]
             result[f"{dbname}_cn_state"] = match["cn_state"]
-            # result[f"{dbname}_n_markers"] = match["n_markers"] if 'n_markers' in match else None
+            result[f"{dbname}_n_markers"] = match["n_markers"] if 'n_markers' in match else None
             result["reciprocal_overlap"] = reciprocal_overlap
             result["breakpoint_difference"] = breakpoint_difference
 
@@ -629,12 +621,9 @@ def _report(data, _type, label, output_dir):
     data.write_csv(
         output_dir / f'{_type}_by_{label}.tsv', include_header = True, separator = '\t')
 
-def report(a_vs_b, fragments_file, output_dir, _type):
+def report(a_vs_b, output_dir, _type):
 
-    fragments = pl.read_csv(
-            fragments_file, has_header = True, separator = '\t', 
-            infer_schema = False,)
-            # schema_overrides = {'barcode': pl.Utf8, 'fragment_idx': pl.Utf8})
+
     if _type == 'ppv':
         frag_idx = 'prediction_fragment_idx'
     elif _type == 'sensitivity':
@@ -642,23 +631,6 @@ def report(a_vs_b, fragments_file, output_dir, _type):
 
 
     data = a_vs_b.rename({frag_idx: 'fragment_idx'})
-
-    # x = data.unique(subset = ['fragment_idx'])
-    #
-    # duplicates = x.filter(x.select(['sample_name', 'chrom', 'prediction_start', 'prediction_end']).is_duplicated())\
-    #         .sort(['sample_name', 'chrom', 'prediction_start'])
-    #
-    # print('#' * 50)
-    # print(duplicates)
-    #
-    # print('unique fragments' , len(data['fragment_idx'].unique()))
-    # print('unique record', len(data.unique(subset=['sample_name', 'chrom', 'prediction_start', 'prediction_end'])))
-    # print('unique record', len(data.unique(subset=['sample_name', 'chrom', 'truth_start', 'truth_end'])))
-
-
-    # data = fragments.join(a_vs_b, left_on = 'fragment_idx', right_on = frag_idx, how = 'left')
-    #
-    # print(_type, len(data.filter(pl.col('matched') == True)))
 
     bag = list()
 
@@ -743,7 +715,8 @@ def report_by_size(data, output_file, label):
         metric = 'sensitivity'
 
     lengths =  [0, 50000,100000,250000, 500000,1000000, np.inf]
-    n_markers = [0, 50, 100, 500, 1000, 2000, 4000, 8000, 10000, np.inf]
+    # n_markers = [0, 50, 100, 500, 1000, 2000, 4000, 8000, 10000, np.inf]
+    n_markers = [0, np.inf]
 
     bag = list()
 
@@ -761,8 +734,8 @@ def report_by_size(data, output_file, label):
             max_n_markers = n_markers[j + 1]
 
             target2 = target.filter(
-                (pl.col(f'{label}_n_markers') >= min_n_markers) & 
-                (pl.col(f'{label}_n_markers') < max_n_markers)
+                (pl.col(f'{label}_n_markers').cast(pl.Int64) >= min_n_markers) & 
+                (pl.col(f'{label}_n_markers').cast(pl.Int64) < max_n_markers)
             )
 
             n_detected = len(target2)

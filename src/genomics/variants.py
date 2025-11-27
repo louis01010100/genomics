@@ -48,143 +48,141 @@ def assign_coord_id(df, genome_file, n_threads = 1):
 
     return result
 
-# data1_file must contains the VCF 4-tuple
-# dat2_file must be an indexed VCF file with the ID column populated
-def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_size):
+def _batches(records, data2_file, genome_file):
 
-    def batches(records, data2_file, genome_file):
+    genome = Genome(genome_file)
 
-        genome = Genome(genome_file)
+    bag = list()
+    for record in records:
+        bag.append(record)
 
-        bag = list()
-        for record in records:
-            bag.append(record)
-
-            if len(bag) >= batch_size:
-                yield {
-                        'records': bag, 
-                        'genome_file': genome_file, 
-                        'data2_file': data2_file
-                }
-                bag = list()
-
-        if len(bag) > 0:
+        if len(bag) >= batch_size:
             yield {
                     'records': bag, 
                     'genome_file': genome_file, 
                     'data2_file': data2_file
             }
+            bag = list()
 
-    def check_relation(v1, v2):
+    if len(bag) > 0:
+        yield {
+                'records': bag, 
+                'genome_file': genome_file, 
+                'data2_file': data2_file
+        }
 
-        assert v1.chrom == v2.chrom, f'{v1}\n{v2}'
-        assert v1.pos == v2.pos, f'{v1}\n{v2}'
-        assert v1.ref == v2.ref, f'{v1}\n{v2}'
+def _check_relation(v1, v2):
 
-        if v1.alts == v2.alts:
-            return 'same'
+    assert v1.chrom == v2.chrom, f'{v1}\n{v2}'
+    assert v1.pos == v2.pos, f'{v1}\n{v2}'
+    assert v1.ref == v2.ref, f'{v1}\n{v2}'
 
-        if set(v1.alts) & set(v2.alts):
-            return 'overlap'
+    if v1.alts == v2.alts:
+        return 'same'
 
-        return 'different'
+    if set(v1.alts) & set(v2.alts):
+        return 'overlap'
 
-    def process(batch):
+    return 'different'
 
+def _process(batch):
+    genome = Genome(batch['genome_file'])
+    data2_file = batch['data2_file']
+    result_collector = list()
 
-        genome = Genome(batch['genome_file'])
-        data2_file = batch['data2_file']
-        result_collector = list()
+    for record in batch['records']:
+        chrom_seq = genome.seq(record['chrom'])
 
-        for record in batch['records']:
-            chrom_seq = genome.seq(record['chrom'])
+        ref_snv = Variant(
+            chrom=record['chrom'],
+            pos=int(record['pos']),
+            ref=record['ref'],
+            alt=record['alt'],
+        )
 
-            ref_snv = Variant(
-                chrom=record['chrom'],
-                pos=int(record['pos']),
-                ref=record['ref'],
-                alt=record['alt'],
-            )
+        snvs = fetch_variants(
+            record['chrom'],
+            record['pos'],
+            data2_file,
+        )
 
-            snvs = fetch_variants(
-                record['chrom'],
-                record['pos'],
-                data2_file,
-            )
+        bag = dict()
+        for snv in snvs:
+            if snv.alts == ['.']:
+                continue
+            try:
+                synced_ref, synced_other = sync(
+                    vx = ref_snv,
+                    vy = snv,
+                    chrom_seq = chrom_seq
+                )
+            except RecursionError as e:
+                print(e)
+                print(ref_snv)
+                print(snv)
+                continue
 
-            bag = dict()
-            for snv in snvs:
-                if snv.alts == ['.']:
-                    continue
-                try:
-                    synced_ref, synced_other = sync(
-                        vx = ref_snv,
-                        vy = snv,
-                        chrom_seq = chrom_seq
-                    )
-                except RecursionError as e:
-                    print(e)
-                    print(ref_snv)
-                    print(snv)
-                    continue
+            result = _check_relation(synced_ref, synced_other)
 
-                result = check_relation(synced_ref, synced_other)
+            if result not in bag:
+                bag[result] = list()
 
-                if result not in bag:
-                    bag[result] = list()
+            bag[result].append({
+                'snv': synced_ref,
+                'matched_snv': synced_other
+            })
 
-                bag[result].append({
-                    'snv': synced_ref,
-                    'matched_snv': synced_other
-                })
+        snv_same = list()
+        snv_overlap = list()
 
-            snv_same = list()
-            snv_overlap = list()
+        if 'same' in bag:
+            snv_same.extend(bag['same'])
+            snv_overlap.extend(bag['same'])
 
-            if 'same' in bag:
-                snv_same.extend(bag['same'])
-                snv_overlap.extend(bag['same'])
+        if 'overlap' in bag:
+            snv_overlap.extend(bag['overlap'])
 
-            if 'overlap' in bag:
-                snv_overlap.extend(bag['overlap'])
+        if snv_same:
+            snv_same = [x['matched_snv'] for x in snv_same]
+            snv_same = concat_snv(snv_same)
 
-            if snv_same:
-                snv_same = [x['matched_snv'] for x in snv_same]
-                snv_same = concat_snv(snv_same)
+            record['matched_id'] = snv_same['id']
+            record['matched_pos'] = snv_same['pos']
+            record['matched_ref'] = snv_same['ref']
+            record['matched_alt'] = snv_same['alt']
+        else:
+            record['matched_id'] = None
+            record['matched_pos'] = None
+            record['matched_ref'] = None
+            record['matched_alt'] = None
 
-                record['matched_id'] = snv_same['id']
-                record['matched_pos'] = snv_same['pos']
-                record['matched_ref'] = snv_same['ref']
-                record['matched_alt'] = snv_same['alt']
-            else:
-                record['matched_id'] = None
-                record['matched_pos'] = None
-                record['matched_ref'] = None
-                record['matched_alt'] = None
+        if snv_overlap:
+            snv_ext = [x['matched_snv'] for x in snv_overlap]
+            snv_ext = concat_snv(snv_ext)
+            record['extended_matched_id'] = snv_ext['id']
+            record['extended_matched_pos'] = snv_ext['pos']
+            record['extended_matched_ref'] = snv_ext['ref']
+            record['extended_matched_alt'] = snv_ext['alt']
+        else:
+            record['extended_matched_id'] = None
+            record['extended_matched_pos'] = None
+            record['extended_matched_ref'] = None
+            record['extended_matched_alt'] = None
 
-            if snv_overlap:
-                snv_ext = [x['matched_snv'] for x in snv_overlap]
-                snv_ext = concat_snv(snv_ext)
-                record['extended_matched_id'] = snv_ext['id']
-                record['extended_matched_pos'] = snv_ext['pos']
-                record['extended_matched_ref'] = snv_ext['ref']
-                record['extended_matched_alt'] = snv_ext['alt']
-            else:
-                record['extended_matched_id'] = None
-                record['extended_matched_pos'] = None
-                record['extended_matched_ref'] = None
-                record['extended_matched_alt'] = None
+        result_collector.append(record)
+    return result_collector
 
-            result_collector.append(record)
-        return result_collector
+# data1_file must contains the VCF 4-tuple
+# dat2_file must be an indexed VCF file with the ID column populated
+def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_size):
 
     bag = []
 
     data1 = pl.read_csv(data1_file, has_header = True, separator = '\t')
 
     if n_threads == 1:
-        for batch in batches(data1.to_dicts(), data2_file):
-            result = process(batch)
+        for batch in _batches(data1.to_dicts(), data2_file):
+            result = _process(batch)
             bag.extend(result)
 
     else:
@@ -192,7 +190,7 @@ def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_
             records = data1.to_dicts()
             n_done = 0
             n_total = len(records)
-            for results in pool.uimap(process, batches(records, data2_file, genome_file)):
+            for results in pool.uimap(_process, _batches(records, data2_file, genome_file)):
                 bag.extend(results)
                 n_done += len(results)
                 print(f'progress: {(n_done / n_total) * 100:.2f}%',

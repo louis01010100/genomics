@@ -38,10 +38,9 @@ def main():
 
     elif args.subcommand == 'export-gene':
         gene.export(
-            data_source = args.data_source,
-            input_file = Path(args.input_file),
-            output_file = Path(args.output_file),
-            one_based = args.one_based,
+            genes_file = new_path(args.gene_file),
+            gene_names_file = new_path(args.gene_names_file),
+            output_file = new_path(args.output_file),
         )
     elif args.subcommand == 'dbsnp-normalize':
         dbsnp.normalize(
@@ -207,10 +206,9 @@ def _config_snv_truth_parser(parser):
     parser.add_argument('vcf_files', nargs='*')
 
 def _config_gene_parser(parser):
-    parser.add_argument('--input-file', required=True)
+    parser.add_argument('--genes-file', required=True)
+    parser.add_argument('--gene-names-file', required=False)
     parser.add_argument('--output-file', required=False)
-    parser.add_argument('--data-source', type=str, choices = ['UCSC', 'GENCODE'], default = 'GENCODE')
-    parser.add_argument('--one-based', action='store_true', default=False)
 
 def _new_path(file_):
     if file_:
