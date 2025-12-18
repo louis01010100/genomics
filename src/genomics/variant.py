@@ -128,12 +128,12 @@ class Variant():
     def region(self):
         return self._region
 
-    def expand(self, chrom):
-        max_region = get_max_region(self, chrom)
+    def expand(self, chrom_seq):
+        max_region = get_max_region(self, chrom_seq)
         new_pos = max_region.start + 1
 
-        ref_prefix = chrom[max_region.start: self.pos - 1]
-        ref_suffix = chrom[self.pos - 1 + len(self.ref):max_region.end]
+        ref_prefix = chrom_seq[max_region.start: self.pos - 1]
+        ref_suffix = chrom_seq[self.pos - 1 + len(self.ref):max_region.end]
 
         new_ref = ref_prefix + self.ref + ref_suffix
         new_alt = ','.join([ref_prefix + alt + ref_suffix for alt in self.alts])
@@ -347,7 +347,7 @@ class Variant():
 
 
 # bed format
-def get_region(chrom, pos, ref, alt):
+def get_region(chrom, pos, ref, alt) -> GenomicRegion:
 
     if is_snv(ref, alt):
         return GenomicRegion(chrom, pos -1, pos)

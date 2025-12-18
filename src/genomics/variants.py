@@ -48,7 +48,7 @@ def assign_coord_id(df, genome_file, n_threads = 1):
 
     return result
 
-def _batches(records, data2_file, genome_file):
+def _batches(records, data2_file, genome_file, batch_size):
 
     genome = Genome(genome_file)
 
@@ -181,7 +181,7 @@ def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_
     data1 = pl.read_csv(data1_file, has_header = True, separator = '\t')
 
     if n_threads == 1:
-        for batch in _batches(data1.to_dicts(), data2_file):
+        for batch in _batches(data1.to_dicts(), data2_file, genome_file, batch_size):
             result = _process(batch)
             bag.extend(result)
 
@@ -190,7 +190,7 @@ def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_
             records = data1.to_dicts()
             n_done = 0
             n_total = len(records)
-            for results in pool.uimap(_process, _batches(records, data2_file, genome_file)):
+            for results in pool.uimap(_process, _batches(records, data2_file, genome_file, batch_size)):
                 bag.extend(results)
                 n_done += len(results)
                 print(f'progress: {(n_done / n_total) * 100:.2f}%',

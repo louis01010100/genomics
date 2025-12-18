@@ -13,7 +13,7 @@ class GenomicRegionDatabase:
     def chroms(self):
         return set([str(x) for x in self._regions.keys()])
 
-    def find_overlap(self, region: dict):
+    def find_overlap(self, region: dict[str, str|int])-> dict[str, str|int]:
 
         bag = list()
         if region["chrom"] not in self._regions.keys():
@@ -73,6 +73,14 @@ class GenomicRegion:
         self._start = start
         self._end = end
         self._name = name
+
+    def to_dict(self):
+        return {
+                'chrom': self._chrom,
+                'start': self._start,
+                'end': self._end,
+                'name': self._name,
+        }
 
     def intersects(self, other):
         if not self.overlaps(other):

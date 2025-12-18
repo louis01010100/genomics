@@ -2,6 +2,7 @@ from pathlib import Path
 
 import polars as pl
 
+
 GFF3_COLUMNS = [
     'seqid',
     'source',
@@ -14,55 +15,56 @@ GFF3_COLUMNS = [
     'attribute',
 ]
 
-UCSC_GENE_COLUMNS = [
-    'bin',
-    'name',
-    'chrom',
-    'strand',
-    'tx_start',
-    'tx_end',
-    'cds_start',
-    'cds_end',
-    'exon_count',
-    'exon_starts',
-    'exon_ends',
-    'score',
-    'name2',
-    'cds_start_stat',
-    'cds_end_stat',
-    'exon_frames',
-]
+# UCSC_GENE_COLUMNS = [
+#     'bin',
+#     'name',
+#     'chrom',
+#     'strand',
+#     'tx_start',
+#     'tx_end',
+#     'cds_start',
+#     'cds_end',
+#     'exon_count',
+#     'exon_starts',
+#     'exon_ends',
+#     'score',
+#     'name2',
+#     'cds_start_stat',
+#     'cds_end_stat',
+#     'exon_frames',
+# ]
 
-def export(input_file: Path, output_file, data_source: str, one_based):
-    if data_source == 'UCSC':
-        export_ucsc_gene(input_file, output_file, one_based)
-    elif data_source == 'GENCODE':
-        export_gencode_gene(input_file, output_file, one_based)
+ZERO_BASED=True
 
-    else:
-        raise Exception(data_source)
+def export(genes_file: Path, gene_names_file: Path, output_file: Path):
+    export_gencode_gene(genes_file, gene_names_file, output_file)
 
-        
 
-def export_gencode_gene(input_file: Path, output_file: Path, one_based):
-    data = pl.read_csv(input_file, comment_prefix = '#', separator = '\t', new_columns = GFF3_COLUMNS)
+def export_gencode_gene(genes_file: Path, gene_names_file: Path, output_file):
+    data = pl.read_csv(genes_file, comment_prefix = '#', separator = '\t', new_columns = GFF3_COLUMNS, infer_schema = None)
     data = data.with_columns(pl.arange(0, len(data)).alias('idx'))
 
     genes = data.filter(pl.col('type') == 'gene')
 
-    genes = genes.with_columns(pl.col('attribute').str.split(';').alias('attribute')).explode(pl.col('attribute'))
+    genes = genes.with_columns(pl.col('attribute').str.split(';')).explode(pl.col('attribute'))
     genes = genes.with_columns(pl.col('attribute').str.split('=').alias('split'))\
             .with_columns(
                     pl.col('split').list.get(0).alias('key'), \
-                    pl.col('split').list.get(1).alias('gene_name'), \
+                    pl.col('split').list.get(1).alias('symbol'), \
             )
     genes = genes.filter(pl.col('key') == 'gene_name')
     genes = genes.rename({'seqid': 'chrom', 'start': 'default_start', 'end': 'default_end'})
-    if one_based:
-        genes = genes.with_columns((pl.col('default_start')).alias('start'), pl.col('default_end').alias('end'))
+    if ZERO_BASED:
+        genes = genes.with_columns((pl.col('default_start').cast(pl.Int64) -1 ).alias('start'), pl.col('default_end').alias('end'))
     else:
-        genes = genes.with_columns((pl.col('default_start') - 1).alias('start'), pl.col('default_end').alias('end'))
-    genes = genes.select(['gene_name', 'chrom', 'start', 'end'])
+        genes = genes.with_columns(pl.col('default_start').alias('start'), pl.col('default_end').alias('end'))
+
+    genes = genes.select(['symbol', 'chrom', 'start', 'end'])
+
+    if gene_names_file:
+        gene_names = pl.read_csv(gene_names_file, has_header = True, separator = '\t', infer_schema = None).select(['symbol', 'name'])
+        genes = genes.join(gene_names, on = 'symbol', how = 'left')
+
     genes.write_csv(output_file, include_header = True, separator = '\t')
 
 

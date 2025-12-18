@@ -21,10 +21,10 @@ class Genome():
 
         if is_gzip(genome_file):
             with gzip.open(genome_file, 'rt')  as fh:
-                self._chroms = load_chroms(fh)
+                self._chroms = load_genome(fh)
         else:
             with genome_file.open('rt') as fh:
-                self._chroms = load_chroms(fh)
+                self._chroms = load_genome(fh)
 
 
     @property
@@ -75,7 +75,7 @@ class Genome():
                     end_pos = begin_pos + width
 
 
-def load_chroms(fh):
+def load_genome(fh):
     chroms = dict()
     id_ = None
     seq = None

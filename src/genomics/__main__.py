@@ -38,9 +38,9 @@ def main():
 
     elif args.subcommand == 'export-gene':
         gene.export(
-            genes_file = new_path(args.gene_file),
-            gene_names_file = new_path(args.gene_names_file),
-            output_file = new_path(args.output_file),
+            genes_file = _new_path(args.genes_file),
+            gene_names_file = _new_path(args.gene_names_file),
+            output_file = _new_path(args.output_file),
         )
     elif args.subcommand == 'dbsnp-normalize':
         dbsnp.normalize(
@@ -119,7 +119,7 @@ def config_parsers():
 
     parsers = parser.add_subparsers(dest='subcommand')
 
-    _config_varmatch_arser(parsers.add_parser('varmatch'))
+    _config_varmatch_parser(parsers.add_parser('varmatch'))
     _config_clinvar_parser(parsers.add_parser('clinvar'))
     _config_dbsnp_merged2map_parser(parsers.add_parser('dbsnp-merged2map'))
     _config_dbsnp_normalize_parser(parsers.add_parser('dbsnp-normalize'))
