@@ -1,18 +1,41 @@
-from genomics.cnv import validate, sort_matches, chop_region
+from genomics.cnv import validate, sort_matches, exclude_regions, include_regions
 from pathlib import Path
 
-def test_chop_region():
+def test_include_regions():
     record = {
             'region_idx': 100,
+            'chrom': 'chr1',
             'start': 100,
             'end': 200,
     }
     matches = list()
-    matches.append({ 'start': 50, 'end': 110, })
-    matches.append({ 'start': 120, 'end': 140, })
-    matches.append({ 'start': 150, 'end': 210, })
+    matches.append({ 'chrom': 'chr1', 'start': 50, 'end': 110, })
+    matches.append({ 'chrom': 'chr1', 'start': 120, 'end': 140, })
+    matches.append({'chrom': 'chr1',  'start': 150, 'end': 210, })
 
-    fragments = chop_region(record, matches)
+    fragments = include_regions(record, matches)
+
+    assert len(fragments) == 3
+    assert fragments[0]['start'] == 100
+    assert fragments[0]['end'] == 110
+    assert fragments[1]['start'] == 120
+    assert fragments[1]['end'] == 140
+    assert fragments[2]['start'] == 150
+    assert fragments[2]['end'] == 200
+
+def test_exclude_regions():
+    record = {
+            'region_idx': 100,
+            'chrom': 'chr1',
+            'start': 100,
+            'end': 200,
+    }
+    matches = list()
+    matches.append({ 'chrom': 'chr1', 'start': 50, 'end': 110, })
+    matches.append({ 'chrom': 'chr1', 'start': 120, 'end': 140, })
+    matches.append({'chrom': 'chr1',  'start': 150, 'end': 210, })
+
+    fragments = exclude_regions(record, matches)
 
     assert len(fragments) == 2
     assert fragments[0]['start'] == 110
@@ -28,7 +51,7 @@ def test_chop_region():
     matches = list()
     matches.append({ 'start': 110, 'end': 150})
 
-    fragments = chop_region(record, matches)
+    fragments = exclude_regions(record, matches)
 
     assert len(fragments) == 2
     assert fragments[0]['start'] == 100

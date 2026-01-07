@@ -82,6 +82,7 @@ class GenomicRegion:
                 'name': self._name,
         }
 
+
     def intersects(self, other):
         if not self.overlaps(other):
             return None

@@ -42,6 +42,8 @@ def test_intersects():
 #     regions = create_database(data)
 
 
+
+
 def test_GenomicRegionDatabase():
     data = pl.from_dict({
         'chrom': ['chr1', 'chr1', 'chr2'],
@@ -71,8 +73,6 @@ def test_GenomicRegionDatabase():
     assert result[0]['start'] == 30000
     assert result[0]['end'] == 40000
     assert result[0]['name'] == 'r2'
-
-
 
 
 

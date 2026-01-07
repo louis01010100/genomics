@@ -95,15 +95,15 @@ def validate(
 
     if hotspot_regions_file:
         hotspot_region_db = create_database(load_hotspot_regions(hotspot_regions_file))
-        predictions = annotate_hotspot_regions(predictions, hotspot_region_db)
-        truths = annotate_hotspot_regions(truths, hotspot_region_db)
-
-    complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
-
-    prediction_regions, prediction_fragments = annotate_complex_regions(
-        predictions,
-        complex_region_db,
-    )
+        prediction_vs_truth = annotate_hotspot_regions(prediction_vs_truth, hotspot_region_db)
+        truth_vs_prediction = annotate_hotspot_regions(truth_vs_prediction, hotspot_region_db)
+    else:
+        complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
+        prediction_regions, prediction_fragments = annotate_complex_regions(
+            predictions,
+            complex_region_db,
+        )
+        truth_regions, truth_fragments = annotate_complex_regions(truths, complex_region_db)
 
 
     prediction_regions.write_csv(
@@ -114,7 +114,6 @@ def validate(
         output_dir / "prediction_fragments.tsv", include_header=True, separator="\t"
     )
 
-    truth_regions, truth_fragments = annotate_complex_regions(truths, complex_region_db)
 
     truth_regions.write_csv(
         output_dir / "truth_regions.tsv", include_header=True, separator="\t"
@@ -132,8 +131,10 @@ def validate(
     for sample in samples:
         sample_name_prediction = sample["sample_name_prediction"]
         sample_name_truth = sample["sample_name_truth"]
-        prediction_fragments = sample["prediction_fragments"].to_dicts()
-        truth_fragments = sample["truth_fragments"].to_dicts()
+
+        # exclude samples without CNV
+        prediction_fragments = sample["prediction_fragments"].filter(~pl.col('chrom').is_null()).to_dicts()
+        truth_fragments = sample["truth_fragments"].filter(~pl.col('chrom').is_null()).to_dicts()
 
         data_ppv = _validate_cnv(
             prediction_fragments,
@@ -142,13 +143,14 @@ def validate(
             "truth",
             reciprocal_overlap_cutoff,
             breakpoint_tolerance_cutoff,
-        ).with_columns(
-                pl.lit(sample_name_prediction).alias('sample_name'),
         )
 
-        data_ppv = data_ppv.select(['sample_name'] + data_ppv.columns[:-1])
-
-        prediction_vs_truth.append(data_ppv)
+        if data_ppv is not None:
+            # move the sample name to the first column
+            data_ppv = data_ppv \
+                    .with_columns(pl.lit(sample_name_prediction).alias('sample_name'),) \
+                    .select(['sample_name'] + data_ppv.columns[:])
+            prediction_vs_truth.append(data_ppv)
 
         data_sensitivity = _validate_cnv(
             truth_fragments,
@@ -157,12 +159,15 @@ def validate(
             "prediction",
             reciprocal_overlap_cutoff,
             breakpoint_tolerance_cutoff,
-        ).with_columns(
-                pl.lit(sample_name_truth).alias('sample_name'),
         )
-        data_sensitivity = data_sensitivity.select(['sample_name'] + data_sensitivity.columns[:-1])
 
-        truth_vs_prediction.append(data_sensitivity)
+        if data_sensitivity is not None:
+            # move the sample name to the first column
+            data_sensitivity = data_sensitivity\
+                    .with_columns( pl.lit(sample_name_truth).alias('sample_name')) \
+                    .select(['sample_name'] + data_sensitivity.columns[:])
+
+            truth_vs_prediction.append(data_sensitivity)
 
     prediction_vs_truth = pl.concat(prediction_vs_truth, how="vertical_relaxed")
     truth_vs_prediction = pl.concat(truth_vs_prediction, how="vertical_relaxed")
@@ -200,6 +205,7 @@ def validate(
         # pl.col("truth_n_markers").cast(pl.Int64),
         pl.col("reciprocal_overlap").cast(pl.Float64),
     )
+
 
 
     report(prediction_vs_truth, output_dir , 'ppv')
@@ -435,7 +441,6 @@ def _validate_cnv(
 ):
     bag = list()
     for query in queries:
-
         matches = database.find_overlap(query)
         query_region = GenomicRegion(query["chrom"], query["start"], query["end"])
 
@@ -506,7 +511,10 @@ def _validate_cnv(
 
             bag.append(result)
 
-    report = pl.from_dicts(bag, infer_schema_length=None)
+    if len(bag) == 0:
+        report = None
+    else:
+        report = pl.from_dicts(bag, infer_schema_length=None)
 
 
     return report
@@ -575,7 +583,7 @@ def _report(data, _type, label, output_dir):
         }
 
         if 'hotspot_overlap_ratio' in data.columns:
-            on_hotspot = data.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0)
+            on_hotspot = data.filter(pl.col('hotspot_overlap_ratio').cast(pl.Float64) > 0.5)
 
             record['n_total_hotspot'] = len(on_hotspot)
             record['n_matched_hotspot'] = len(on_hotspot.filter(pl.col('matched') == True))
@@ -648,9 +656,6 @@ def report(a_vs_b, output_dir, _type):
             bag.append(record)
 
     data = pl.from_dicts(bag, infer_schema_length = None)
-
-    print(_type, len(data.filter(pl.col('matched') == True)))
-
 
     if 'barcode' in data.columns:
         _report(data, _type, 'barcode', output_dir)
@@ -789,9 +794,6 @@ def annotate_hotspot_regions(cnvs, hotspot_region_db):
 
     for record in cnvs.to_dicts():
 
-
-        # if record['sample_name'] == '20200915_GT3_ARRAY_435_H02_TPMI.CEL'and record['start_position'] == '18967500':
-
         matches = hotspot_region_db.find_overlap(record)
 
         tmp_record = deepcopy(record)
@@ -802,7 +804,7 @@ def annotate_hotspot_regions(cnvs, hotspot_region_db):
             hotspot_name = None
         else:
 
-            x = GenomicRegion(record['chrom'], record['start'], record['end'])
+            query = GenomicRegion(record['chrom'], record['start'], record['end'])
 
             hotspot_names = list()
 
@@ -810,8 +812,6 @@ def annotate_hotspot_regions(cnvs, hotspot_region_db):
 
             for match in matches:
                 intersect = x.intersects(GenomicRegion(match['chrom'], int(match['start']), int(match['end'])))
-
-
                 overlap_length += len(intersect)
                 hotspot_names.append(match['region_name'])
 
@@ -838,7 +838,6 @@ def annotate_complex_regions(cnvs, complex_region_db):
 
     for record in cnvs.to_dicts():
 
-
         matches = complex_region_db.find_overlap(record)
 
         if len(matches) == 0:
@@ -857,7 +856,7 @@ def annotate_complex_regions(cnvs, complex_region_db):
             region['complex_region'] = ';'.join([x['category'] for x in matches])
             bag_region.append(region)
 
-            fragments = chop_region(record, matches)
+            fragments = exclude_regions(record, matches)
 
             bag_fragment.extend(fragments)
 
@@ -867,8 +866,29 @@ def annotate_complex_regions(cnvs, complex_region_db):
 
     return regions, fragments
 
+def include_regions(record, matches):
 
-def chop_region(record, matches):
+    bag = list()
+
+    region_idx = record["region_idx"]
+    frag_idx = 0
+
+    region = GenomicRegion(record['chrom'], record['start'], record['end'])
+
+
+    for match in matches:
+        intersect = region.intersects(GenomicRegion(match['chrom'], match['start'], match['end']))
+        fragment = deepcopy(record)
+        fragment['start'] = intersect.start
+        fragment['end'] = intersect.end
+        fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
+        bag.append(fragment)
+        frag_idx += 1
+
+    return bag
+
+
+def exclude_regions(record, matches):
 
     bag = list()
 
