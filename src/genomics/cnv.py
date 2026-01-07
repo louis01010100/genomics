@@ -95,8 +95,11 @@ def validate(
 
     if hotspot_regions_file:
         hotspot_region_db = create_database(load_hotspot_regions(hotspot_regions_file))
-        prediction_vs_truth = annotate_hotspot_regions(prediction_vs_truth, hotspot_region_db)
-        truth_vs_prediction = annotate_hotspot_regions(truth_vs_prediction, hotspot_region_db)
+        prediction_regions, prediction_fragments = annotate_hotspot_regions(
+            predictions,
+            hotspot_region_db,
+        )
+        truth_regions, truth_fragments = annotate_hotspot_regions(truths, hotspot_region_db)
     else:
         complex_region_db = create_database(load_complex_regions(COMPLEX_REGIONS_FILE))
         prediction_regions, prediction_fragments = annotate_complex_regions(
@@ -782,47 +785,46 @@ def sort_matches(data):
 
     return bag
 
+def annotate_hotspot_regions(cnvs, complex_region_db):
 
-def annotate_hotspot_regions(cnvs, hotspot_region_db):
     cnvs = cnvs.with_columns(
         pl.col("start").cast(pl.Int64).alias("start"),
-        pl.col("end").cast(pl.Int64).alias("end"),
+       pl.col("end").cast(pl.Int64).alias("end"),
     )
 
+    bag_region = list()
+    bag_fragment = list()
 
-    bag = list()
 
     for record in cnvs.to_dicts():
 
-        matches = hotspot_region_db.find_overlap(record)
-
-        tmp_record = deepcopy(record)
-
+        matches = complex_region_db.find_overlap(record)
 
         if len(matches) == 0:
-            overlap_ratio = 0
-            hotspot_name = None
+            region = record.copy()
+            fragment = record.copy()
+
+            region["hotspot_region"] = None
+            bag_region.append(region)
+
+            fragment["fragment_idx"] = fragment["region_idx"]
+            bag_fragment.append(fragment)
         else:
+            matches = sort_matches(matches)
 
-            query = GenomicRegion(record['chrom'], record['start'], record['end'])
+            region = deepcopy(record)
+            region['hotspot_region'] = ';'.join([x['category'] for x in matches])
+            bag_region.append(region)
 
-            hotspot_names = list()
+            fragments = exclude_regions(record, matches)
 
-            overlap_length = 0
+            bag_fragment.extend(fragments)
 
-            for match in matches:
-                intersect = x.intersects(GenomicRegion(match['chrom'], int(match['start']), int(match['end'])))
-                overlap_length += len(intersect)
-                hotspot_names.append(match['region_name'])
 
-            overlap_ratio = overlap_length / len(x)
-            hotspot_name = ','.join(hotspot_names)
+    regions = pl.from_dicts(bag_region, infer_schema_length=None)
+    fragments = pl.from_dicts(bag_fragment, infer_schema_length=None)
 
-        tmp_record['hotspot_overlap_ratio'] = overlap_ratio
-        tmp_record['hotspot_name'] = hotspot_name
-        bag.append(tmp_record)
-
-    return pl.from_dicts(bag, infer_schema_length = None)
+    return regions, fragments
 
 
 def annotate_complex_regions(cnvs, complex_region_db):
