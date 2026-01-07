@@ -785,7 +785,7 @@ def sort_matches(data):
 
     return bag
 
-def annotate_hotspot_regions(cnvs, complex_region_db):
+def annotate_hotspot_regions(cnvs, hotspot_region_db):
 
     cnvs = cnvs.with_columns(
         pl.col("start").cast(pl.Int64).alias("start"),
@@ -798,7 +798,7 @@ def annotate_hotspot_regions(cnvs, complex_region_db):
 
     for record in cnvs.to_dicts():
 
-        matches = complex_region_db.find_overlap(record)
+        matches = hotspot_region_db.find_overlap(record)
 
         if len(matches) == 0:
             region = record.copy()
@@ -813,7 +813,7 @@ def annotate_hotspot_regions(cnvs, complex_region_db):
             matches = sort_matches(matches)
 
             region = deepcopy(record)
-            region['hotspot_region'] = ';'.join([x['category'] for x in matches])
+            region['hotspot_region'] = ';'.join([x['region_name'] for x in matches])
             bag_region.append(region)
 
             fragments = exclude_regions(record, matches)
