@@ -1,4 +1,5 @@
 from .gregion import GenomicRegion
+import polars as pl
 import re
 from pathlib import Path
 from .utils import is_gzip
@@ -36,6 +37,8 @@ class Genome():
         chroms = dict()
 
         for old_name, seq in self._chroms.items():
+
+            print(old_name, chrom_name_map[old_name])
             if old_name in chrom_name_map:
                 chrom_name = chrom_name_map[old_name]
             else:
@@ -94,4 +97,43 @@ def load_genome(fh):
         chroms[id_] = seq
 
     return chroms
+
+def create_chrom_name_map(genome_file):
+    ptn = re.compile(r'^>([^ ]+)( .+)?$')
+    ptn2 = re.compile(r'^.+chromosome ([^ ,]+)(:?.+)?')
+
+    def create_map(line):
+        
+        match = ptn.match(line)
+        old_name = match[1]
+        remains = match[2]
+        if remains:
+            match2 = ptn2.match(remains)
+            if match2:
+                new_name = 'chr' + match2[1]
+            else:
+                new_name = old_name
+
+        return {'old_name': old_name, 'new_name': new_name}
+
+        
+
+    bag = list()
+    if is_gzip(genome_file):
+        with gzip.open(genome_file, 'rt') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line.startswith('>'):
+                    continue
+                bag.append(create_map(line))
+    else:
+        with open(genome_file, 'rt') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line.startswith('>'):
+                    continue
+                bag.append(create_map(line))
+    return pl.from_dicts(bag)
+
+
 

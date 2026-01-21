@@ -64,10 +64,11 @@ def validate(
 
     # Write, reload, and cast results
     _write_validation_results(prediction_vs_truth, truth_vs_prediction, output_dir)
-    prediction_vs_truth, truth_vs_prediction = _reload_validation_results(output_dir)
-    prediction_vs_truth, truth_vs_prediction = _cast_validation_columns(
-        prediction_vs_truth, truth_vs_prediction
-    )
+
+    # prediction_vs_truth, truth_vs_prediction = _reload_validation_results(output_dir)
+    # prediction_vs_truth, truth_vs_prediction = _cast_validation_columns(
+    #     prediction_vs_truth, truth_vs_prediction
+    # )
 
     # Generate final reports
     _generate_reports(prediction_vs_truth, truth_vs_prediction, output_dir)
@@ -131,6 +132,7 @@ def _annotate_and_get_regions(predictions, truths, hotspot_regions_file):
             predictions, complex_region_db
         )
         truth_regions, truth_fragments = annotate_complex_regions(truths, complex_region_db)
+
     return prediction_regions, prediction_fragments, truth_regions, truth_fragments
 
 
@@ -813,6 +815,7 @@ def _handle_no_region_overlap(record, region_label):
     fragment = record.copy()
     region[region_label] = None
     fragment["fragment_idx"] = fragment["region_idx"]
+    fragment['fragment_length'] = fragment['end'] - fragment['start'] if fragment['end'] else None
     return region, fragment
 
 
@@ -858,7 +861,9 @@ def _generic_region_annotation(cnvs, region_db, region_name_key, region_label, u
         if len(matches) == 0:
             region, fragment = _handle_no_region_overlap(record, region_label)
             bag_region.append(region)
-            bag_fragment.append(fragment)
+
+            if not use_include:
+                bag_fragment.append(fragment)
         else:
             region, fragments = _handle_region_overlap(
                 record, matches, region_name_key, region_label, use_include
@@ -899,6 +904,7 @@ def include_regions(record, matches):
         fragment = deepcopy(record)
         fragment['start'] = intersect.start
         fragment['end'] = intersect.end
+        fragment['fragment_length'] = fragment['end'] - fragment['start']
         fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
         bag.append(fragment)
         frag_idx += 1
@@ -921,6 +927,7 @@ def exclude_regions(record, matches):
             fragment = deepcopy(record)
             fragment['start'] = start
             fragment['end'] = match['start']
+            fragment['fragment_length'] = fragment['end'] - fragment['start']
             fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
             bag.append(fragment)
             frag_idx += 1
@@ -935,6 +942,7 @@ def exclude_regions(record, matches):
         fragment = deepcopy(record)
         fragment['start'] = start
         fragment['end'] = end
+        fragment['fragment_length'] = fragment['end'] - fragment['start']
         fragment["fragment_idx"] = f"{region_idx}_{frag_idx}"
         bag.append(fragment)
 
