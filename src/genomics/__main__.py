@@ -74,7 +74,6 @@ def main():
             genders_file=Path(args.genders_file),
             genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
-            coordinates_file=Path(args.coordinates_file),
             n_threads=args.n_threads,
         )
 
@@ -177,7 +176,6 @@ def _config_cram_depth_parser(parser):
     parser.add_argument('--genders-file', required = True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--genome-file', required=True)
-    parser.add_argument('--coordinates-file', required=True)
     parser.add_argument('--n-threads', type=int, default=1)
 
 

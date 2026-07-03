@@ -1,28 +1,24 @@
-import gzip
 import shutil
+import numpy as np
 import pandas as pd
 from pathlib import Path
-from subprocess import PIPE, STDOUT, Popen
+from subprocess import PIPE, Popen
 from collections import OrderedDict
-import logging
-from icecream import ic
-from .utils import df2tsv, is_gzip, load_dict, init_logging, log_start, log_stop, log_info
-from .genome import Genome
-from .variant import Variant
-
-import numpy as np
-import polars as pl
 from pathos.multiprocessing import ProcessPool
-from .vcf import Vcf
 import multiprocess.context as ctx
+
+from .utils import load_dict, init_logging, log_start, log_info
 
 
 ctx._force_start_method('spawn')
 
-COORDINATES_FILENAME = 'coordinates.tsv'
+AUTOSOMES = {f'chr{i}' for i in range(1, 23)}
+MITO = 'chrMT'
+SEX = {'chrX', 'chrY'}
+CONTIG_ORDER = [f'chr{i}' for i in range(1, 23)] + [MITO, 'chrX', 'chrY']
+
 
 def export_cram_depths(
-    coordinates_file: Path,
     crams_file: Path,
     genders_file: Path,
     genome_file: Path,
@@ -31,73 +27,154 @@ def export_cram_depths(
     prod: bool = False,
 ):
 
-
     if prod:
         shutil.rmtree(output_dir, ignore_errors=True)
 
-    output_dir.mkdir(parents = True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = output_dir / 'depth.log'
-
-    init_logging(log_file)
+    init_logging(output_dir / 'depth.log')
 
     info = OrderedDict()
-
-    info['coordinates-file'] = coordinates_file
     info['crams-file'] = crams_file
     info['genders-file'] = genders_file
     info['genome-file'] = genome_file
-    info['ouput_dir'] = output_dir
+    info['output-dir'] = output_dir
     info['n-threads'] = n_threads
 
-    log_start('CRAM-based Read Depth Export', info)
+    log_start('CRAM-based Whole-Contig Read Depth', info)
 
     sample2cram = load_dict(crams_file)
     sample2gender = load_dict(genders_file)
 
-    log_info('Expand Coordinates')
-    coordinates_expanded = expand_coordinates(coordinates_file, genome_file)
+    validate_genders(sample2cram, sample2gender)
 
-    coordinates_expanded.write_csv(
-            output_dir / 'coordinates_expanded_details.tsv', include_header = True, separator = '\t')
+    contigs = target_contigs(next(iter(sample2cram.values())))
 
-    coordinates_expanded = pl.read_csv(
-            output_dir / 'coordinates_expanded_details.tsv', has_header = True, separator = '\t')
+    autosomes_file = output_dir / 'autosomes-depth.tsv'
+    sex_file = output_dir / 'sex-depth.tsv'
 
-    coordinates_expanded_file = output_dir / 'coordinates_expanded.tsv'
-    coordinates_expanded.select(['chrom', 'pos']).unique().sort(['chrom', 'pos']).write_csv(
-            coordinates_expanded_file, include_header = False, separator = '\t')
+    with autosomes_file.open('wt') as a_fh, sex_file.open('wt') as s_fh:
+        a_fh.write('chrom\tpos\tdepth_mean\tn_samples\n')
+        s_fh.write('chrom\tpos\tmean_male\tn_male\tmean_female\tn_female\n')
+
+        with ProcessPool(n_threads) as pool:
+            for contig in contigs:
+                group = classify_contig(contig)
+                if group == 'exclude':
+                    continue
+
+                log_info(f'Depth {contig}')
+
+                jobs = [
+                    {
+                        'cram_file': sample2cram[sample],
+                        'genome_file': genome_file,
+                        'contig': contig,
+                        'sample': sample,
+                        'gender': sample2gender[sample],
+                    }
+                    for sample in sample2cram
+                ]
+                results = list(pool.map(contig_depth, jobs))
+
+                if group == 'single':
+                    mean, n_samples = mean_single([vec for _, _, vec in results])
+                    write_single(a_fh, contig, mean, n_samples)
+                else:
+                    mean_male, n_male, mean_female, n_female = mean_per_gender(
+                        [(gender, vec) for _, gender, vec in results])
+                    write_sex(s_fh, contig, mean_male, n_male, mean_female, n_female)
+
+    log_info('Done')
 
 
-    depths_dir = output_dir / 'depths'
-    depths_dir.mkdir(exist_ok=True)
+def classify_contig(chrom):
+    if chrom in AUTOSOMES or chrom == MITO:
+        return 'single'
+    if chrom in SEX:
+        return 'sex'
+    return 'exclude'
 
-    log_info('Parse CRAM')
-    with ProcessPool(n_threads) as pool:
-        for future in pool.uimap(
-                parse_cram,
-                parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, coordinates_expanded_file)
-        ):
-            sample_name = future[0]
-            gender = future[1]
-            depth_df = future[2]
 
-            depth_df = coordinates_expanded.join(depth_df, on = ['chrom', 'pos'], how = 'left')\
-                    .with_columns(
-                            pl.col('depth').fill_null(0), 
-                    )
+def validate_genders(sample2cram, sample2gender):
+    for sample in sample2cram:
+        gender = sample2gender.get(sample)
+        if gender not in ('male', 'female'):
+            raise ValueError(
+                f'sample {sample!r} has missing or invalid gender: {gender!r}')
 
-            output_file = depths_dir / f'{sample_name}.tsv'
-            depth_df.write_csv(output_file, include_header=True, separator='\t')
 
-    log_info('Summarize Depths')
-    depths = summarize_depths(depths_dir, sample2gender)
+def target_contigs(cram_file):
+    cmd = f'samtools view -H {cram_file}'
 
-    output_filename = f'{coordinates_file.name.split(".")[0]}-depth.tsv'
+    present = set()
+    with Popen(cmd, shell=True, text=True, stdout=PIPE) as proc:
+        for line in proc.stdout:
+            if not line.startswith('@SQ'):
+                continue
+            for field in line.rstrip('\n').split('\t'):
+                if field.startswith('SN:'):
+                    present.add(field[3:])
+        proc.wait()
+        if proc.returncode:
+            raise Exception(cmd)
 
-    result = coordinates_expanded.join(depths, on=['chrom', 'pos'], how = 'left')
+    return [contig for contig in CONTIG_ORDER if contig in present]
 
-    df2tsv(result, output_dir / f'{output_filename}')
+
+def contig_depth(args):
+    cram_file = args['cram_file']
+    genome_file = args['genome_file']
+    contig = args['contig']
+    sample = args['sample']
+    gender = args['gender']
+
+    cmd = (''
+           f'samtools depth -aa'
+           f'    -r {contig}'
+           f'    --reference {genome_file}'
+           f'    {cram_file}'
+           '')
+
+    depths = []
+    with Popen(cmd, shell=True, text=True, stdout=PIPE) as proc:
+        for line in proc.stdout:
+            depths.append(int(line.rstrip('\n').split('\t')[2]))
+        proc.wait()
+        if proc.returncode:
+            raise Exception(cmd)
+
+    return sample, gender, np.array(depths, dtype=np.int64)
+
+
+def mean_single(depth_vectors):
+    total = None
+    for vec in depth_vectors:
+        total = vec.astype(np.float64) if total is None else total + vec
+    return total / len(depth_vectors), len(depth_vectors)
+
+
+def mean_per_gender(items):
+    males = [vec for gender, vec in items if gender == 'male']
+    females = [vec for gender, vec in items if gender == 'female']
+
+    mean_male = mean_single(males)[0] if males else None
+    mean_female = mean_single(females)[0] if females else None
+
+    return mean_male, len(males), mean_female, len(females)
+
+
+def write_single(fh, contig, mean, n_samples):
+    for i in range(len(mean)):
+        fh.write(f'{contig}\t{i + 1}\t{mean[i]}\t{n_samples}\n')
+
+
+def write_sex(fh, contig, mean_male, n_male, mean_female, n_female):
+    length = len(mean_male) if mean_male is not None else len(mean_female)
+    for i in range(length):
+        vmale = mean_male[i] if mean_male is not None else ''
+        vfemale = mean_female[i] if mean_female is not None else ''
+        fh.write(f'{contig}\t{i + 1}\t{vmale}\t{n_male}\t{vfemale}\t{n_female}\n')
 
 
 # def export_gvcf_depths(
@@ -144,70 +221,6 @@ def export_cram_depths(
 #         has_header=True,
 #         separator='\t',
 #     )
-
-# male X and female Y are excluded from the summary
-def summarize_depths(depth_dir, sample2gender):
-
-    bag = dict()
-    for f in depth_dir.glob('*.tsv'):
-
-        with f.open('rt') as fh:
-            sample = f.name[0:-4]
-            gender = sample2gender[sample]
-            col2idx = {col: idx for idx, col in enumerate(next(fh).strip().split('\t'))}
-
-            n_fields = len(col2idx)
-
-            for line in fh:
-                record = line.strip().split('\t')
-
-                record = pad(record, n_fields)
-                chrom = record[col2idx['chrom']]
-                pos = str2int(record[col2idx['pos']])
-                ref = record[col2idx['ref']]
-                start = str2int(record[col2idx['start']])
-                end = str2int(record[col2idx['end']])
-                depth = str2int(record[col2idx['depth']])
-
-                key = (chrom, pos)
-
-                if key not in bag:
-                    bag[key] = list()
-
-                if gender == 'male' and chrom == 'chrX':
-                    continue
-                if gender == 'female' and chrom == 'chrY':
-                    continue
-
-                bag[key].append(depth)
-
-    result = list()
-
-    for key, depths in bag.items():
-        result.append({
-            'chrom': key[0],
-            'pos': key[1],
-            'depth_median': int(np.median(depths)),
-            'depth_max': np.max(depths),
-            'depth_min': np.min(depths),
-            'n_samples_zero_depth': len([x for x in depths if x == 0]),
-            'n_samples': len(depths),
-        })
-
-    return pl.from_dicts(result)
-
-def str2int(v):
-    if v is None:
-        return 0
-    return int(v)
-
-def pad(record: list, n_fields: int, padding = None):
-    if len(record) == n_fields:
-        return record
-
-    record.extend([None] * (n_fields - len(record)))
-
-    return record
 
 def parse_gvcf(args):
     gvcf_file = args['gvcf_file']
@@ -368,113 +381,3 @@ def parse_gvcf_depth(line):
         'ref': ref,
         'depth': depth,
     }
-
-
-def parse_cram(args):
-    cram_file = args['cram_file']
-    genome_file = args['genome_file']
-    sample = args['sample']
-    gender = args['gender']
-    coordinates_file = args['coordinates_file']
-
-    cmd = (''
-           f'samtools mpileup'
-           f'    -l {coordinates_file}'
-           f'    -f {genome_file}'
-           f'    {cram_file}'
-           '')
-
-    with Popen(cmd, shell=True, text=True, stdout=PIPE) as proc:
-        bag = []
-        for line in proc.stdout:
-            items = line.strip().split('\t', 4)
-            record = {
-                'chrom': items[0],
-                'pos': int(items[1]),
-                'ref': items[2],
-                'depth': int(items[3]),
-            }
-
-            bag.append(record)
-
-        proc.wait()
-
-        if proc.returncode:
-            raise Exception(cmd)
-
-
-    depths = pl.from_dicts(bag)
-
-    return sample, gender, depths
-
-
-
-
-def expand_coordinates(coordinates_vcf_file, genome_file):
-
-    def create_coordinates(items, genome):
-        chrom = items[0]
-        pos = int(items[1])
-        id_ = items[2]
-        ref = items[3]
-        alt = items[4]
-
-        v = Variant(chrom = chrom, pos = pos, id_ = id_, ref = ref, alt = alt)
-        region = v.expand(genome.seq(chrom)).region
-
-        bag = list()
-
-        for _pos in range(region.start, region.end + 1):
-
-            bag.append({
-                'chrom': chrom,
-                'pos': _pos,
-                'id': id_,
-                'pos_original': pos,
-                'ref_original': ref,
-                'alt_original': alt,
-                'start': region.start,
-                'end': region.end,
-            })
-
-        return bag
-
-    genome = Genome(genome_file)
-
-    bag = list()
-    if is_gzip(coordinates_vcf_file):
-        with gzip.open(coordinates_vcf_file, 'rt') as fh:
-            for line in fh:
-                if line.startswith('##'):
-                    continue
-                break
-
-            for line in fh:
-                items = line.strip('\n').split('\t')
-
-                record = create_coordinates(items, genome)
-                bag.extend(record)
-    else:
-        with coordinates_vcf_file.open('rt') as fh:
-            for line in fh:
-                if line.startswith('##'):
-                    continue
-                break
-
-            for line in fh:
-                items = line.strip('\t').split('\t')
-
-                record = create_coordinates(items, genome)
-                bag.extend(record)
-
-    return  pl.from_dicts(bag).sort(['chrom', 'pos'])
-
-def parse_cram_depths_jobs(sample2cram, sample2gender, genome_file, coordinates_expanded_file):
-    for sample, cram_file in sample2cram.items():
-        yield {
-            'cram_file': cram_file,
-            'sample': sample,
-            'gender': sample2gender[sample],
-            'coordinates_file': coordinates_expanded_file,
-            'genome_file': genome_file,
-        }
