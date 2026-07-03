@@ -9,7 +9,7 @@ import polars as pl
 
 from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene, variants, genome
 
-__VERSION__ = '0.5.3'
+__VERSION__ = '0.6.0'
 
 
 def main():
