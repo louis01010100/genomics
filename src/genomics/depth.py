@@ -13,7 +13,7 @@ from .utils import load_dict, init_logging, log_start, log_info
 ctx._force_start_method('spawn')
 
 AUTOSOMES = {f'chr{i}' for i in range(1, 23)}
-MITO = 'chrMT'
+MITO = 'chrM'
 SEX = {'chrX', 'chrY'}
 CONTIG_ORDER = [f'chr{i}' for i in range(1, 23)] + [MITO, 'chrX', 'chrY']
 

@@ -13,11 +13,12 @@ import pytest
 def test_classify_contig():
     for i in range(1, 23):
         assert classify_contig(f'chr{i}') == 'single'
-    assert classify_contig('chrMT') == 'single'
+    # mitochondria named chrM (1000G/UCSC GRCh38 analysis set) -> treated like autosome
+    assert classify_contig('chrM') == 'single'
     assert classify_contig('chrX') == 'sex'
     assert classify_contig('chrY') == 'sex'
     # non-target contigs excluded from both outputs
-    assert classify_contig('chrM') == 'exclude'
+    assert classify_contig('chrMT') == 'exclude'
     assert classify_contig('chr1_KI270706v1_random') == 'exclude'
     assert classify_contig('chrUn_GL000195v1') == 'exclude'
     assert classify_contig('HLA-A*01:01:01:01') == 'exclude'
