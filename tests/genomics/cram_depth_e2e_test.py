@@ -35,15 +35,15 @@ def _read_tsv(path):
         return list(csv.DictReader(fh, delimiter='\t'))
 
 
-@pytest.fixture(scope='module')
-def outputs(tmp_path_factory):
-    out = tmp_path_factory.mktemp('cram_depth_out')
-    crams_file = out / 'crams.tsv'
+def _run_cli(work_dir, n_threads):
+    work_dir.mkdir(parents=True, exist_ok=True)
+    crams_file = work_dir / 'crams.tsv'
     with crams_file.open('w') as fh:
         fh.write('sample\tcram\n')
         for s in SAMPLES:
             fh.write(f'{s}\t{FIXTURE / f"{s}.cram"}\n')
 
+    out = work_dir / 'depth'
     env = dict(os.environ)
     env['PYTHONPATH'] = str(SRC)
     subprocess.run(
@@ -51,11 +51,26 @@ def outputs(tmp_path_factory):
          '--crams-file', str(crams_file),
          '--genders-file', str(FIXTURE / 'genders.tsv'),
          '--genome-file', str(FIXTURE / 'miniref.fa'),
-         '--output-dir', str(out / 'depth'),
-         '--n-threads', '4'],
+         '--output-dir', str(out),
+         '--n-threads', str(n_threads)],
         check=True, env=env, capture_output=True, text=True,
     )
-    return out / 'depth'
+    return out
+
+
+@pytest.fixture(scope='module')
+def outputs(tmp_path_factory):
+    return _run_cli(tmp_path_factory.mktemp('cram_depth_out'), n_threads=4)
+
+
+def test_output_is_thread_invariant(tmp_path):
+    # (sample x contig) jobs complete out of order under parallelism, but
+    # contigs are flushed in CONTIG_ORDER: output must be byte-identical
+    # regardless of --n-threads.
+    single = _run_cli(tmp_path / 'n1', n_threads=1)
+    multi = _run_cli(tmp_path / 'n4', n_threads=4)
+    for name in ('autosomes-depth.tsv', 'sex-depth.tsv'):
+        assert (single / name).read_bytes() == (multi / name).read_bytes()
 
 
 def test_only_expected_files(outputs):
