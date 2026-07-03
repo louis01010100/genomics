@@ -49,6 +49,7 @@ def export_cram_depths(
     validate_genders(sample2cram, sample2gender)
 
     contigs = target_contigs(next(iter(sample2cram.values())))
+    n_samples = len(sample2cram)
 
     autosomes_file = output_dir / 'autosomes-depth.tsv'
     sex_file = output_dir / 'sex-depth.tsv'
@@ -57,35 +58,58 @@ def export_cram_depths(
         a_fh.write('chrom\tpos\tdepth_mean\tn_samples\n')
         s_fh.write('chrom\tpos\tmean_male\tn_male\tmean_female\tn_female\n')
 
+        log_info('Compute depths')
+
+        # One job per (sample, contig): all n_threads workers stay busy across
+        # contigs instead of serializing one contig at a time. Each samtools call
+        # is still scoped to a single contig (-r), so a contig's per-position
+        # accumulation stays bounded to that contig. Results arrive unordered;
+        # a contig is finalized once all its samples are in, and completed
+        # contigs are flushed in CONTIG_ORDER for deterministic output.
+        pending = {contig: [] for contig in contigs}
+        done = {}
+        write_idx = 0
+
         with ProcessPool(n_threads) as pool:
-            for contig in contigs:
-                group = classify_contig(contig)
-                if group == 'exclude':
+            for sample, gender, contig, depths in pool.uimap(
+                    contig_depth,
+                    cram_depth_jobs(sample2cram, sample2gender, genome_file, contigs)):
+
+                bucket = pending[contig]
+                bucket.append((gender, depths))
+
+                if len(bucket) < n_samples:
                     continue
 
-                log_info(f'Depth {contig}')
-
-                jobs = [
-                    {
-                        'cram_file': sample2cram[sample],
-                        'genome_file': genome_file,
-                        'contig': contig,
-                        'sample': sample,
-                        'gender': sample2gender[sample],
-                    }
-                    for sample in sample2cram
-                ]
-                results = list(pool.map(contig_depth, jobs))
-
-                if group == 'single':
-                    mean, n_samples = mean_single([vec for _, _, vec in results])
-                    write_single(a_fh, contig, mean, n_samples)
+                if classify_contig(contig) == 'single':
+                    mean, n = mean_single([vec for _, vec in bucket])
+                    done[contig] = ('single', mean, n)
                 else:
-                    mean_male, n_male, mean_female, n_female = mean_per_gender(
-                        [(gender, vec) for _, gender, vec in results])
-                    write_sex(s_fh, contig, mean_male, n_male, mean_female, n_female)
+                    done[contig] = ('sex', *mean_per_gender(bucket))
+                del pending[contig]
+
+                while write_idx < len(contigs) and contigs[write_idx] in done:
+                    c = contigs[write_idx]
+                    payload = done.pop(c)
+                    if payload[0] == 'single':
+                        write_single(a_fh, c, payload[1], payload[2])
+                    else:
+                        write_sex(s_fh, c, payload[1], payload[2], payload[3], payload[4])
+                    write_idx += 1
 
     log_info('Done')
+
+
+def cram_depth_jobs(sample2cram, sample2gender, genome_file, contigs):
+    for contig in contigs:
+        for sample, cram_file in sample2cram.items():
+            yield {
+                'cram_file': cram_file,
+                'genome_file': genome_file,
+                'contig': contig,
+                'sample': sample,
+                'gender': sample2gender[sample],
+            }
 
 
 def classify_contig(chrom):
@@ -144,7 +168,7 @@ def contig_depth(args):
         if proc.returncode:
             raise Exception(cmd)
 
-    return sample, gender, np.array(depths, dtype=np.int64)
+    return sample, gender, contig, np.array(depths, dtype=np.int64)
 
 
 def mean_single(depth_vectors):
