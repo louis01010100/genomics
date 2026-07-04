@@ -1,663 +1,401 @@
-import gzip
-import shutil
-from pathlib import Path
-from subprocess import PIPE, STDOUT, Popen
-from collections import OrderedDict
-from icecream import ic
-from .genome import Genome
+"""Backbone-driven exact-match SNV truth calling.
 
-import numpy as np
-import polars as pl
+`genomics snv-truth` consumes an `axiom backbone` output VCF as `--coordinates-file`
+and builds a per-sample truth VCF (+ TSV) by exact `(chrom, pos, ref, ALT-set)`
+matching against a normalized single-sample VCF. Backbone records that share an `ID`
+form a SNP family: if one member matches the sample it is emitted with the sample's
+genotype and its siblings are dropped; if none matches, every member is emitted with a
+depth- and gender-aware homozygous-reference or no-call genotype.
+"""
+import gzip
+import math
+import shutil
+from collections import OrderedDict
+from pathlib import Path
+
 from pathos.multiprocessing import ProcessPool
 
-from .utils import is_gzip, load_dict, load_list, init_logging, log_start, log_stop, log_info,copy_vcf_header
-from .variant import Variant, sync
-from .vcf import Vcf, concat, fetch_variants, filter_variants, list_samples, list_contigs, standardize
-from .gregion import GenomicRegion
-from .genome import Genome
+from .utils import (
+    is_gzip,
+    load_dict,
+    load_list,
+    init_logging,
+    log_start,
+    log_info,
+    copy_vcf_header,
+    execute,
+)
+from .vcf import Vcf, list_samples
 
-COORDINATES_FILENAME = 'coordinates.tsv'
+AUTOSOMES = {f'chr{i}' for i in range(1, 23)}
+MITO = {'chrM', 'chrMT'}
+SEX = {'chrX', 'chrY'}
 
-SUBSET_SAMPLES_DIR = 'samples'
-SUBSET_SNVS_DIR = 'snv'
+# chr-prefixed GRCh38 ploidy for `bcftools +fixploidy` (CHROM FROM TO SEX PLOIDY).
+# Unlisted regions default to ploidy 2, so autosomes and the PAR stay diploid. Male
+# non-PAR chrX / chrY (MSY) and chrM are haploid; female chrY is absent (ploidy 0).
+GRCH38_PLOIDY = (
+    'chrX 2781480 155701382 M 1\n'
+    'chrX 156030896 156040895 M 1\n'
+    'chrY 1 10000 M 1\n'
+    'chrY 2781480 56887902 M 1\n'
+    'chrY 57217416 57227415 M 1\n'
+    'chrY 1 57227415 F 0\n'
+    'chrM 1 16569 M 1\n'
+    'chrM 1 16569 F 1\n'
+)
 
-X_PAR_1 = GenomicRegion('chrX',10000, 2781479)
-X_PAR_2 = GenomicRegion('chrX', 155701382, 156030895)
-
-X_PARS = [X_PAR_1, X_PAR_2]
-
-JOB_SIZE=10000
-
-
-## Use male samples as the reference for read depth, as females are expected to have 0 depth on chrY.
-# 10 hrs
 def export_snv_truth(
     coordinates_file: Path,
     vcf_files: list,
-    depths_file: Path,
+    autosomes_depths_file: Path,
+    sex_depths_file: Path,
     samples_file: Path,
     genders_file: Path,
     genome_file: Path,
     output_dir: Path,
     n_threads: int = 1,
-    min_depth: int = 4,
-    chrm_missing_as_homref: bool = False,
-    merge_vcf: bool = False,
+    min_depth: int = 2,
     prod: bool = True,
 ):
-
-    # if prod:
-    #     shutil.rmtree(output_dir, ignore_errors=True)
-    output_dir.mkdir(exist_ok=True)
-
-    log_file = output_dir / 'snv_truth.log'
-    init_logging(log_file)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    init_logging(output_dir / 'snv_truth.log')
 
     info = OrderedDict()
-    info['coordiantes-file'] = coordinates_file
+    info['coordinates-file'] = coordinates_file
     info['n_vcf_files'] = len(vcf_files)
     info['samples-file'] = samples_file
     info['genders-file'] = genders_file
+    info['autosomes-depths-file'] = autosomes_depths_file
+    info['sex-depths-file'] = sex_depths_file
     info['genome-file'] = genome_file
     info['output-dir'] = output_dir
     info['min-depth'] = min_depth
-    info['chrm-missing-as-homref'] = chrm_missing_as_homref
-    info['merge-vcf'] = merge_vcf
     info['n-threads'] = n_threads
+    log_start(banner='SNV Truth Creation', info=info)
 
-    log_start(banner = 'SNV Truth Creation', info = info)
-
-    sample_vcf_dir = output_dir / 'samples'
-    sample_vcf_dir.mkdir(exist_ok=True)
-
-    log_info('load samples')
+    log_info('load samples, genders, depths')
     samples = load_list(samples_file)
     sample2gender = load_dict(genders_file)
+    autosomes_depths = load_autosomes_depths(autosomes_depths_file)
+    sex_depths = load_sex_depths(sex_depths_file)
 
-    log_info('subset samples')
-    vcf_files = subset_samples(
-        vcf_files=vcf_files,
-        genome_file=genome_file,
-        samples=samples,
-        trim_alts = True,
-        output_dir=sample_vcf_dir,
-        n_threads=n_threads,
-    )
-
-    vcf_files = [x for x in sample_vcf_dir.glob('*/*info-norm-uppercase-samples-format-info-trim_alt-norm-uppercase-ex.vcf.bgz')]
-
-    # log_info('groupd spanning deletions')
-    #
-    # spandel_dir = output_dir / 'spandels'
-    # spandel_dir.mkdir(exist_ok=True)
-    #
-    # vcf_files = group_spanning_deletions(
-    #         vcf_files = vcf_files,
-    #         output_dir = spandel_dir,
-    #         n_threads = n_threads,
-    # )
-
-    log_info('load coordinates')
+    log_info('load backbone coordinates')
     coordinates = load_coordinates(coordinates_file)
+    families = group_families(coordinates)
 
-    log_info('load depths')
-    depths = load_depths(depths_file)
+    log_info('locate samples in input vcfs')
+    sample2vcf = locate_samples(vcf_files, samples)
 
-    log_info('fetch snvs')
-    snv_vcf_dir = output_dir / 'snv'
+    tmp_dir = output_dir / 'tmp'
+    ploidy_file = output_dir / 'grch38.ploidy'
+    ploidy_file.write_text(GRCH38_PLOIDY)
 
-    result = subset_snvs(
-        coordinates = coordinates,
-        vcf_files=vcf_files,
-        sample2gender = sample2gender,
-        genome_file = genome_file,
-        depths=depths,
+    log_info('build per-sample truth')
+    jobs = [
+        {
+            'sample': sample,
+            'vcf_file': sample2vcf[sample],
+            'gender': sample2gender[sample],
+            'families': families,
+            'genome_file': genome_file,
+            'autosomes_depths': autosomes_depths,
+            'sex_depths': sex_depths,
+            'min_depth': min_depth,
+            'ploidy_file': ploidy_file,
+            'output_dir': output_dir,
+            'tmp_dir': tmp_dir,
+        }
+        for sample in samples
+    ]
+
+    if n_threads > 1:
+        with ProcessPool(n_threads) as pool:
+            for _ in pool.uimap(process_sample, jobs):
+                pass
+    else:
+        for job in jobs:
+            process_sample(job)
+
+    log_info('done')
+
+
+def process_sample(job):
+    sample = job['sample']
+    vcf_file = job['vcf_file']
+    gender = job['gender']
+    families = job['families']
+    genome_file = job['genome_file']
+    autosomes_depths = job['autosomes_depths']
+    sex_depths = job['sex_depths']
+    min_depth = job['min_depth']
+    ploidy_file = job['ploidy_file']
+    output_dir = job['output_dir']
+
+    tmp_base = job['tmp_dir'] / sample
+    tmp_base.mkdir(parents=True, exist_ok=True)
+
+    prepared = prepare_sample(vcf_file, sample, genome_file, tmp_base)
+    prepared_name = list_samples(prepared)[0]
+
+    lookup = build_lookup(prepared)
+
+    matched_lines, fill_lines = call_families(
+        families=families,
+        lookup=lookup,
+        gender=gender,
+        autosomes_depths=autosomes_depths,
+        sex_depths=sex_depths,
         min_depth=min_depth,
-        output_dir=snv_vcf_dir,
-        chrm_missing_as_homref=chrm_missing_as_homref,
-        n_threads=n_threads,
     )
 
-    if merge_vcf:
-        one_vcf = concat(
-            vcf_files=vcf_files,
-            output_file=output_dir / 'truth.vcf.bgz',
-            tmp_dir=vcf_tmp_dir,
-            n_threads=n_threads,
-            preprocess=False,
-        )
-        print(one_vcf.filepath)
-    else:
-        for vcf_file in vcf_files:
-            Vcf(vcf_file, vcf_tmp_dir).index().move_to(output_dir)
-
-    print('done')
-
-
-def subset_snvs(
-    coordinates: list[dict],
-    vcf_files: list[Path],
-    sample2gender: dict,
-    genome_file: Path,
-    depths: dict,
-    min_depth: int,
-    output_dir: Path,
-    chrm_missing_as_homref: bool,
-    n_threads: int,
-):
-
-    genome = Genome(genome_file)
-
-    for vcf_file in vcf_files:
-
-        task_dir = output_dir / vcf_file.name.replace('.vcf.bgz', '')
-        task_dir.mkdir(parents = True, exist_ok = True)
-
-        truth_vcf_file = task_dir / 'truth.vcf'
-
-        truth_synced_vcf_file = task_dir / 'truth_synced.vcf'
-
-        snv_profile_file = task_dir / 'snv_profile.tsv'
-
-        copy_vcf_header(vcf_file, truth_vcf_file)
-        copy_vcf_header(vcf_file, truth_synced_vcf_file)
-
-        with snv_profile_file.open('wt') as fh:
-            snv_profile_header = '\t'.join([
-                    'chrom',
-                    'pos',
-                    'id',
-                    'ref',
-                    'alt',
-                    'pos_synced',
-                    'ref_synced',
-                    'alt_synced',
-                    'note',
-            ])
-            fh.write(f'{snv_profile_header}\n')
-
-        samples = list_samples(vcf_file)
-        n_samples = len(samples)
-
-        genders = [sample2gender[sample] for sample in samples]
-
-        with truth_vcf_file.open('at') as fh_t, \
-                truth_synced_vcf_file.open('at') as fh_s, \
-                snv_profile_file.open('at') as fh_p:
-
-            # for job in fetch_calls_jobs(
-            #             coordinates = coordinates,
-            #             genome = genome,
-            #             depths = depths,
-            #             genders = genders,
-            #             min_depth = min_depth,
-            #             chrm_missing_as_homref = chrm_missing_as_homref,
-            #             vcf_file = vcf_file,
-            #         ):
-            #
-            #     results = fetch_calls(job)
-            #     for result in results:
-            #
-            #         variant= result['variant']
-            #         fh_t.write(f'{variant}\n')
-            #
-            #         variant_synced = result['variant_synced']
-            #         fh_s.write(f'{variant_synced}\n')
-            #
-            #         record = '\t'.join([
-            #                 result['chrom'],
-            #                 str(result['pos']),
-            #                 result['id'],
-            #                 result['ref'],
-            #                 result['alt'],
-            #                 str(result['pos_synced']),
-            #                 result['ref_synced'],
-            #                 result['alt_synced'],
-            #                 result['note'],
-            #         ])
-            #         fh_p.write(f'{record}\n')
-            #
-
-            with ProcessPool(n_threads) as pool:
-                for results in pool.uimap(
-                        fetch_calls, fetch_calls_jobs(
-                            coordinates = coordinates,
-                            genome = genome,
-                            depths = depths,
-                            genders = genders,
-                            min_depth = min_depth,
-                            chrm_missing_as_homref = chrm_missing_as_homref,
-                            vcf_file = vcf_file,
-                        )):
-                    for result in results:
-
-                        variant= result['variant']
-                        fh_t.write(f'{variant}\n')
-
-                        variant_synced = result['variant_synced']
-                        fh_s.write(f'{variant_synced}\n')
-
-                        record = '\t'.join([
-                                result['chrom'],
-                                str(result['pos']),
-                                result['id'],
-                                result['ref'],
-                                result['alt'],
-                                str(result['pos_synced']),
-                                result['ref_synced'],
-                                result['alt_synced'],
-                                result['note'],
-                        ])
-                        fh_p.write(f'{record}\n')
-
-    return {
-        'truth_vcf_files' : list(task_dir.glob('*/truth.vcf')),
-        'truth_synced_vcf_files' : list(task_dir.glob('*/truth_synced.vcf')),
-        'snv_profile_files' : list(task_dir.glob('*/snv_profile.tsv')),
-    }
-
-
-def format_report(data):
-        return {
-            'chrom': coordinate.chrom,
-            'pos': coordinate.pos,
-            'id': coordinate.id,
-            'ref': coordinate.ref,
-            'alt': coordinate.alt,
-            'pos_synced': coordinate_synced.pos,
-            'ref_synced': coordinate_synced.ref,
-            'alt_synced': coordinate_synced.alt,
-            'variant': variant,
-            'variant_synced': variant_synced,
-            'note': note,
-        }
-
-
-def fetch_calls_jobs(coordinates, genome, depths, genders, min_depth, chrm_missing_as_homref, vcf_file):
-    contigs = list_contigs(vcf_file)
-
-    bag = list()
-
-    for coordinate in coordinates:
-
-        chrom = coordinate['chrom']
-
-        if chrom not in contigs:
-            continue
-
-        pos = int(coordinate['pos']),
-        id_ = coordinate['id']
-        ref = coordinate['ref']
-        alt = coordinate['alt']
-
-        if id_ == '.':
-            id_ = f'{chrom}_{pos}_{ref}_{alt}'
-
-        coordinate = Variant(
-                chrom = chrom,
-                pos = int(coordinate['pos']),
-                id_ =  id_,
-                ref = ref,
-                alt = alt,
-        )
-
-        job =  {
-                'coordinate': coordinate,
-                'vcf_file': vcf_file,
-                'seq': genome.seq(chrom),
-                'depths': depths,
-                'genders': genders,
-                'min_depth': min_depth,
-                'chrm_missing_as_homref' : chrm_missing_as_homref,
-        }
-
-        bag.append(job)
-
-        if len(bag) > JOB_SIZE:
-            yield bag
-            bag = list()
-
-    if len(bag) > 0:
-        yield bag
-
-
-def fetch_calls(jobs):
-
-    def _new_record(coordinate, coordinate_synced, variant, variant_synced, note):
-
-        if variant is None:
-            variant = coordinate.clone()
-            variant_synced = coordinate_synced.clone()
-        return {
-            'chrom': coordinate.chrom,
-            'pos': coordinate.pos,
-            'id': coordinate.id,
-            'ref': coordinate.ref,
-            'alt': coordinate.alt,
-            'pos_synced': coordinate_synced.pos,
-            'ref_synced': coordinate_synced.ref,
-            'alt_synced': coordinate_synced.alt,
-            'variant': variant,
-            'variant_synced': variant_synced,
-            'note': note,
-        }
-
-
-    bag = list()
-
-    for job in jobs:
-        coordinate = job['coordinate']
-        vcf_file = job['vcf_file']
-        seq = job['seq']
-        genders=job['genders']
-        depths=job['depths']
-        min_depth=job['min_depth']
-        chrm_missing_as_homref=job['chrm_missing_as_homref']
-
-        coordinate_expanded = coordinate.expand(seq)
-
-        candidates = fetch_variants(
-            chrom = coordinate_expanded.chrom,
-            pos = coordinate_expanded.region.start,
-            end = coordinate_expanded.region.end,
-            vcf_file = vcf_file,
-            regions_overlap = 1,
-        )
-
-        if len(candidates) == 0:
-            record = _new_record(coordinate, coordinate_expanded, None, None, 'MISSING')
-        else:
-            assert  len([ x for x in candidates if '*' in x.alts]) == 0
-
-            if len(candidates) == 0:
-                record = _new_record(coordinate, coordinate_expanded, None, None, 'COMPLEX')
-            elif len(candidates) == 1:
-                candidate = candidates[0]
-                coordinate_synced, candidate_synced = sync(coordinate, candidate, seq)
-                record  = _new_record(coordinate, coordinate_synced, candidate, candidate_synced, 'DONE')
-            else:
-                assert len(candidates) > 1
-
-                best_coordinate_synced = None
-                best_candidate = None
-                best_candidate_synced = None
-                n_match_alts = None
-
-                for candidate in candidates:
-                    coordinate_synced, candidate_synced = sync(coordinate, candidate, seq)
-
-                    n_match_alts_current = len(set(coordinate_synced.alts) & set(candidate_synced.alts))
-
-                    if n_match_alts is None:
-                        n_match_alts = n_match_alts_current
-                        best_coordinate_synced = coordinate_synced
-                        best_candidate = candidate
-                        best_candidate_synced = candidate_synced
-                    elif n_match_alts_current > n_match_alts:
-                        n_match_alts = n_match_alts_current
-                        best_coordinate_synced = coordinate_synced
-                        best_candidate = candidate
-                        best_candidate_synced = candidate_synced
-                    else:
-                        continue
-                record = _new_record(coordinate, best_coordinate_synced, best_candidate, best_candidate_synced, 'DONE')
-
-        record = fill_missing_calls(
-            record,
-            depths=depths,
-            genders = genders,
-            min_depth=min_depth,
-            chrm_missing_as_homref=
-            chrm_missing_as_homref,
-        )
-
-        bag.append(record)
-
-    return bag
-
-
-def fill_missing_calls(
-        data: dict,
-        depths: dict,
-        genders: list,
-        min_depth: int,
-        chrm_missing_as_homref: bool,    #chrM always has high coverage
-):
-
-    # 'chrom': coordinate.chrom,
-    # 'pos': coordinate.pos,
-    # 'id': coordinate.id,
-    # 'ref': coordinate.ref,
-    # 'alt': coordinate.alt,
-    # 'pos_synced': coordinate_synced.pos,
-    # 'ref_synced': coordinate_synced.ref,
-    # 'alt_synced': coordinate_synced.alt,
-    # 'variant': variant,
-    # 'variant_synced': variant_synced,
-    # 'note': note,
-
-    note = data['note']
-
-    if note == 'DONE':
-        return data
-
-    chrom = data['chrom']
-    pos = data['pos']
-    ref = data['ref']
-
-    pos_synced = data['pos_synced']
-    ref_synced = data['ref_synced']
-
-    region = GenomicRegion(chrom, pos, pos + len(ref) - 1)
-    region_synced = GenomicRegion(chrom, pos_synced, pos_synced + len(ref_synced) - 1)
-
-    # if data['id'] == 'AX-656564988':
-    #     print(note, region_synced)
-
-
-    if note == 'COMPLEX':
-        ref = False
-
-    elif note == 'MISSING':
-
-        keys = [(chrom, pos) for pos in range(region_synced.start, region_synced.end + 1)]
-
-
-        if not depths:
-            ref = False
-        elif len(keys & depths.keys()) == 0:
-            ref = False
-        elif chrm_missing_as_homref and 'm' in chrom.lower():
-            ref = True
-        else:
-            bag = list()
-            for key in keys:
-                if key not in depths:
-                    assert False, f'{key};{data}'
-
-            depth = min([depths[key] for key in keys])
-
-            if depth >= min_depth:
-                ref = True
-                note = 'DONE'
-            else:
-                ref = False
-                print(key, f'{depth} < {min_depth}')
-
-        # if data['id'] == 'AX-656564988':
-        #     print(keys, region_synced, depth)
-    else:
-        raise Exception(note)
-
-    data['note'] = note
-    data['variant'].format = 'GT'
-    data['variant_synced'].format = 'GT'
-    data['variant'].calls = create_dummy_calls(chrom,  region, ref = ref, genders = genders, x_pars = X_PARS)
-    data['variant_synced'].calls = create_dummy_calls(chrom, region_synced, ref = ref, genders = genders, x_pars = X_PARS)
-
-    return data
-
-
-def subset_samples(vcf_files, genome_file, samples, output_dir, trim_alts, n_threads):
-
-    def jobs(vcf_files, outupt_dir, samples, trim_alts):
-        for vcf_file in vcf_files:
-            yield {
-                'vcf_file': vcf_file,
-                'output_dir': output_dir,
-                'samples': samples,
-                'trim_alts': trim_alts,
-            }
-
-    def process(job):
-        vcf_file = job['vcf_file']
-        output_dir = job['output_dir']
-        samples = job['samples']
-        trim_alts = job['trim_alts']
-        if samples:
-            v = Vcf(vcf_file, output_dir) \
-                    .subset_samples(samples, ) \
-                    .keep_format(fields = ['GT'])
-        else:
-            v = Vcf(vcf_file, output_dir) \
-                    .keep_format(fields = ['GT'])
-
-        if trim_alts:
-            v = v.drop_info() \
-                    .trim_alts() \
-                    .normalize(genome_file) \
-                    .uppercase() \
-                    .exclude('ALT="."') \
-                    .index()
-        else:
-            v = v.drop_info() \
-                    .normalize(genome_file) \
-                    .uppercase() \
-                    .index()
-
-        return v.filepath
-
-    bag = []
-
-    with ProcessPool(n_threads) as pool:
-        for vcf_file in pool.uimap(
-                process,
-                jobs(vcf_files, output_dir, samples, trim_alts),
-        ):
-            bag.append(vcf_file)
-
-    return bag
-
-
-
-def load_depths(depths_file):
-
-    def process(fh):
-        bag = dict()
-        col2idx = {
-            column: idx
-            for idx, column in enumerate((next(fh)).strip().split('\t'))
-        }
-
+    header_file = tmp_base / 'header.vcf'
+    copy_vcf_header(prepared, header_file)
+
+    fixed_fill_lines = fixploidy_lines(
+        fill_lines=fill_lines,
+        header_file=header_file,
+        sample_name=prepared_name,
+        gender=gender,
+        ploidy_file=ploidy_file,
+        tmp_base=tmp_base,
+    )
+
+    body_file = tmp_base / 'truth.vcf'
+    with header_file.open('rt') as hfh, body_file.open('wt') as bfh:
+        for line in hfh:
+            bfh.write(line)
+        for line in matched_lines:
+            bfh.write(line + '\n')
+        for line in fixed_fill_lines:
+            bfh.write(line + '\n')
+
+    vcf = Vcf(body_file, tmp_base).bgzip().sort().index()
+    out_vcf = output_dir / f'{sample}.truth.vcf.bgz'
+    vcf.move_to(out_vcf)
+
+    write_tsv(out_vcf, output_dir / f'{sample}.truth.tsv.gz', tmp_base)
+
+    return sample
+
+
+def write_tsv(vcf_file, output_file, tmp_dir):
+    """bcftools query -> gzip TSV with columns: chrom pos id ref alt tgt."""
+    tsv = tmp_dir / 'truth.tsv'
+    with tsv.open('wt') as fh:
+        fh.write('chrom\tpos\tid\tref\talt\ttgt\n')
+    cmd = (''
+           f"bcftools query"
+           f"      -f '%CHROM\\t%POS\\t%ID\\t%REF\\t%ALT\\t[%TGT]\\n'"
+           f"      {vcf_file}"
+           f"      >> {tsv}"
+           '')
+    execute(cmd)
+    with tsv.open('rb') as src, gzip.open(output_file, 'wb') as dst:
+        shutil.copyfileobj(src, dst)
+    return output_file
+
+
+def prepare_sample(vcf_file, sample, genome_file, tmp_base):
+    """Extract one sample, trim unused ALTs, left-align + parsimonious normalize
+    (no multiallelic split) — mirrors the existing subset_samples chain."""
+    vcf = (
+        Vcf(vcf_file, tmp_base)
+        .subset_samples({sample})
+        .keep_format(fields=['GT'])
+        .drop_info()
+        .trim_alts()
+        .normalize(genome_file)
+        .uppercase()
+        .exclude('ALT="."')
+        .index()
+    )
+    return vcf.filepath
+
+
+def build_lookup(prepared_vcf):
+    """(chrom, pos, ref, ALT-set) -> genotype string, from the single-sample VCF."""
+    lookup = dict()
+    with gzip.open(prepared_vcf, 'rt') as fh:
         for line in fh:
-            items = line.strip().split('\t')
-            id_ = items[col2idx['chrom']]
-            chrom = items[col2idx['chrom']]
-            pos = int(items[col2idx['pos']])
-            depth = items[col2idx['depth_min']]
-
-            try:
-                depth = float(depth)
-            except ValueError:
-                depth = np.nan
-
-            key = (chrom, pos)
-
-            bag[key] = depth
-        return bag
+            if line.startswith('#'):
+                continue
+            items = line.rstrip('\n').split('\t')
+            chrom, pos, _id, ref, alt = items[0], items[1], items[2], items[3], items[4]
+            gt = items[9].split(':')[0]
+            lookup[match_key(chrom, pos, ref, alt)] = gt
+    return lookup
 
 
-    if not depths_file:
-        return bag
+def call_families(families, lookup, gender, autosomes_depths, sex_depths, min_depth):
+    """Per family: matched member(s) with the sample GT (siblings dropped), else one
+    fill record per member (placeholder diploid GT, ploidy-corrected downstream)."""
+    matched_lines = list()
+    fill_lines = list()
 
-    if is_gzip(depths_file):
-        with gzip.open(depths_file, 'rt') as fh:
-            return process(fh)
-    else:
-        with depths_file.open('rt') as fh:
-            return process(fh)
+    for members in families.values():
+        matched = [
+            (member, lookup[match_key(member['chrom'], member['pos'], member['ref'], member['alt'])])
+            for member in members
+            if match_key(member['chrom'], member['pos'], member['ref'], member['alt']) in lookup
+        ]
+
+        if matched:
+            for member, gt in matched:
+                matched_lines.append(vcf_line(member, gt))
+        else:
+            chrom = members[0]['chrom']
+            pos = members[0]['pos']
+            depth = depth_for(chrom, pos, gender, autosomes_depths, sex_depths)
+            gt = '0/0' if is_homref(depth, min_depth) else './.'
+            for member in members:
+                fill_lines.append(vcf_line(member, gt))
+
+    return matched_lines, fill_lines
+
+
+def vcf_line(member, gt):
+    return '\t'.join([
+        member['chrom'],
+        str(member['pos']),
+        member['id'],
+        member['ref'],
+        member['alt'],
+        '.', '.', '.', 'GT', gt,
+    ])
+
+
+def fixploidy_lines(fill_lines, header_file, sample_name, gender, ploidy_file, tmp_base):
+    """Apply GRCh38 gender-aware ploidy to the fill records ONLY (never to matched
+    real genotypes). Returns ploidy-corrected data lines."""
+    if not fill_lines:
+        return []
+
+    fills_file = tmp_base / 'fills.vcf'
+    with header_file.open('rt') as hfh, fills_file.open('wt') as ffh:
+        for line in hfh:
+            ffh.write(line)
+        for line in fill_lines:
+            ffh.write(line + '\n')
+
+    sex_file = tmp_base / 'sex.txt'
+    sex = 'M' if gender == 'male' else 'F'
+    sex_file.write_text(f'{sample_name}\t{sex}\n')
+
+    cmd = (''
+           f'bcftools +fixploidy {fills_file} --'
+           f'      -p {ploidy_file}'
+           f'      -s {sex_file}'
+           f'      -t GT'
+           '')
+    out = execute(cmd, pipe=True)
+    return [line for line in out if not line.startswith('#')]
+
+
+def locate_samples(vcf_files, samples):
+    """Map each target sample to the single input VCF that contains it."""
+    wanted = set(samples)
+    mapping = dict()
+    for vcf_file in vcf_files:
+        present = set(list_samples(vcf_file))
+        for sample in wanted & present:
+            mapping[sample] = vcf_file
+    missing = wanted - set(mapping)
+    if missing:
+        raise ValueError(f'target samples not found in any input vcf: {sorted(missing)}')
+    return mapping
 
 
 def load_coordinates(coordinates_file):
-    coordinates = pl.read_csv(coordinates_file, comment_prefix = '##', has_header = True, separator = '\t')
-
-    coordinates = coordinates.rename({'#CHROM': 'chrom'})
-    coordinates.columns = [x.lower() for x in coordinates.columns]
-
-    return coordinates.to_dicts()
-
-
-
-
-
-def export_coordinates(input_file, output_dir):
-    output_file = output_dir / COORDINATES_FILENAME
-    coordinates.write_csv(output_file, has_header=False, separator='\t')
-
-    return output_file
-
-def create_dummy_calls(chrom: str, region: GenomicRegion, genders: list, ref = True, x_pars = X_PARS):
-
-    if ref:
-        allele = '0'
-    else:
-        allele = '.'
-
-    if 'chrX' == chrom:
-        in_par = False
-        for par in x_pars:
-            if par.overlaps(region):
-                in_par = True
-
-        if in_par:
-            return '\t'.join([f'{allele}/{allele}' for x in genders])
-        else:
-            return '\t'.join([f'{allele}' if x == 'male' else f'{allele}/{allele}' for x in genders])
-
-    elif 'chrY' == chrom:
-        return '\t'.join([f'{allele}' if x == 'male' else f'.' for x in genders])
-
-    elif 'chrM' ==  chrom:
-        return '\t'.join([f'{allele}' for x in genders])
-    else:
-        return '\t'.join([f'{allele}/{allele}' for x in genders])
+    """Read the backbone VCF (bgzip or plain) into coordinate records."""
+    opener = gzip.open if is_gzip(coordinates_file) else open
+    rows = list()
+    with opener(coordinates_file, 'rt') as fh:
+        for line in fh:
+            if line.startswith('#'):
+                continue
+            if not line.strip():
+                continue
+            items = line.rstrip('\n').split('\t')
+            rows.append({
+                'chrom': items[0],
+                'pos': int(items[1]),
+                'id': items[2],
+                'ref': items[3].upper(),
+                'alt': items[4].upper(),
+            })
+    return rows
 
 
+def group_families(coordinates):
+    """Group coordinate records into SNP families by the exact ID string."""
+    families = OrderedDict()
+    for row in coordinates:
+        families.setdefault(row['id'], []).append(row)
+    return families
 
-def group_spanning_deletions(
-            vcf_files,
-            output_dir,
-            n_threads,
-    ):
 
-    def process(job):
-        vcf_file = job['vcf_file']
-        output_dir = job['output_dir']
-        return Vcf(vcf_file, tmp_dir = output_dir).group_spanning_deletions().filepath
+def load_autosomes_depths(depths_file):
+    """(chrom, pos) -> depth_mean, from autosomes-depth.tsv (chr1..chr22 + chrM)."""
+    depths = dict()
+    opener = gzip.open if is_gzip(depths_file) else open
+    with opener(depths_file, 'rt') as fh:
+        idx = {c: i for i, c in enumerate(next(fh).rstrip('\n').split('\t'))}
+        for line in fh:
+            items = line.rstrip('\n').split('\t')
+            key = (items[idx['chrom']], int(items[idx['pos']]))
+            depths[key] = _to_float(items[idx['depth_mean']])
+    return depths
 
-    def jobs(vcf_files, output_dir):
-        for vcf_file in vcf_files:
-            print(vcf_file)
-            yield {
-                'vcf_file': vcf_file,
-                'output_dir': output_dir,
+
+def load_sex_depths(depths_file):
+    """(chrom, pos) -> {'male': mean_male, 'female': mean_female}, from sex-depth.tsv."""
+    depths = dict()
+    opener = gzip.open if is_gzip(depths_file) else open
+    with opener(depths_file, 'rt') as fh:
+        idx = {c: i for i, c in enumerate(next(fh).rstrip('\n').split('\t'))}
+        for line in fh:
+            items = line.rstrip('\n').split('\t')
+            key = (items[idx['chrom']], int(items[idx['pos']]))
+            depths[key] = {
+                'male': _to_float(items[idx['mean_male']]),
+                'female': _to_float(items[idx['mean_female']]),
             }
+    return depths
 
 
-    with ProcessPool(n_threads) as pool:
-        for future in pool.uimap(process, jobs(vcf_files, output_dir)):
-            pass
+def depth_for(chrom, pos, sex, autosomes_depths, sex_depths):
+    """Select the depth for a site: contig class picks the table; sex picks the
+    sex-chromosome column. Missing key -> None (treated as below threshold)."""
+    pos = int(pos)
+    if chrom in AUTOSOMES or chrom in MITO:
+        return autosomes_depths.get((chrom, pos))
+    if chrom in SEX:
+        record = sex_depths.get((chrom, pos))
+        if record is None:
+            return None
+        return record['male'] if sex == 'male' else record['female']
+    return None
 
-    return [x for x in output_dir.glob('**/*.vcf.bgz')]
+
+def match_key(chrom, pos, ref, alt):
+    """Exact-match key: (chrom, pos, ref, set-of-ALT-alleles), case-insensitive."""
+    return (chrom, int(pos), ref.upper(), frozenset(a.upper() for a in alt.split(',')))
 
 
+def is_homref(depth, min_depth):
+    if depth is None:
+        return False
+    if isinstance(depth, float) and math.isnan(depth):
+        return False
+    return depth >= min_depth
+
+
+def _to_float(value):
+    value = value.strip()
+    if value == '':
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return math.nan

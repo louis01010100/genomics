@@ -89,14 +89,13 @@ def main():
         truth.export_snv_truth(
             coordinates_file=Path(args.coordinates_file),
             vcf_files=_load_files(args.vcfs_file, args.vcf_files),
-            depths_file=_new_path(args.depths_file),
-            samples_file=_new_path(args.samples_file),
-            genders_file=_new_path(args.genders_file),
+            autosomes_depths_file=Path(args.autosomes_depths_file),
+            sex_depths_file=Path(args.sex_depths_file),
+            samples_file=Path(args.samples_file),
+            genders_file=Path(args.genders_file),
             genome_file=Path(args.genome_file),
-            min_depth=args.min_depth,
-            chrm_missing_as_homref=args.chrm_missing_as_homref,
-            merge_vcf=args.merge_vcf,
             output_dir=Path(args.output_dir),
+            min_depth=args.min_depth,
             n_threads=args.n_threads,
         )
     else:
@@ -190,16 +189,13 @@ def _config_gvcf_depth_parser(parser):
 def _config_snv_truth_parser(parser):
     parser.add_argument('--coordinates-file', required=True)
     parser.add_argument('--vcfs-file', required=False)
-    parser.add_argument('--samples-file', required=False)
-    parser.add_argument('--genders-file', required=False)
-    parser.add_argument('--depths-file', required=False)
+    parser.add_argument('--samples-file', required=True)
+    parser.add_argument('--genders-file', required=True)
+    parser.add_argument('--autosomes-depths-file', required=True)
+    parser.add_argument('--sex-depths-file', required=True)
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--min-depth', type=int, default=2)
-    parser.add_argument('--chrm-missing-as-homref',
-                        action='store_true',
-                        default=False)
-    parser.add_argument('--merge-vcf', action='store_true', default=False)
     parser.add_argument('--n-threads', type=int, default=1)
     parser.add_argument('vcf_files', nargs='*')
 
