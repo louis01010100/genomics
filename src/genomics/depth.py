@@ -7,7 +7,7 @@ from collections import OrderedDict
 from pathos.multiprocessing import ProcessPool
 import multiprocess.context as ctx
 
-from .utils import load_dict, init_logging, log_start, log_info
+from .utils import load_dict, init_logging, log_start, log_info, execute
 
 
 ctx._force_start_method('spawn')
@@ -97,7 +97,23 @@ def export_cram_depths(
                         write_sex(s_fh, c, payload[1], payload[2], payload[3], payload[4])
                     write_idx += 1
 
+    log_info('Compress and index')
+    bgzip_index(autosomes_file)
+    bgzip_index(sex_file)
+
     log_info('Done')
+
+
+def bgzip_index(tsv_file: Path) -> Path:
+    """bgzip-compress a (chrom, pos) depth TSV and build its tabix index so
+    downstream analysis can random-search by position instead of loading the whole
+    table. Columns are 1=chrom, 2=pos (single position, so begin==end) with one
+    header line. Returns the .bgz path; the plain TSV is removed."""
+    bgz_file = tsv_file.parent / f'{tsv_file.name}.bgz'
+    execute(f'bgzip -f -c {tsv_file} > {bgz_file}')
+    tsv_file.unlink()
+    execute(f'tabix -f -s 1 -b 2 -e 2 -S 1 {bgz_file}')
+    return bgz_file
 
 
 def cram_depth_jobs(sample2cram, sample2gender, genome_file, contigs):

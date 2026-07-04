@@ -11,6 +11,7 @@ samples (2 male, 2 female) exercise every edge case in a few thousand positions:
   * chrUn_...decoy -> excluded from both outputs
 """
 import csv
+import gzip
 import os
 import shutil
 import subprocess
@@ -30,8 +31,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+AUTOSOMES_TSV = 'autosomes-depth.tsv.bgz'
+SEX_TSV = 'sex-depth.tsv.bgz'
+
+
 def _read_tsv(path):
-    with path.open() as fh:
+    with gzip.open(path, 'rt') as fh:
         return list(csv.DictReader(fh, delimiter='\t'))
 
 
@@ -69,20 +74,24 @@ def test_output_is_thread_invariant(tmp_path):
     # regardless of --n-threads.
     single = _run_cli(tmp_path / 'n1', n_threads=1)
     multi = _run_cli(tmp_path / 'n4', n_threads=4)
-    for name in ('autosomes-depth.tsv', 'sex-depth.tsv'):
-        assert (single / name).read_bytes() == (multi / name).read_bytes()
+    # Compare decompressed content: BGZF framing can differ, the data must not.
+    for name in (AUTOSOMES_TSV, SEX_TSV):
+        assert gzip.decompress((single / name).read_bytes()) \
+            == gzip.decompress((multi / name).read_bytes())
 
 
 def test_only_expected_files(outputs):
     assert sorted(p.name for p in outputs.iterdir()) == [
-        'autosomes-depth.tsv', 'depth.log', 'sex-depth.tsv',
+        'autosomes-depth.tsv.bgz', 'autosomes-depth.tsv.bgz.tbi',
+        'depth.log',
+        'sex-depth.tsv.bgz', 'sex-depth.tsv.bgz.tbi',
     ]
     # no per-sample per-position depth artifacts left behind
     assert not (outputs / 'depths').exists()
 
 
 def test_autosomes_schema_and_contigs(outputs):
-    rows = _read_tsv(outputs / 'autosomes-depth.tsv')
+    rows = _read_tsv(outputs / AUTOSOMES_TSV)
     assert list(rows[0].keys()) == ['chrom', 'pos', 'depth_mean', 'n_samples']
     by_contig = {}
     for r in rows:
@@ -95,7 +104,7 @@ def test_autosomes_schema_and_contigs(outputs):
 
 
 def test_sex_schema_and_contigs(outputs):
-    rows = _read_tsv(outputs / 'sex-depth.tsv')
+    rows = _read_tsv(outputs / SEX_TSV)
     assert list(rows[0].keys()) == [
         'chrom', 'pos', 'mean_male', 'n_male', 'mean_female', 'n_female',
     ]
@@ -105,8 +114,8 @@ def test_sex_schema_and_contigs(outputs):
 
 
 def test_chrM_only_in_autosomes(outputs):
-    auto = {r['chrom'] for r in _read_tsv(outputs / 'autosomes-depth.tsv')}
-    sex = {r['chrom'] for r in _read_tsv(outputs / 'sex-depth.tsv')}
+    auto = {r['chrom'] for r in _read_tsv(outputs / AUTOSOMES_TSV)}
+    sex = {r['chrom'] for r in _read_tsv(outputs / SEX_TSV)}
     assert 'chrM' in auto
     assert 'chrM' not in sex
     # sex chromosomes never leak into the autosomes file
@@ -114,7 +123,7 @@ def test_chrM_only_in_autosomes(outputs):
 
 
 def test_chrX_female_diploid_gt_male_haploid(outputs):
-    rows = [r for r in _read_tsv(outputs / 'sex-depth.tsv') if r['chrom'] == 'chrX']
+    rows = [r for r in _read_tsv(outputs / SEX_TSV) if r['chrom'] == 'chrX']
     male = sum(float(r['mean_male']) for r in rows) / len(rows)
     female = sum(float(r['mean_female']) for r in rows) / len(rows)
     # non-PAR chrX: females carry two copies, males one
@@ -122,7 +131,7 @@ def test_chrX_female_diploid_gt_male_haploid(outputs):
 
 
 def test_chrY_male_present_female_near_zero(outputs):
-    rows = [r for r in _read_tsv(outputs / 'sex-depth.tsv') if r['chrom'] == 'chrY']
+    rows = [r for r in _read_tsv(outputs / SEX_TSV) if r['chrom'] == 'chrY']
     male = sum(float(r['mean_male']) for r in rows) / len(rows)
     female = sum(float(r['mean_female']) for r in rows) / len(rows)
     zero_female = sum(1 for r in rows if float(r['mean_female']) == 0.0)
@@ -132,6 +141,6 @@ def test_chrY_male_present_female_near_zero(outputs):
 
 
 def test_decoy_contig_excluded(outputs):
-    for name in ('autosomes-depth.tsv', 'sex-depth.tsv'):
-        text = (outputs / name).read_text()
+    for name in (AUTOSOMES_TSV, SEX_TSV):
+        text = gzip.open(outputs / name, 'rt').read()
         assert 'decoy' not in text

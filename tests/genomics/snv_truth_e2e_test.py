@@ -29,8 +29,8 @@ SRC = HERE.parents[1] / 'src'
 
 pytestmark = pytest.mark.skipif(
     shutil.which('bcftools') is None or shutil.which('samtools') is None
-    or shutil.which('bgzip') is None,
-    reason='bcftools/samtools/bgzip not on PATH',
+    or shutil.which('bgzip') is None or shutil.which('tabix') is None,
+    reason='bcftools/samtools/bgzip/tabix not on PATH',
 )
 
 INPUT_VCF = (
@@ -83,6 +83,17 @@ GENDERS = 'sample\tgender\nMALE1\tmale\nFEM1\tfemale\n'
 SAMPLES = 'sample\nMALE1\nFEM1\n'
 
 
+def _index_depths(tsv_file: Path, text: str):
+    """bgzip + tabix-index a (chrom, pos) depth table like `cram-depth` produces."""
+    tsv_file.write_text(text)
+    bgz_file = Path(f'{tsv_file}.bgz')
+    subprocess.run(f'bgzip -f -c {tsv_file} > {bgz_file}', shell=True, check=True)
+    subprocess.run(
+        ['tabix', '-f', '-s', '1', '-b', '2', '-e', '2', '-S', '1', str(bgz_file)],
+        check=True,
+    )
+
+
 def _build_fixture(d: Path):
     d.mkdir(parents=True, exist_ok=True)
     # all-'A' mini reference so every SNV REF ('A') matches the reference
@@ -96,8 +107,8 @@ def _build_fixture(d: Path):
     subprocess.run(['samtools', 'faidx', str(genome)], check=True)
 
     (d / 'backbone.vcf').write_text(BACKBONE_VCF)
-    (d / 'autosomes-depth.tsv').write_text(AUTOSOMES_DEPTH)
-    (d / 'sex-depth.tsv').write_text(SEX_DEPTH)
+    _index_depths(d / 'autosomes-depth.tsv', AUTOSOMES_DEPTH)
+    _index_depths(d / 'sex-depth.tsv', SEX_DEPTH)
     (d / 'genders.tsv').write_text(GENDERS)
     (d / 'samples.tsv').write_text(SAMPLES)
 
@@ -120,8 +131,8 @@ def _run(work: Path):
          '--coordinates-file', str(fixture / 'backbone.vcf'),
          '--samples-file', str(fixture / 'samples.tsv'),
          '--genders-file', str(fixture / 'genders.tsv'),
-         '--autosomes-depths-file', str(fixture / 'autosomes-depth.tsv'),
-         '--sex-depths-file', str(fixture / 'sex-depth.tsv'),
+         '--autosomes-depths-file', str(fixture / 'autosomes-depth.tsv.bgz'),
+         '--sex-depths-file', str(fixture / 'sex-depth.tsv.bgz'),
          '--genome-file', str(genome),
          '--output-dir', str(out),
          str(fixture / 'input.vcf.bgz')],

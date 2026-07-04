@@ -74,20 +74,26 @@ def export_snv_truth(
     info['n-threads'] = n_threads
     log_start(banner='SNV Truth Creation', info=info)
 
-    log_info('load samples, genders, depths')
-    samples = load_list(samples_file)
-    sample2gender = load_dict(genders_file)
-    autosomes_depths = load_autosomes_depths(autosomes_depths_file)
-    sex_depths = load_sex_depths(sex_depths_file)
+    tmp_dir = output_dir / 'tmp'
+    tmp_dir.mkdir(parents=True, exist_ok=True)
 
     log_info('load backbone coordinates')
     coordinates = load_coordinates(coordinates_file)
     families = group_families(coordinates)
 
+    log_info('load samples, genders, depths')
+    samples = load_list(samples_file)
+    sample2gender = load_dict(genders_file)
+    # Only the backbone positions are ever looked up, so random-search the
+    # tabix-indexed depth tables for those alone instead of loading the whole
+    # (genome-sized) tables into memory and pickling them into every worker.
+    coord_keys = sorted({(row['chrom'], row['pos']) for row in coordinates})
+    autosomes_depths = load_autosomes_depths(autosomes_depths_file, coord_keys, tmp_dir)
+    sex_depths = load_sex_depths(sex_depths_file, coord_keys, tmp_dir)
+
     log_info('locate samples in input vcfs')
     sample2vcf = locate_samples(vcf_files, samples)
 
-    tmp_dir = output_dir / 'tmp'
     ploidy_file = output_dir / 'grch38.ploidy'
     ploidy_file.write_text(GRCH38_PLOIDY)
 
@@ -336,32 +342,39 @@ def group_families(coordinates):
     return families
 
 
-def load_autosomes_depths(depths_file):
-    """(chrom, pos) -> depth_mean, from autosomes-depth.tsv (chr1..chr22 + chrM)."""
+def _fetch_depths(depths_file, coord_keys, tmp_dir):
+    """Stream only the backbone positions out of a tabix-indexed depth table.
+
+    Writes the coordinates to a 1bp-region BED and runs `tabix -R`, so the amount
+    read is bounded by the panel size rather than the genome. Yields the split
+    columns of each matching row (tabix output carries no header)."""
+    regions_file = tmp_dir / f'{depths_file.name}.regions.bed'
+    with regions_file.open('wt') as fh:
+        for chrom, pos in coord_keys:
+            fh.write(f'{chrom}\t{pos - 1}\t{pos}\n')
+    for line in execute(f'tabix -R {regions_file} {depths_file}', pipe=True):
+        yield line.split('\t')
+
+
+def load_autosomes_depths(depths_file, coord_keys, tmp_dir):
+    """(chrom, pos) -> depth_mean for the backbone coordinates only, fetched via
+    tabix. Producer schema (autosomes-depth): chrom, pos, depth_mean, n_samples."""
     depths = dict()
-    opener = gzip.open if is_gzip(depths_file) else open
-    with opener(depths_file, 'rt') as fh:
-        idx = {c: i for i, c in enumerate(next(fh).rstrip('\n').split('\t'))}
-        for line in fh:
-            items = line.rstrip('\n').split('\t')
-            key = (items[idx['chrom']], int(items[idx['pos']]))
-            depths[key] = _to_float(items[idx['depth_mean']])
+    for items in _fetch_depths(depths_file, coord_keys, tmp_dir):
+        depths[(items[0], int(items[1]))] = _to_float(items[2])
     return depths
 
 
-def load_sex_depths(depths_file):
-    """(chrom, pos) -> {'male': mean_male, 'female': mean_female}, from sex-depth.tsv."""
+def load_sex_depths(depths_file, coord_keys, tmp_dir):
+    """(chrom, pos) -> {'male', 'female'} for the backbone coordinates only, fetched
+    via tabix. Producer schema (sex-depth): chrom, pos, mean_male, n_male,
+    mean_female, n_female."""
     depths = dict()
-    opener = gzip.open if is_gzip(depths_file) else open
-    with opener(depths_file, 'rt') as fh:
-        idx = {c: i for i, c in enumerate(next(fh).rstrip('\n').split('\t'))}
-        for line in fh:
-            items = line.rstrip('\n').split('\t')
-            key = (items[idx['chrom']], int(items[idx['pos']]))
-            depths[key] = {
-                'male': _to_float(items[idx['mean_male']]),
-                'female': _to_float(items[idx['mean_female']]),
-            }
+    for items in _fetch_depths(depths_file, coord_keys, tmp_dir):
+        depths[(items[0], int(items[1]))] = {
+            'male': _to_float(items[2]),
+            'female': _to_float(items[4]),
+        }
     return depths
 
 

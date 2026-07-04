@@ -8,9 +8,28 @@ homref/nocall decision.
 import gzip
 import math
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
+
+requires_tabix = pytest.mark.skipif(
+    shutil.which('bgzip') is None or shutil.which('tabix') is None,
+    reason='bgzip/tabix not on PATH',
+)
+
+
+def _index_depths(tsv_file: Path, text: str) -> Path:
+    """Write a depth TSV then bgzip + tabix-index it exactly like the producer,
+    returning the .bgz path the loaders random-search."""
+    tsv_file.write_text(text)
+    bgz_file = Path(f'{tsv_file}.bgz')
+    subprocess.run(f'bgzip -f -c {tsv_file} > {bgz_file}', shell=True, check=True)
+    subprocess.run(
+        ['tabix', '-f', '-s', '1', '-b', '2', '-e', '2', '-S', '1', str(bgz_file)],
+        check=True,
+    )
+    return bgz_file
 
 from genomics.truth import (
     load_coordinates,
@@ -71,26 +90,28 @@ def test_group_families_by_id_first_seen_order(tmp_path):
     assert len(fams['AX-9']) == 1
 
 
+@requires_tabix
 def test_load_autosomes_depths(tmp_path):
-    f = tmp_path / 'autosomes-depth.tsv'
-    f.write_text(
+    f = _index_depths(
+        tmp_path / 'autosomes-depth.tsv',
         'chrom\tpos\tdepth_mean\tn_samples\n'
         'chr1\t100\t12.5\t4\n'
         'chrM\t5\t900.0\t4\n'
     )
-    d = load_autosomes_depths(f)
+    d = load_autosomes_depths(f, [('chr1', 100), ('chrM', 5)], tmp_path)
     assert d[('chr1', 100)] == pytest.approx(12.5)
     assert d[('chrM', 5)] == pytest.approx(900.0)
 
 
+@requires_tabix
 def test_load_sex_depths_blank_maps_to_none(tmp_path):
-    f = tmp_path / 'sex-depth.tsv'
-    f.write_text(
+    f = _index_depths(
+        tmp_path / 'sex-depth.tsv',
         'chrom\tpos\tmean_male\tn_male\tmean_female\tn_female\n'
         'chrX\t100\t5.0\t2\t11.0\t2\n'
         'chrY\t200\t8.0\t2\t\t0\n'   # no females in cohort -> blank
     )
-    d = load_sex_depths(f)
+    d = load_sex_depths(f, [('chrX', 100), ('chrY', 200)], tmp_path)
     assert d[('chrX', 100)]['male'] == pytest.approx(5.0)
     assert d[('chrX', 100)]['female'] == pytest.approx(11.0)
     assert d[('chrY', 200)]['male'] == pytest.approx(8.0)
@@ -99,27 +120,30 @@ def test_load_sex_depths_blank_maps_to_none(tmp_path):
 
 @pytest.fixture
 def depth_tables(tmp_path):
-    a = tmp_path / 'autosomes-depth.tsv'
-    a.write_text(
+    a = _index_depths(
+        tmp_path / 'autosomes-depth.tsv',
         'chrom\tpos\tdepth_mean\tn_samples\n'
         'chr1\t100\t12.5\t4\n'
         'chrM\t5\t900.0\t4\n'
     )
-    s = tmp_path / 'sex-depth.tsv'
-    s.write_text(
+    s = _index_depths(
+        tmp_path / 'sex-depth.tsv',
         'chrom\tpos\tmean_male\tn_male\tmean_female\tn_female\n'
         'chrX\t100\t5.0\t2\t11.0\t2\n'
         'chrY\t200\t8.0\t2\t\t0\n'
     )
-    return load_autosomes_depths(a), load_sex_depths(s)
+    keys = [('chr1', 100), ('chrM', 5), ('chrX', 100), ('chrY', 200)]
+    return load_autosomes_depths(a, keys, tmp_path), load_sex_depths(s, keys, tmp_path)
 
 
+@requires_tabix
 def test_depth_for_autosome_and_mito(depth_tables):
     auto, sex = depth_tables
     assert depth_for('chr1', 100, 'male', auto, sex) == pytest.approx(12.5)
     assert depth_for('chrM', 5, 'female', auto, sex) == pytest.approx(900.0)
 
 
+@requires_tabix
 def test_depth_for_sex_by_gender(depth_tables):
     auto, sex = depth_tables
     assert depth_for('chrX', 100, 'male', auto, sex) == pytest.approx(5.0)
@@ -129,6 +153,7 @@ def test_depth_for_sex_by_gender(depth_tables):
     assert depth_for('chrY', 200, 'female', auto, sex) is None
 
 
+@requires_tabix
 def test_depth_for_missing_key_is_none(depth_tables):
     auto, sex = depth_tables
     assert depth_for('chr1', 999, 'male', auto, sex) is None
