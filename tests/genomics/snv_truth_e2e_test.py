@@ -40,6 +40,7 @@ INPUT_VCF = (
     '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n'
     '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tMALE1\tFEM1\n'
     'chr1\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\t0/0\n'      # MALE1 het A/C -> matches F1 member C
+    'chr1\t150\t.\tA\tG\t.\t.\t.\tGT\t0/0\t./.\n'      # MALE1 obs homref; FEM1 obs nocall (AX-9)
     'chr1\t300\t.\tA\tG,T\t.\t.\t.\tGT\t1/2\t0/0\n'    # MALE1 G/T -> matches multiallelic member
 )
 
@@ -210,7 +211,8 @@ def test_female_fill_one_record_per_member(outputs):
     assert all(r['tgt'] == 'A/A' for r in fam2)
 
     by = {r['id']: r for r in rows}
-    assert by['AX-9']['tgt'] == 'A/A'
+    # observed ./. at chr1:150 is honored as nocall, overriding the depth homref
+    assert by['AX-9']['tgt'] == './.'
     assert by['AX-10']['tgt'] == './.'
     assert by['AX-50']['tgt'] == './.'
     assert by['AX-40']['tgt'] == 'A'                     # chrM haploid homref

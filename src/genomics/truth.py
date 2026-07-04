@@ -144,11 +144,12 @@ def process_sample(job):
     prepared = prepare_sample(vcf_file, sample, genome_file, tmp_base)
     prepared_name = list_samples(prepared)[0]
 
-    lookup = build_lookup(prepared)
+    lookup, nonvariant = build_lookup(prepared)
 
     matched_lines, fill_lines = call_families(
         families=families,
         lookup=lookup,
+        nonvariant=nonvariant,
         gender=gender,
         autosomes_depths=autosomes_depths,
         sex_depths=sex_depths,
@@ -204,7 +205,8 @@ def write_tsv(vcf_file, output_file, tmp_dir):
 
 def prepare_sample(vcf_file, sample, genome_file, tmp_base):
     """Extract one sample, trim unused ALTs, left-align + parsimonious normalize
-    (no multiallelic split) — mirrors the existing subset_samples chain."""
+    (no multiallelic split). Records with no called ALT (observed 0/0 / ./.) are
+    kept — with ALT='.' — so their genotype can be honored during filling."""
     vcf = (
         Vcf(vcf_file, tmp_base)
         .subset_samples({sample})
@@ -213,15 +215,17 @@ def prepare_sample(vcf_file, sample, genome_file, tmp_base):
         .trim_alts()
         .normalize(genome_file)
         .uppercase()
-        .exclude('ALT="."')
         .index()
     )
     return vcf.filepath
 
 
 def build_lookup(prepared_vcf):
-    """(chrom, pos, ref, ALT-set) -> genotype string, from the single-sample VCF."""
+    """From the single-sample VCF: the exact-match variant lookup
+    (chrom, pos, ref, ALT-set) -> GT, plus a non-variant lookup (chrom, pos) ->
+    'homref'|'nocall' built from the retained ALT='.' records (observed 0/0 / ./.)."""
     lookup = dict()
+    nonvariant = dict()
     with gzip.open(prepared_vcf, 'rt') as fh:
         for line in fh:
             if line.startswith('#'):
@@ -229,13 +233,19 @@ def build_lookup(prepared_vcf):
             items = line.rstrip('\n').split('\t')
             chrom, pos, _id, ref, alt = items[0], items[1], items[2], items[3], items[4]
             gt = items[9].split(':')[0]
-            lookup[match_key(chrom, pos, ref, alt)] = gt
-    return lookup
+            if alt == '.':
+                alleles = gt.replace('|', '/').split('/')
+                nonvariant[(chrom, int(pos))] = 'nocall' if '.' in alleles else 'homref'
+            else:
+                lookup[match_key(chrom, pos, ref, alt)] = gt
+    return lookup, nonvariant
 
 
-def call_families(families, lookup, gender, autosomes_depths, sex_depths, min_depth):
+def call_families(families, lookup, nonvariant, gender, autosomes_depths, sex_depths, min_depth):
     """Per family: matched member(s) with the sample GT (siblings dropped), else one
-    fill record per member (placeholder diploid GT, ploidy-corrected downstream)."""
+    fill record per member. A fill honors the sample's observed 0/0 / ./. at the
+    member's position; only a site with no sample record falls back to the depth
+    decision. All fill genotypes are ploidy-corrected downstream."""
     matched_lines = list()
     fill_lines = list()
 
@@ -251,11 +261,17 @@ def call_families(families, lookup, gender, autosomes_depths, sex_depths, min_de
                 matched_lines.append(vcf_line(member, gt))
         else:
             # Members of a family can sit at different (chrom, pos) after axiom
-            # backbone re-normalizes/left-aligns the expanded records, so the
-            # homref/nocall decision is looked up per member, not once per family.
+            # backbone re-normalizes/left-aligns the expanded records, so each
+            # member is resolved at its own position.
             for member in members:
-                depth = depth_for(member['chrom'], member['pos'], gender, autosomes_depths, sex_depths)
-                gt = '0/0' if is_homref(depth, min_depth) else './.'
+                observed = nonvariant.get((member['chrom'], member['pos']))
+                if observed == 'homref':
+                    gt = '0/0'
+                elif observed == 'nocall':
+                    gt = './.'
+                else:
+                    depth = depth_for(member['chrom'], member['pos'], gender, autosomes_depths, sex_depths)
+                    gt = '0/0' if is_homref(depth, min_depth) else './.'
                 fill_lines.append(vcf_line(member, gt))
 
     return matched_lines, fill_lines

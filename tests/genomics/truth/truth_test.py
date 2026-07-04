@@ -187,11 +187,52 @@ def test_fill_depth_is_per_member_position():
         ]
     }
     auto = {('chr1', 100): 10.0, ('chr1', 500): 1.0}   # pos 100 homref, pos 500 nocall
-    matched, fills = call_families(families, {}, 'male', auto, {}, min_depth=2)
+    matched, fills = call_families(families, {}, {}, 'male', auto, {}, min_depth=2)
     assert matched == []
     gt = {line.split('\t')[1]: line.split('\t')[9] for line in fills}
     assert gt['100'] == '0/0'
     assert gt['500'] == './.'
+
+
+def test_build_lookup_splits_variant_and_nonvariant(tmp_path):
+    """build_lookup returns the exact-match variant lookup plus a non-variant lookup
+    (chrom,pos) -> homref|nocall built from the retained ALT='.' records."""
+    from genomics.truth import build_lookup
+    vcf = tmp_path / 'prepared.vcf.bgz'
+    with gzip.open(vcf, 'wt') as fh:
+        fh.write(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+            'chr1\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\n'    # variant
+            'chr1\t200\t.\tA\t.\t.\t.\t.\tGT\t0/0\n'    # observed homref
+            'chr1\t300\t.\tA\t.\t.\t.\t.\tGT\t./.\n'    # observed nocall
+        )
+    lookup, nonvariant = build_lookup(vcf)
+    assert lookup[match_key('chr1', 100, 'A', 'C')] == '0/1'
+    # non-variant records do not pollute the variant lookup
+    assert match_key('chr1', 200, 'A', '.') not in lookup
+    assert nonvariant[('chr1', 200)] == 'homref'
+    assert nonvariant[('chr1', 300)] == 'nocall'
+
+
+def test_call_families_honors_observed_calls():
+    """An explicitly observed 0/0 / ./. is honored over the depth-based fill; only a
+    site with no sample record falls back to depth."""
+    from genomics.truth import call_families
+    families = {
+        'AX-1': [{'chrom': 'chr1', 'pos': 100, 'id': 'AX-1', 'ref': 'A', 'alt': 'C'}],
+        'AX-2': [{'chrom': 'chr1', 'pos': 200, 'id': 'AX-2', 'ref': 'A', 'alt': 'G'}],
+        'AX-3': [{'chrom': 'chr1', 'pos': 300, 'id': 'AX-3', 'ref': 'A', 'alt': 'T'}],
+    }
+    nonvariant = {('chr1', 100): 'homref', ('chr1', 200): 'nocall'}
+    # depth deliberately DISAGREES with the observed calls
+    auto = {('chr1', 100): 1.0, ('chr1', 200): 10.0}   # pos 300 absent
+    matched, fills = call_families(families, {}, nonvariant, 'male', auto, {}, min_depth=2)
+    assert matched == []
+    gt = {line.split('\t')[1]: line.split('\t')[9] for line in fills}
+    assert gt['100'] == '0/0'   # observed homref honored despite low depth
+    assert gt['200'] == './.'   # observed nocall honored despite high depth
+    assert gt['300'] == './.'   # no observation, no depth -> nocall fill
 
 
 HEADER = (
