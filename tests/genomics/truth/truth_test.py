@@ -150,6 +150,25 @@ def test_is_homref_threshold():
     assert is_homref(math.nan, 2) is False
 
 
+def test_fill_depth_is_per_member_position():
+    """Members of one family can sit at different positions (axiom backbone
+    re-normalizes/left-aligns expanded records), so the homref/nocall decision must
+    be looked up per member, not once for the whole family."""
+    from genomics.truth import call_families
+    families = {
+        'AX-1,AX-2': [
+            {'chrom': 'chr1', 'pos': 100, 'id': 'AX-1,AX-2', 'ref': 'A', 'alt': 'C'},
+            {'chrom': 'chr1', 'pos': 500, 'id': 'AX-1,AX-2', 'ref': 'A', 'alt': 'G'},
+        ]
+    }
+    auto = {('chr1', 100): 10.0, ('chr1', 500): 1.0}   # pos 100 homref, pos 500 nocall
+    matched, fills = call_families(families, {}, 'male', auto, {}, min_depth=2)
+    assert matched == []
+    gt = {line.split('\t')[1]: line.split('\t')[9] for line in fills}
+    assert gt['100'] == '0/0'
+    assert gt['500'] == './.'
+
+
 HEADER = (
     '##fileformat=VCFv4.2\n'
     '##contig=<ID=chr1,length=250000000>\n'

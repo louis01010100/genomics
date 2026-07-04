@@ -244,11 +244,12 @@ def call_families(families, lookup, gender, autosomes_depths, sex_depths, min_de
             for member, gt in matched:
                 matched_lines.append(vcf_line(member, gt))
         else:
-            chrom = members[0]['chrom']
-            pos = members[0]['pos']
-            depth = depth_for(chrom, pos, gender, autosomes_depths, sex_depths)
-            gt = '0/0' if is_homref(depth, min_depth) else './.'
+            # Members of a family can sit at different (chrom, pos) after axiom
+            # backbone re-normalizes/left-aligns the expanded records, so the
+            # homref/nocall decision is looked up per member, not once per family.
             for member in members:
+                depth = depth_for(member['chrom'], member['pos'], gender, autosomes_depths, sex_depths)
+                gt = '0/0' if is_homref(depth, min_depth) else './.'
                 fill_lines.append(vcf_line(member, gt))
 
     return matched_lines, fill_lines
