@@ -895,7 +895,6 @@ class Vcf():
             shutil.move(old_filepath, filepath)
 
             vcf = Vcf(filepath, self.tmp_dir, new_tmp=False)
-            vcf.index()
             samplename = vcf.samples.pop()
             bag[samplename] = str(vcf.filepath)
 
@@ -1508,6 +1507,7 @@ def concat(
     tmp_dir: Path,
     n_threads: int = 1,
     preprocess: bool = True,
+    allow_overlaps: bool = True,
 ) -> Vcf:
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1535,7 +1535,7 @@ def concat(
 
     cmd = (''
            f'bcftools concat'
-           f'      --allow-overlaps'
+           f'      {"--allow-overlaps" if allow_overlaps else ""}'
            f'      --file-list {vcfs_file}'
            f'      -O z'
            f'      -o {tmp_filepath}'

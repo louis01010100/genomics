@@ -335,8 +335,12 @@ def process_sample(job):
     tmp_base = job['tmp_dir'] / sample
     tmp_base.mkdir(parents=True, exist_ok=True)
 
+    # Pieces are one-per-chromosome and disjoint, so a plain concat (no
+    # --allow-overlaps) suffices and needs no per-piece index; the trailing
+    # sort inside concat() still coordinate-sorts the combined result.
     combined = concat(
-        job['pieces'], tmp_base / 'combined.vcf.bgz', tmp_base, preprocess=False).filepath
+        job['pieces'], tmp_base / 'combined.vcf.bgz', tmp_base,
+        preprocess=False, allow_overlaps=False).filepath
     prepared = prepare_sample(combined, sample, genome_file, tmp_base)
     lookup, nonvariant = build_lookup(prepared)
 

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from genomics.gregion import GenomicRegion
 from genomics.variant import Variant
-from genomics.vcf import Vcf, filter_variants, split_rtrim
+from genomics.vcf import Vcf, concat, filter_variants, split_rtrim
 import polars as pl
 
 
@@ -604,3 +604,67 @@ def test_to_variants(tmp_path):
 
     variants = Vcf(vcf_file, tmp_path).to_variants(key='coordinate')
     assert len(variants.keys()) == 3
+
+
+def _write_bgz(path, text, tmp_path):
+    plain = tmp_path / path
+    plain.write_text(text)
+    return Vcf(plain, tmp_path).bgzip()   # -> <name>.vcf.bgz, unindexed
+
+
+def test_concat_allow_overlaps_false_needs_no_index(tmp_path):
+    # Per-sample truth pieces are one-per-chromosome and disjoint, so concat can
+    # run without --allow-overlaps and without indexing the inputs.
+    a = _write_bgz(
+        'a.vcf',
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t100\t.\tA\tG\t.\t.\t.\tGT\t0/1\n',
+        tmp_path,
+    )
+    b = _write_bgz(
+        'b.vcf',
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr2>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr2\t200\t.\tC\tT\t.\t.\t.\tGT\t1/1\n',
+        tmp_path,
+    )
+    # inputs are intentionally NOT indexed
+    assert not (a.filepath.parent / f'{a.filepath.name}.csi').exists()
+    assert not (b.filepath.parent / f'{b.filepath.name}.csi').exists()
+
+    out = tmp_path / 'combined.vcf.bgz'
+    result = concat([a.filepath, b.filepath], out, tmp_path / 'work',
+                    preprocess=False, allow_overlaps=False)
+
+    import subprocess
+    rows = subprocess.run(
+        ['bcftools', 'query', '-f', '%CHROM\t%POS\n', str(result.filepath)],
+        capture_output=True, text=True, check=True).stdout.split()
+    assert 'chr1' in rows and 'chr2' in rows
+    assert '100' in rows and '200' in rows
+
+
+def test_split_by_samples_pieces_are_not_indexed(tmp_path):
+    src = _write_bgz(
+        'multi.vcf',
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\n'
+        'chr1\t100\t.\tA\tG\t.\t.\t.\tGT\t0/1\t1/1\n',
+        tmp_path,
+    ).index()
+
+    pieces = Vcf(src.filepath, tmp_path).split_by_samples()
+
+    assert set(pieces) == {'S1', 'S2'}
+    for path in pieces.values():
+        p = Path(path)
+        assert p.exists()
+        assert not (p.parent / f'{p.name}.csi').exists()
+        assert not (p.parent / f'{p.name}.tbi').exists()
