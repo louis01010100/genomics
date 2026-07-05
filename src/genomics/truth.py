@@ -320,7 +320,10 @@ def extract_and_split(job):
     work.mkdir(parents=True, exist_ok=True)
     if not targets_present:
         return chrom, {}
-    subset = Vcf(job['path'], work).subset_samples(set(targets_present))
+    # Drop INFO before splitting: bcftools +split copies INFO into every
+    # per-sample file (~88x write amplification), and the truth pipeline discards
+    # INFO downstream, so stripping it here is output-neutral and much cheaper.
+    subset = Vcf(job['path'], work).subset_samples(set(targets_present)).drop_info()
     pieces = subset.split_by_samples()   # {sample: piece_path_str}
     return chrom, {sample: Path(path) for sample, path in pieces.items()}
 

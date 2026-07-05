@@ -42,6 +42,7 @@ from genomics.truth import (
     fixploidy_lines,
     load_ploidy,
     _require_single_chrom,
+    extract_and_split,
 )
 
 BACKBONE = (
@@ -345,3 +346,38 @@ def test_require_single_chrom(tmp_path):
     assert _require_single_chrom(build('one', ['chr1'])) == 'chr1'
     with pytest.raises(ValueError):
         _require_single_chrom(build('two', ['chr1', 'chr2']))
+
+
+@requires_tabix
+def test_extract_and_split_strips_info(tmp_path):
+    # INFO is discarded downstream, so pieces produced by extract_and_split must
+    # carry no INFO (avoids ~88x INFO write-amplification in bcftools +split).
+    vcf_text = (
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##INFO=<ID=AC,Number=A,Type=Integer,Description="allele count">\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\n'
+        'chr1\t100\t.\tA\tG\t.\t.\tAC=3\tGT\t0/1\t1/1\n'
+    )
+    plain = tmp_path / 'in.vcf'
+    plain.write_text(vcf_text)
+    subprocess.run(f'bgzip -f {plain}', shell=True, check=True)
+    bgz = tmp_path / 'in.vcf.bgz'
+    (tmp_path / 'in.vcf.gz').rename(bgz)
+    subprocess.run(['bcftools', 'index', '-f', str(bgz)], check=True)
+
+    chrom, pieces = extract_and_split({
+        'path': bgz,
+        'chrom': 'chr1',
+        'targets_present': ['S1', 'S2'],
+        'tmp_dir': tmp_path / 'work',
+    })
+
+    assert chrom == 'chr1'
+    assert set(pieces) == {'S1', 'S2'}
+    for path in pieces.values():
+        info = subprocess.run(
+            ['bcftools', 'query', '-f', '%INFO\n', str(path)],
+            capture_output=True, text=True, check=True).stdout.split()
+        assert info and all(x == '.' for x in info), f'INFO not stripped: {info}'
