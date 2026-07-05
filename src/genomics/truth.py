@@ -10,6 +10,7 @@ depth- and gender-aware homozygous-reference or no-call genotype.
 import gzip
 import math
 from collections import OrderedDict
+from importlib import resources
 from pathlib import Path
 
 from pathos.multiprocessing import ProcessPool
@@ -30,19 +31,18 @@ AUTOSOMES = {f'chr{i}' for i in range(1, 23)}
 MITO = {'chrM', 'chrMT'}
 SEX = {'chrX', 'chrY'}
 
-# chr-prefixed GRCh38 ploidy for `bcftools +fixploidy` (CHROM FROM TO SEX PLOIDY).
-# Unlisted regions default to ploidy 2, so autosomes and the PAR stay diploid. Male
-# non-PAR chrX / chrY (MSY) and chrM are haploid; female chrY is absent (ploidy 0).
-GRCH38_PLOIDY = (
-    'chrX 2781480 155701382 M 1\n'
-    'chrX 156030896 156040895 M 1\n'
-    'chrY 1 10000 M 1\n'
-    'chrY 2781480 56887902 M 1\n'
-    'chrY 57217416 57227415 M 1\n'
-    'chrY 1 57227415 F 0\n'
-    'chrM 1 16569 M 1\n'
-    'chrM 1 16569 F 1\n'
-)
+PLOIDY_ASSEMBLIES = ('hg38', 'hg19')
+
+
+def load_ploidy(assembly):
+    """Read the chr-prefixed `bcftools +fixploidy` ploidy table (CHROM FROM TO SEX
+    PLOIDY) for a genome assembly from package resources. Unlisted regions default
+    to ploidy 2, so autosomes and the PAR stay diploid; only male non-PAR chrX /
+    chrY (MSY) and chrM are haploid, and female chrY is absent (ploidy 0)."""
+    if assembly not in PLOIDY_ASSEMBLIES:
+        raise ValueError(
+            f'unsupported assembly {assembly!r}; expected one of {PLOIDY_ASSEMBLIES}')
+    return (resources.files('genomics') / 'resources' / f'ploidy-{assembly}.txt').read_text()
 
 def export_snv_truth(
     coordinates_file: Path,
@@ -55,6 +55,7 @@ def export_snv_truth(
     output_dir: Path,
     n_threads: int = 1,
     min_depth: int = 2,
+    assembly: str = 'hg38',
     prod: bool = True,
 ):
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -70,6 +71,7 @@ def export_snv_truth(
     info['genome-file'] = genome_file
     info['output-dir'] = output_dir
     info['min-depth'] = min_depth
+    info['assembly'] = assembly
     info['n-threads'] = n_threads
     log_start(banner='SNV Truth Creation', info=info)
 
@@ -93,8 +95,8 @@ def export_snv_truth(
     log_info('locate samples in input vcfs')
     sample2vcf = locate_samples(vcf_files, samples)
 
-    ploidy_file = output_dir / 'grch38.ploidy'
-    ploidy_file.write_text(GRCH38_PLOIDY)
+    ploidy_file = output_dir / f'{assembly}.ploidy'
+    ploidy_file.write_text(load_ploidy(assembly))
 
     log_info('build per-sample truth')
     jobs = [

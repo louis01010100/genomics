@@ -40,7 +40,7 @@ from genomics.truth import (
     match_key,
     is_homref,
     fixploidy_lines,
-    GRCH38_PLOIDY,
+    load_ploidy,
 )
 
 BACKBONE = (
@@ -249,11 +249,11 @@ HEADER = (
 @pytest.mark.skipif(shutil.which('bcftools') is None, reason='bcftools not on PATH')
 def test_fixploidy_grch38_gender_aware(tmp_path):
     """Fill records get GRCh38 gender-aware ploidy at real non-PAR coordinates via
-    the module's GRCH38_PLOIDY: male sex-chrom/chrM haploid, female chrY nocall."""
+    the hg38 ploidy resource: male sex-chrom/chrM haploid, female chrY nocall."""
     header_file = tmp_path / 'header.vcf'
     header_file.write_text(HEADER)
     ploidy_file = tmp_path / 'grch38.ploidy'
-    ploidy_file.write_text(GRCH38_PLOIDY)
+    ploidy_file.write_text(load_ploidy('hg38'))
 
     fills = [
         'chr1\t100\ta\tA\tC\t.\t.\t.\tGT\t0/0',       # autosome -> diploid
@@ -275,3 +275,32 @@ def test_fixploidy_grch38_gender_aware(tmp_path):
     assert [gt(male, i) for i in range(5)] == ['0/0', '0', '0', '0', '.']
     # female: chrX diploid (default 2), chrY absent (ploidy 0 -> nocall), chrM haploid
     assert [gt(female, i) for i in range(5)] == ['0/0', '0/0', '.', '0', '.']
+
+
+def test_load_ploidy_assemblies_and_validation():
+    for assembly in ('hg38', 'hg19'):
+        text = load_ploidy(assembly)
+        assert 'chrX' in text and 'chrY' in text and 'chrM' in text
+    # hg38 vs hg19 use different non-PAR chrX coordinates
+    assert '2781480' in load_ploidy('hg38')
+    assert '2699521' in load_ploidy('hg19')
+    with pytest.raises(ValueError):
+        load_ploidy('grch38')
+
+
+@pytest.mark.skipif(shutil.which('bcftools') is None, reason='bcftools not on PATH')
+def test_fixploidy_hg19_par_vs_nonpar(tmp_path):
+    """The hg19 ploidy resource carves out hg19 PAR: a male PAR1 site stays diploid
+    while a non-PAR chrX site collapses to haploid (validates the hg19 coordinates)."""
+    header_file = tmp_path / 'header.vcf'
+    header_file.write_text(HEADER)
+    ploidy_file = tmp_path / 'hg19.ploidy'
+    ploidy_file.write_text(load_ploidy('hg19'))
+
+    fills = [
+        'chrX\t1000000\ta\tA\tC\t.\t.\t.\tGT\t0/0',   # hg19 PAR1 (60001-2699520) -> diploid
+        'chrX\t3000000\tb\tA\tC\t.\t.\t.\tGT\t0/0',   # hg19 non-PAR -> haploid
+    ]
+    (tmp_path / 'm').mkdir()
+    male = fixploidy_lines(fills, header_file, 'S1', 'male', ploidy_file, tmp_path / 'm')
+    assert [line.split('\t')[9] for line in male] == ['0/0', '0']

@@ -96,6 +96,7 @@ def main():
             genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
             min_depth=args.min_depth,
+            assembly=args.assembly,
             n_threads=args.n_threads,
         )
     else:
@@ -196,6 +197,7 @@ def _config_snv_truth_parser(parser):
     parser.add_argument('--genome-file', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--min-depth', type=int, default=2)
+    parser.add_argument('--assembly', choices=['hg38', 'hg19'], default='hg38')
     parser.add_argument('--n-threads', type=int, default=1)
     parser.add_argument('vcf_files', nargs='*')
 
