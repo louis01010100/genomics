@@ -43,7 +43,8 @@ INPUT_VCF = (
     'chr1\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\t0/0\n'      # MALE1 het A/C -> matches F1 member C
     'chr1\t150\t.\tA\tG\t.\t.\t.\tGT\t0/0\t./.\n'      # MALE1 obs homref; FEM1 obs nocall (AX-9)
     'chr1\t300\t.\tA\tG,T\t.\t.\t.\tGT\t1/2\t0/0\n'    # MALE1 G/T -> matches multiallelic member
-)
+    'chrM\t10\t.\tA\tG\t.\t.\t.\tGT\t0/1\t0/1\n'       # non-backbone chrM record (keeps the
+)                                                      # per-chrom chrM input non-empty)
 
 BACKBONE_VCF = (
     '##fileformat=VCFv4.2\n'
@@ -143,7 +144,8 @@ def _run(work: Path):
     fixture = work / 'fixture'
     genome = _build_fixture(fixture)
     out = work / 'out'
-    _run_snv_truth(fixture, genome, out, [fixture / 'input.vcf.bgz'])
+    # inputs must be one chromosome per file
+    _run_snv_truth(fixture, genome, out, _split_input_by_chrom(fixture))
     return out
 
 
@@ -263,40 +265,58 @@ def test_truth_vcf_sorted_and_indexed(outputs):
     assert positions == sorted(positions, key=lambda x: (x[0], x[1]))
 
 
-def test_by_chromosome_split_equivalence(tmp_path):
-    # A sample's calls split across per-chromosome VCFs must yield the same combined
-    # truth as the equivalent single multi-sample VCF (AC1). Also exercises the
-    # (sample x chrom) parallel path with n_threads > sample count (AC3).
+def test_determinism_input_order_and_threads(tmp_path):
+    # Same per-chromosome inputs in different order and thread counts -> byte-identical
+    # output (AC5). n_threads > sample count also exercises per-sample parallelism (AC4).
     fixture = tmp_path / 'fixture'
     genome = _build_fixture(fixture)
-
-    single = tmp_path / 'single'
-    _run_snv_truth(fixture, genome, single, [fixture / 'input.vcf.bgz'], n_threads=1)
-
     split_vcfs = _split_input_by_chrom(fixture)
-    split = tmp_path / 'split'
-    _run_snv_truth(fixture, genome, split, list(reversed(split_vcfs)), n_threads=8)
 
-    single_tsv = gzip.open(single / 'truth.tsv.gz', 'rt').read()
-    split_tsv = gzip.open(split / 'truth.tsv.gz', 'rt').read()
-    assert split_tsv == single_tsv
+    a = tmp_path / 'a'
+    _run_snv_truth(fixture, genome, a, split_vcfs, n_threads=1)
+    b = tmp_path / 'b'
+    _run_snv_truth(fixture, genome, b, list(reversed(split_vcfs)), n_threads=8)
 
+    assert gzip.open(a / 'truth.tsv.gz', 'rt').read() == gzip.open(b / 'truth.tsv.gz', 'rt').read()
     for sample in ('MALE1', 'FEM1'):
-        assert (split / f'{sample}.truth.vcf.bgz').exists()
-        assert (split / f'{sample}.truth.vcf.bgz.csi').exists()
+        assert (b / f'{sample}.truth.vcf.bgz').exists()
+        assert (b / f'{sample}.truth.vcf.bgz.csi').exists()
+
+
+def test_extract_once_per_input(tmp_path):
+    # Each input (chromosome) is extracted exactly once: one extraction dir per input
+    # file, not one per (sample, chromosome) (AC1).
+    fixture = tmp_path / 'fixture'
+    genome = _build_fixture(fixture)
+    split_vcfs = _split_input_by_chrom(fixture)   # two inputs: chr1, chrM
+    out = tmp_path / 'out'
+    _run_snv_truth(fixture, genome, out, split_vcfs)
+    chrom_dirs = sorted(p.name for p in (out / 'tmp' / 'extract').iterdir() if p.is_dir())
+    assert chrom_dirs == ['chr1', 'chrM']         # one per input, not 4 (per sample x chrom)
+
+
+def test_multichromosome_input_fails(tmp_path):
+    # An input spanning more than one chromosome is rejected up front, no output (AC2).
+    fixture = tmp_path / 'fixture'
+    genome = _build_fixture(fixture)   # builds the indexed multi-chrom input.vcf.bgz
+    out = tmp_path / 'out'
+    result = _run_snv_truth(fixture, genome, out, [fixture / 'input.vcf.bgz'], check=False)
+    assert result.returncode != 0
+    assert 'exactly one chromosome' in (result.stderr + result.stdout)
+    assert not (out / 'truth.tsv.gz').exists()
 
 
 def test_unindexed_input_fails(tmp_path):
-    # An input lacking an index aborts with an actionable error, before any output
-    # is produced (AC4).
+    # An input lacking an index aborts with an actionable error, before any output.
     fixture = tmp_path / 'fixture'
     genome = _build_fixture(fixture)
+    split_vcfs = _split_input_by_chrom(fixture)
 
     noidx = fixture / 'noidx.vcf.bgz'
-    shutil.copy(fixture / 'input.vcf.bgz', noidx)   # copy WITHOUT its .csi index
+    shutil.copy(split_vcfs[0], noidx)   # copy a per-chrom input WITHOUT its index
 
     out = tmp_path / 'out'
-    result = _run_snv_truth(fixture, genome, out, [noidx], check=False)
+    result = _run_snv_truth(fixture, genome, out, [noidx, split_vcfs[1]], check=False)
     assert result.returncode != 0
     assert 'not indexed' in (result.stderr + result.stdout)
     assert not (out / 'truth.tsv.gz').exists()
@@ -310,7 +330,7 @@ def test_unindexed_depth_table_fails(tmp_path):
     (fixture / 'autosomes-depth.tsv.bgz.tbi').unlink()   # drop the tabix index
 
     out = tmp_path / 'out'
-    result = _run_snv_truth(fixture, genome, out, [fixture / 'input.vcf.bgz'], check=False)
+    result = _run_snv_truth(fixture, genome, out, _split_input_by_chrom(fixture), check=False)
     assert result.returncode != 0
     assert 'not indexed' in (result.stderr + result.stdout)
     assert not (out / 'truth.tsv.gz').exists()

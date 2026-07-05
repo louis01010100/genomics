@@ -41,6 +41,7 @@ from genomics.truth import (
     is_homref,
     fixploidy_lines,
     load_ploidy,
+    _require_single_chrom,
 )
 
 BACKBONE = (
@@ -322,3 +323,25 @@ def test_fixploidy_hg19_par_vs_nonpar(tmp_path):
     (tmp_path / 'm').mkdir()
     male = fixploidy_lines(fills, header_file, 'S1', 'male', ploidy_file, tmp_path / 'm')
     assert [line.split('\t')[9] for line in male] == ['0/0', '0']
+
+
+@requires_tabix
+@pytest.mark.skipif(shutil.which('bcftools') is None, reason='bcftools not on PATH')
+def test_require_single_chrom(tmp_path):
+    """An input VCF must contain exactly one chromosome; multi-contig -> error."""
+    def build(name, contigs):
+        header = '##fileformat=VCFv4.2\n'
+        for c in contigs:
+            header += f'##contig=<ID={c},length=1000000>\n'
+        header += '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        body = ''.join(f'{c}\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\n' for c in contigs)
+        plain = tmp_path / f'{name}.vcf'
+        plain.write_text(header + body)
+        bgz = tmp_path / f'{name}.vcf.bgz'
+        subprocess.run(f'bgzip -c {plain} > {bgz}', shell=True, check=True)
+        subprocess.run(['bcftools', 'index', '-f', str(bgz)], check=True)
+        return bgz
+
+    assert _require_single_chrom(build('one', ['chr1'])) == 'chr1'
+    with pytest.raises(ValueError):
+        _require_single_chrom(build('two', ['chr1', 'chr2']))

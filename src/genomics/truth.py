@@ -7,11 +7,11 @@ form a SNP family: if one member matches the sample it is emitted with the sampl
 genotype and its siblings are dropped; if none matches, every member is emitted with a
 depth- and gender-aware homozygous-reference or no-call genotype.
 
-Input VCFs (bgzip-compressed and indexed) may be split by chromosome — a sample's
-calls spread across several per-chromosome files — or be whole-genome multi-sample, or
-any mix. Work is partitioned into (sample x chromosome) units run in parallel, then the
-per-chromosome truth slices are assembled into each sample's truth VCF and one combined
-`truth.tsv.gz`.
+Each input VCF (bgzip-compressed and indexed) must contain exactly one chromosome. Each
+chromosome is decoded once — the target samples present are extracted in a single pass
+and split per sample — then each sample's per-chromosome pieces are concatenated into
+one per-sample VCF and processed in parallel across samples into that sample's truth VCF
+and one combined `truth.tsv.gz`.
 """
 import gzip
 import math
@@ -86,75 +86,95 @@ def export_snv_truth(
     log_info('load backbone coordinates')
     coordinates = load_coordinates(coordinates_file)
     families = group_families(coordinates)
-    # Chromosomes to process come from the backbone; families are single-chromosome
-    # (left-alignment never crosses contigs) and a cross-contig family is an error.
-    families_by_chrom = partition_families_by_chrom(families)
-    chroms = list(families_by_chrom.keys())
 
     log_info('load samples and genders')
     samples = load_list(samples_file)
     sample2gender = load_dict(genders_file)
 
-    log_info('validate and inventory input vcfs')
-    # Inputs must be bgzip-compressed AND indexed (fail fast; never mutate them).
-    inventory = build_inventory(vcf_files)
-    sources = resolve_sources(inventory, samples, chroms)
+    log_info('validate inputs (one chromosome per vcf, bgzip + indexed)')
+    # Each input VCF must hold exactly one chromosome; fail fast and never mutate.
+    inputs = build_inputs(vcf_files)
+    target = set(samples)
+    all_input_samples = set().union(*(inp['samples'] for inp in inputs)) if inputs else set()
+    absent = [s for s in samples if s not in all_input_samples]
+    if absent:
+        raise ValueError(f'target samples not found in any input vcf: {sorted(absent)}')
 
     # Depth is consulted only for the few sites that fall through to the depth
     # decision, so don't pre-fetch the panel; validate the tables up front (present +
-    # tabix-indexed, no region reads) and let each unit query on demand.
+    # tabix-indexed, no region reads) and let each sample query on demand.
     _require_indexed_depth(autosomes_depths_file)
     _require_indexed_depth(sex_depths_file)
 
     ploidy_file = output_dir / f'{assembly}.ploidy'
     ploidy_file.write_text(load_ploidy(assembly))
 
-    # One header per sample (from the reference .fai) shared across that sample's
-    # per-chromosome slices, so slices concat/sort cleanly and a no-source
-    # chromosome can still be emitted with a valid header.
+    # One header per sample (from the reference .fai) — every contig + GT + the
+    # sample column — used to wrap that sample's truth records.
     headers = {}
     for sample in samples:
         sample_dir = tmp_dir / sample
         sample_dir.mkdir(parents=True, exist_ok=True)
         headers[sample] = build_sample_header(sample, genome_file, sample_dir / 'header.vcf')
 
-    log_info('build (sample x chrom) truth')
-    jobs = [
+    # Extract each chromosome ONCE for all target samples present, then split per
+    # sample. Each input file is decoded exactly once (independent of sample count).
+    log_info('extract each chromosome once and split by sample')
+    extract_dir = tmp_dir / 'extract'
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    extract_jobs = [
+        {
+            'path': inp['path'],
+            'chrom': inp['chrom'],
+            'targets_present': sorted(target & inp['samples']),
+            'tmp_dir': extract_dir,
+        }
+        for inp in inputs
+    ]
+    sample_pieces = {sample: {} for sample in samples}
+    if n_threads > 1:
+        with ProcessPool(n_threads) as pool:
+            for chrom, pieces in pool.uimap(extract_and_split, extract_jobs):
+                for sample, piece in pieces.items():
+                    sample_pieces[sample][chrom] = piece
+    else:
+        for job in extract_jobs:
+            chrom, pieces = extract_and_split(job)
+            for sample, piece in pieces.items():
+                sample_pieces[sample][chrom] = piece
+
+    # Combine each sample's per-chromosome pieces and build its truth, in parallel
+    # across samples.
+    log_info('build per-sample truth (parallel over samples)')
+    process_jobs = [
         {
             'sample': sample,
-            'chrom': chrom,
-            'sources': sorted(sources[(sample, chrom)], key=str),
-            'families_chrom': families_by_chrom[chrom],
+            'pieces': [sample_pieces[sample][c] for c in sorted(sample_pieces[sample])],
             'gender': sample2gender[sample],
+            'families': families,
             'genome_file': genome_file,
             'autosomes_depths_file': autosomes_depths_file,
             'sex_depths_file': sex_depths_file,
             'min_depth': min_depth,
             'ploidy_file': ploidy_file,
             'header_file': headers[sample],
+            'output_dir': output_dir,
             'tmp_dir': tmp_dir,
         }
         for sample in samples
-        for chrom in chroms
     ]
-
     unit_out = {}
     if n_threads > 1:
         with ProcessPool(n_threads) as pool:
-            for sample, chrom, vcf_path, body_path in pool.uimap(process_unit, jobs):
-                unit_out[(sample, chrom)] = (Path(vcf_path), Path(body_path))
+            for sample, body_path in pool.uimap(process_sample, process_jobs):
+                unit_out[sample] = Path(body_path)
     else:
-        for job in jobs:
-            sample, chrom, vcf_path, body_path = process_unit(job)
-            unit_out[(sample, chrom)] = (Path(vcf_path), Path(body_path))
-
-    log_info('assemble per-sample truth vcfs')
-    for sample in samples:
-        parts = [unit_out[(sample, chrom)][0] for chrom in chroms]
-        concat(parts, output_dir / f'{sample}.truth.vcf.bgz', tmp_dir / sample, preprocess=False)
+        for job in process_jobs:
+            sample, body_path = process_sample(job)
+            unit_out[sample] = Path(body_path)
 
     log_info('combine truth into one tsv')
-    combine_tsv(samples, chroms, unit_out, output_dir / 'truth.tsv.gz')
+    combine_tsv(samples, unit_out, output_dir / 'truth.tsv.gz')
 
     log_info('done')
 
@@ -187,49 +207,30 @@ def _vcf_contigs(vcf_file):
     return {line.split('\t')[0] for line in out if line.strip()}
 
 
-def build_inventory(vcf_files):
-    """For each input VCF (validated bgz+indexed), its sample set and contig set."""
-    inventory = []
+def _require_single_chrom(vcf_file):
+    """Return the single chromosome an input VCF contains; error if it spans more
+    than one (or none). Enforces the one-chromosome-per-input contract from the
+    index alone (no record scan)."""
+    contigs = sorted(_vcf_contigs(vcf_file))
+    if len(contigs) != 1:
+        raise ValueError(
+            f'input vcf must contain exactly one chromosome: {vcf_file} spans {contigs}')
+    return contigs[0]
+
+
+def build_inputs(vcf_files):
+    """Validate each input (bgzip + indexed, exactly one chromosome) and record its
+    chromosome and sample set. Inputs are read-only and never mutated."""
+    inputs = []
     for vcf_file in sorted(vcf_files, key=str):
         _require_indexed_bgz(vcf_file)
-        inventory.append({
+        chrom = _require_single_chrom(vcf_file)
+        inputs.append({
             'path': Path(vcf_file),
+            'chrom': chrom,
             'samples': set(list_samples(vcf_file)),
-            'contigs': _vcf_contigs(vcf_file),
         })
-    return inventory
-
-
-def resolve_sources(inventory, samples, chroms):
-    """Map each (sample, chrom) to the input paths holding both. A target sample in
-    no input is an error; an empty source list for a (sample, chrom) is legal (that
-    unit emits depth-based fills)."""
-    absent = [s for s in samples if not any(s in e['samples'] for e in inventory)]
-    if absent:
-        raise ValueError(f'target samples not found in any input vcf: {sorted(absent)}')
-    sources = {}
-    for sample in samples:
-        for chrom in chroms:
-            sources[(sample, chrom)] = [
-                e['path'] for e in inventory
-                if sample in e['samples'] and chrom in e['contigs']
-            ]
-    return sources
-
-
-def partition_families_by_chrom(families):
-    """Split families by chromosome, preserving backbone (first-seen) order. A family
-    whose members span more than one contig is an error (never silently truncated)."""
-    by_chrom = OrderedDict()
-    for family_id, members in families.items():
-        member_chroms = {member['chrom'] for member in members}
-        if len(member_chroms) != 1:
-            raise ValueError(
-                f'backbone family {family_id!r} spans multiple contigs: '
-                f'{sorted(member_chroms)}')
-        chrom = next(iter(member_chroms))
-        by_chrom.setdefault(chrom, OrderedDict())[family_id] = members
-    return by_chrom
+    return inputs
 
 
 def _require_indexed_depth(depths_file):
@@ -309,41 +310,38 @@ def build_sample_header(sample, genome_file, out_file):
     return out_file
 
 
-def _extract_slice(src, sample, chrom, out_file):
-    """bcftools view of one sample restricted to one chromosome -> bgz slice."""
-    execute(f'bcftools view -r {chrom} -s {sample} -O z -o {out_file} {src}')
-    return out_file
-
-
-def process_unit(job):
-    """Build the truth for one (sample, chromosome): region-extract the sample's
-    slice for the chromosome (concat if several sources; none -> all depth fills),
-    run the unchanged prepare -> match -> fill -> ploidy pipeline over that
-    chromosome's families, and emit a per-chromosome truth VCF slice + TSV body."""
-    sample = job['sample']
+def extract_and_split(job):
+    """Extract the target samples present in one chromosome's input in a single pass
+    and split them into per-sample pieces. The input file is decoded exactly once.
+    Returns (chrom, {sample: piece_path})."""
     chrom = job['chrom']
-    sources = job['sources']
+    targets_present = job['targets_present']
+    work = job['tmp_dir'] / chrom
+    work.mkdir(parents=True, exist_ok=True)
+    if not targets_present:
+        return chrom, {}
+    subset = Vcf(job['path'], work).subset_samples(set(targets_present))
+    pieces = subset.split_by_samples()   # {sample: piece_path_str}
+    return chrom, {sample: Path(path) for sample, path in pieces.items()}
+
+
+def process_sample(job):
+    """Build the truth for one sample: concatenate its per-chromosome pieces into one
+    whole-genome VCF, then run the unchanged prepare -> match -> fill -> ploidy
+    pipeline over the full backbone. Emits {sample}.truth.vcf.bgz + a TSV body."""
+    sample = job['sample']
     genome_file = job['genome_file']
 
-    unit_tmp = job['tmp_dir'] / sample / chrom
-    unit_tmp.mkdir(parents=True, exist_ok=True)
+    tmp_base = job['tmp_dir'] / sample
+    tmp_base.mkdir(parents=True, exist_ok=True)
 
-    if sources:
-        if len(sources) == 1:
-            slice_vcf = _extract_slice(sources[0], sample, chrom, unit_tmp / 'slice.vcf.bgz')
-        else:
-            parts = [
-                _extract_slice(src, sample, chrom, unit_tmp / f'part{i}.vcf.bgz')
-                for i, src in enumerate(sources)
-            ]
-            slice_vcf = concat(parts, unit_tmp / 'slice.vcf.bgz', unit_tmp).filepath
-        prepared = prepare_sample(slice_vcf, sample, genome_file, unit_tmp)
-        lookup, nonvariant = build_lookup(prepared)
-    else:
-        lookup, nonvariant = {}, {}
+    combined = concat(
+        job['pieces'], tmp_base / 'combined.vcf.bgz', tmp_base, preprocess=False).filepath
+    prepared = prepare_sample(combined, sample, genome_file, tmp_base)
+    lookup, nonvariant = build_lookup(prepared)
 
     matched_lines, fill_lines = call_families(
-        families=job['families_chrom'],
+        families=job['families'],
         lookup=lookup,
         nonvariant=nonvariant,
         gender=job['gender'],
@@ -357,10 +355,10 @@ def process_unit(job):
         sample_name=sample,
         gender=job['gender'],
         ploidy_file=job['ploidy_file'],
-        tmp_base=unit_tmp,
+        tmp_base=tmp_base,
     )
 
-    truth_txt = unit_tmp / 'truth.vcf'
+    truth_txt = tmp_base / 'truth.vcf'
     with open(job['header_file'], 'rt') as hfh, truth_txt.open('wt') as bfh:
         for line in hfh:
             bfh.write(line)
@@ -369,11 +367,14 @@ def process_unit(job):
         for line in fixed_fill_lines:
             bfh.write(line + '\n')
 
-    vcf = Vcf(truth_txt, unit_tmp).bgzip().sort().index()
-    body_file = unit_tmp / 'body.tsv'
-    write_body_tsv(vcf.filepath, body_file)
+    vcf = Vcf(truth_txt, tmp_base).bgzip().sort().index()
+    out_vcf = job['output_dir'] / f'{sample}.truth.vcf.bgz'
+    vcf.move_to(out_vcf)
 
-    return sample, chrom, str(vcf.filepath), str(body_file)
+    body_file = tmp_base / 'body.tsv'
+    write_body_tsv(out_vcf, body_file)
+
+    return sample, str(body_file)
 
 
 def write_body_tsv(vcf_file, output_file):
@@ -389,19 +390,18 @@ def write_body_tsv(vcf_file, output_file):
     return output_file
 
 
-def combine_tsv(samples, chroms, unit_out, output_file):
-    """Concatenate the per-(sample, chrom) TSV bodies into one gzip TSV, writing the
-    header once and prepending each row with its sample_name. Samples are emitted in
-    sorted order and chromosomes in backbone contig order, so the combined output is
-    deterministic regardless of processing order."""
+def combine_tsv(samples, unit_out, output_file):
+    """Concatenate the per-sample TSV bodies into one gzip TSV, writing the header
+    once and prepending each row with its sample_name. Samples are emitted in sorted
+    order; rows within a sample are already contig+position sorted (the per-sample
+    truth VCF is sorted), so the combined output is deterministic."""
     with gzip.open(output_file, 'wt') as out:
         out.write('sample_name\tchrom\tpos\tid\tref\talt\ttgt\n')
         for sample in sorted(samples):
-            for chrom in chroms:
-                body_file = unit_out[(sample, chrom)][1]
-                with body_file.open('rt') as fh:
-                    for line in fh:
-                        out.write(f'{sample}\t{line}')
+            body_file = unit_out[sample]
+            with body_file.open('rt') as fh:
+                for line in fh:
+                    out.write(f'{sample}\t{line}')
     return output_file
 
 
