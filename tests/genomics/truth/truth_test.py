@@ -34,9 +34,9 @@ def _index_depths(tsv_file: Path, text: str) -> Path:
 from genomics.truth import (
     load_coordinates,
     group_families,
-    load_autosomes_depths,
-    load_sex_depths,
+    DepthProvider,
     depth_for,
+    call_families,
     match_key,
     is_homref,
     fixploidy_lines,
@@ -90,36 +90,26 @@ def test_group_families_by_id_first_seen_order(tmp_path):
     assert len(fams['AX-9']) == 1
 
 
-@requires_tabix
-def test_load_autosomes_depths(tmp_path):
-    f = _index_depths(
-        tmp_path / 'autosomes-depth.tsv',
-        'chrom\tpos\tdepth_mean\tn_samples\n'
-        'chr1\t100\t12.5\t4\n'
-        'chrM\t5\t900.0\t4\n'
-    )
-    d = load_autosomes_depths(f, [('chr1', 100), ('chrM', 5)], tmp_path)
-    assert d[('chr1', 100)] == pytest.approx(12.5)
-    assert d[('chrM', 5)] == pytest.approx(900.0)
+class _CountingProvider:
+    """Duck-typed depth provider for pure call_families logic tests: serves depths
+    from in-memory dicts and counts how many times it is consulted."""
 
+    def __init__(self, autosomes=None, sex=None):
+        self._autosomes = autosomes or {}
+        self._sex = sex or {}
+        self.n_queries = 0
 
-@requires_tabix
-def test_load_sex_depths_blank_maps_to_none(tmp_path):
-    f = _index_depths(
-        tmp_path / 'sex-depth.tsv',
-        'chrom\tpos\tmean_male\tn_male\tmean_female\tn_female\n'
-        'chrX\t100\t5.0\t2\t11.0\t2\n'
-        'chrY\t200\t8.0\t2\t\t0\n'   # no females in cohort -> blank
-    )
-    d = load_sex_depths(f, [('chrX', 100), ('chrY', 200)], tmp_path)
-    assert d[('chrX', 100)]['male'] == pytest.approx(5.0)
-    assert d[('chrX', 100)]['female'] == pytest.approx(11.0)
-    assert d[('chrY', 200)]['male'] == pytest.approx(8.0)
-    assert d[('chrY', 200)]['female'] is None
+    def autosomes(self, chrom, pos):
+        self.n_queries += 1
+        return self._autosomes.get((chrom, pos))
+
+    def sex(self, chrom, pos):
+        self.n_queries += 1
+        return self._sex.get((chrom, pos))
 
 
 @pytest.fixture
-def depth_tables(tmp_path):
+def depth_provider(tmp_path):
     a = _index_depths(
         tmp_path / 'autosomes-depth.tsv',
         'chrom\tpos\tdepth_mean\tn_samples\n'
@@ -132,32 +122,58 @@ def depth_tables(tmp_path):
         'chrX\t100\t5.0\t2\t11.0\t2\n'
         'chrY\t200\t8.0\t2\t\t0\n'
     )
-    keys = [('chr1', 100), ('chrM', 5), ('chrX', 100), ('chrY', 200)]
-    return load_autosomes_depths(a, keys, tmp_path), load_sex_depths(s, keys, tmp_path)
+    return DepthProvider(a, s)
 
 
 @requires_tabix
-def test_depth_for_autosome_and_mito(depth_tables):
-    auto, sex = depth_tables
-    assert depth_for('chr1', 100, 'male', auto, sex) == pytest.approx(12.5)
-    assert depth_for('chrM', 5, 'female', auto, sex) == pytest.approx(900.0)
+def test_depth_provider_autosomes_memoized(depth_provider):
+    assert depth_provider.autosomes('chr1', 100) == pytest.approx(12.5)
+    assert depth_provider.autosomes('chrM', 5) == pytest.approx(900.0)
+    assert depth_provider.autosomes('chr1', 999) is None   # missing -> None
+    # one tabix query per distinct position; repeats served from cache
+    assert depth_provider.n_queries == 3
+    depth_provider.autosomes('chr1', 100)
+    depth_provider.autosomes('chr1', 999)
+    assert depth_provider.n_queries == 3
 
 
 @requires_tabix
-def test_depth_for_sex_by_gender(depth_tables):
-    auto, sex = depth_tables
-    assert depth_for('chrX', 100, 'male', auto, sex) == pytest.approx(5.0)
-    assert depth_for('chrX', 100, 'female', auto, sex) == pytest.approx(11.0)
-    assert depth_for('chrY', 200, 'male', auto, sex) == pytest.approx(8.0)
-    # blank female column -> None (below threshold -> nocall)
-    assert depth_for('chrY', 200, 'female', auto, sex) is None
+def test_depth_provider_sex(depth_provider):
+    rec = depth_provider.sex('chrX', 100)
+    assert rec['male'] == pytest.approx(5.0) and rec['female'] == pytest.approx(11.0)
+    # blank female column -> None
+    rec = depth_provider.sex('chrY', 200)
+    assert rec['male'] == pytest.approx(8.0) and rec['female'] is None
+    # missing position -> None record
+    assert depth_provider.sex('chrX', 999) is None
 
 
 @requires_tabix
-def test_depth_for_missing_key_is_none(depth_tables):
-    auto, sex = depth_tables
-    assert depth_for('chr1', 999, 'male', auto, sex) is None
-    assert depth_for('chrX', 999, 'female', auto, sex) is None
+def test_depth_for_dispatch_by_contig_and_gender(depth_provider):
+    assert depth_for('chr1', 100, 'male', depth_provider) == pytest.approx(12.5)
+    assert depth_for('chrM', 5, 'female', depth_provider) == pytest.approx(900.0)
+    assert depth_for('chrX', 100, 'male', depth_provider) == pytest.approx(5.0)
+    assert depth_for('chrX', 100, 'female', depth_provider) == pytest.approx(11.0)
+    assert depth_for('chrY', 200, 'female', depth_provider) is None   # blank female
+    assert depth_for('chr1', 999, 'male', depth_provider) is None     # missing
+    assert depth_for('chrX', 999, 'female', depth_provider) is None
+
+
+def test_call_families_no_depth_query_when_matched_or_observed():
+    """A matched family and an observed 0/0 fill must not consult depth — depth is
+    fetched only when a site truly needs it to infer the genotype."""
+    families = {
+        'M': [{'chrom': 'chr1', 'pos': 100, 'id': 'M', 'ref': 'A', 'alt': 'C'}],
+        'O': [{'chrom': 'chr1', 'pos': 200, 'id': 'O', 'ref': 'A', 'alt': 'G'}],
+    }
+    lookup = {match_key('chr1', 100, 'A', 'C'): '0/1'}
+    nonvariant = {('chr1', 200): 'homref'}
+    provider = _CountingProvider()
+    matched, fills = call_families(families, lookup, nonvariant, 'male', provider, min_depth=2)
+    assert provider.n_queries == 0
+    assert len(matched) == 1
+    gt = {line.split('\t')[1]: line.split('\t')[9] for line in fills}
+    assert gt['200'] == '0/0'
 
 
 def test_match_key_altset_order_and_case_invariant():
@@ -179,16 +195,17 @@ def test_fill_depth_is_per_member_position():
     """Members of one family can sit at different positions (axiom backbone
     re-normalizes/left-aligns expanded records), so the homref/nocall decision must
     be looked up per member, not once for the whole family."""
-    from genomics.truth import call_families
     families = {
         'AX-1,AX-2': [
             {'chrom': 'chr1', 'pos': 100, 'id': 'AX-1,AX-2', 'ref': 'A', 'alt': 'C'},
             {'chrom': 'chr1', 'pos': 500, 'id': 'AX-1,AX-2', 'ref': 'A', 'alt': 'G'},
         ]
     }
-    auto = {('chr1', 100): 10.0, ('chr1', 500): 1.0}   # pos 100 homref, pos 500 nocall
-    matched, fills = call_families(families, {}, {}, 'male', auto, {}, min_depth=2)
+    # pos 100 homref, pos 500 nocall
+    provider = _CountingProvider(autosomes={('chr1', 100): 10.0, ('chr1', 500): 1.0})
+    matched, fills = call_families(families, {}, {}, 'male', provider, min_depth=2)
     assert matched == []
+    assert provider.n_queries == 2   # one depth consult per unobserved member
     gt = {line.split('\t')[1]: line.split('\t')[9] for line in fills}
     assert gt['100'] == '0/0'
     assert gt['500'] == './.'
@@ -218,17 +235,18 @@ def test_build_lookup_splits_variant_and_nonvariant(tmp_path):
 def test_call_families_honors_observed_calls():
     """An explicitly observed 0/0 / ./. is honored over the depth-based fill; only a
     site with no sample record falls back to depth."""
-    from genomics.truth import call_families
     families = {
         'AX-1': [{'chrom': 'chr1', 'pos': 100, 'id': 'AX-1', 'ref': 'A', 'alt': 'C'}],
         'AX-2': [{'chrom': 'chr1', 'pos': 200, 'id': 'AX-2', 'ref': 'A', 'alt': 'G'}],
         'AX-3': [{'chrom': 'chr1', 'pos': 300, 'id': 'AX-3', 'ref': 'A', 'alt': 'T'}],
     }
     nonvariant = {('chr1', 100): 'homref', ('chr1', 200): 'nocall'}
-    # depth deliberately DISAGREES with the observed calls
-    auto = {('chr1', 100): 1.0, ('chr1', 200): 10.0}   # pos 300 absent
-    matched, fills = call_families(families, {}, nonvariant, 'male', auto, {}, min_depth=2)
+    # depth deliberately DISAGREES with the observed calls; pos 300 absent
+    provider = _CountingProvider(autosomes={('chr1', 100): 1.0, ('chr1', 200): 10.0})
+    matched, fills = call_families(families, {}, nonvariant, 'male', provider, min_depth=2)
     assert matched == []
+    # only pos 300 (unobserved) falls back to depth; observed sites never consult it
+    assert provider.n_queries == 1
     gt = {line.split('\t')[1]: line.split('\t')[9] for line in fills}
     assert gt['100'] == '0/0'   # observed homref honored despite low depth
     assert gt['200'] == './.'   # observed nocall honored despite high depth

@@ -100,15 +100,11 @@ def export_snv_truth(
     inventory = build_inventory(vcf_files)
     sources = resolve_sources(inventory, samples, chroms)
 
-    log_info('load depths')
-    # Only backbone positions are looked up, so random-search the tabix-indexed
-    # tables for those alone; split by chromosome so each (sample, chrom) job is
-    # pickled only its own chromosome's depths.
-    coord_keys = sorted({(row['chrom'], row['pos']) for row in coordinates})
-    autosomes_by_chrom = _split_by_chrom(
-        load_autosomes_depths(autosomes_depths_file, coord_keys, tmp_dir))
-    sex_by_chrom = _split_by_chrom(
-        load_sex_depths(sex_depths_file, coord_keys, tmp_dir))
+    # Depth is consulted only for the few sites that fall through to the depth
+    # decision, so don't pre-fetch the panel; validate the tables up front (present +
+    # tabix-indexed, no region reads) and let each unit query on demand.
+    _require_indexed_depth(autosomes_depths_file)
+    _require_indexed_depth(sex_depths_file)
 
     ploidy_file = output_dir / f'{assembly}.ploidy'
     ploidy_file.write_text(load_ploidy(assembly))
@@ -131,8 +127,8 @@ def export_snv_truth(
             'families_chrom': families_by_chrom[chrom],
             'gender': sample2gender[sample],
             'genome_file': genome_file,
-            'autosomes_depths': autosomes_by_chrom.get(chrom, {}),
-            'sex_depths': sex_by_chrom.get(chrom, {}),
+            'autosomes_depths_file': autosomes_depths_file,
+            'sex_depths_file': sex_depths_file,
             'min_depth': min_depth,
             'ploidy_file': ploidy_file,
             'header_file': headers[sample],
@@ -236,12 +232,59 @@ def partition_families_by_chrom(families):
     return by_chrom
 
 
-def _split_by_chrom(depths):
-    """Split a (chrom, pos)-keyed depth dict into per-chromosome sub-dicts."""
-    out = {}
-    for key, value in depths.items():
-        out.setdefault(key[0], {})[key] = value
-    return out
+def _require_indexed_depth(depths_file):
+    """A depth table must be bgzip-compressed AND tabix-indexed. Validated up front
+    (presence + index only; no region reads), so a missing/unindexed table is
+    reported before processing rather than deep inside a worker."""
+    depths_file = Path(depths_file)
+    if not depths_file.exists():
+        raise ValueError(f'depth table not found: {depths_file}')
+    if not is_gzip(depths_file):
+        raise ValueError(f'depth table is not bgzip-compressed: {depths_file}')
+    if _index_path(depths_file) is None:
+        raise ValueError(
+            f'depth table is not indexed: {depths_file}; index it with '
+            f'`tabix -s 1 -b 2 -e 2 -S 1 {depths_file}`')
+
+
+class DepthProvider:
+    """Per-unit, memoized, on-demand depth lookup. A site's depth is fetched from the
+    chromosome-appropriate tabix-indexed table only when a genotype decision needs it
+    (unmatched family member with no observed 0/0 / ./.), and cached by (chrom, pos)
+    so the same position is never queried twice. Process-local; never shared across
+    parallel units. `n_queries` counts the tabix region queries issued (for tests)."""
+
+    def __init__(self, autosomes_depths_file, sex_depths_file):
+        self.autosomes_depths_file = autosomes_depths_file
+        self.sex_depths_file = sex_depths_file
+        self._autosomes = {}   # (chrom, pos) -> float | None
+        self._sex = {}         # (chrom, pos) -> {'male', 'female'} | None
+        self.n_queries = 0
+
+    def autosomes(self, chrom, pos):
+        """depth_mean for (chrom, pos), or None if the site is absent."""
+        key = (chrom, pos)
+        if key not in self._autosomes:
+            row = self._query(self.autosomes_depths_file, chrom, pos)
+            self._autosomes[key] = _to_float(row[2]) if row else None
+        return self._autosomes[key]
+
+    def sex(self, chrom, pos):
+        """{'male', 'female'} means for (chrom, pos), or None if the site is absent."""
+        key = (chrom, pos)
+        if key not in self._sex:
+            row = self._query(self.sex_depths_file, chrom, pos)
+            self._sex[key] = (
+                {'male': _to_float(row[2]), 'female': _to_float(row[4])} if row else None)
+        return self._sex[key]
+
+    def _query(self, depths_file, chrom, pos):
+        """One single-position tabix region query; returns the split row or None."""
+        self.n_queries += 1
+        for line in execute(f'tabix {depths_file} {chrom}:{pos}-{pos}', pipe=True):
+            if line.strip():
+                return line.split('\t')
+        return None
 
 
 def build_sample_header(sample, genome_file, out_file):
@@ -304,8 +347,7 @@ def process_unit(job):
         lookup=lookup,
         nonvariant=nonvariant,
         gender=job['gender'],
-        autosomes_depths=job['autosomes_depths'],
-        sex_depths=job['sex_depths'],
+        depth_provider=DepthProvider(job['autosomes_depths_file'], job['sex_depths_file']),
         min_depth=job['min_depth'],
     )
 
@@ -401,7 +443,7 @@ def build_lookup(prepared_vcf):
     return lookup, nonvariant
 
 
-def call_families(families, lookup, nonvariant, gender, autosomes_depths, sex_depths, min_depth):
+def call_families(families, lookup, nonvariant, gender, depth_provider, min_depth):
     """Per family: matched member(s) with the sample GT (siblings dropped), else one
     fill record per member. A fill honors the sample's observed 0/0 / ./. at the
     member's position; only a site with no sample record falls back to the depth
@@ -430,7 +472,7 @@ def call_families(families, lookup, nonvariant, gender, autosomes_depths, sex_de
                 elif observed == 'nocall':
                     gt = './.'
                 else:
-                    depth = depth_for(member['chrom'], member['pos'], gender, autosomes_depths, sex_depths)
+                    depth = depth_for(member['chrom'], member['pos'], gender, depth_provider)
                     gt = '0/0' if is_homref(depth, min_depth) else './.'
                 fill_lines.append(vcf_line(member, gt))
 
@@ -504,50 +546,15 @@ def group_families(coordinates):
     return families
 
 
-def _fetch_depths(depths_file, coord_keys, tmp_dir):
-    """Stream only the backbone positions out of a tabix-indexed depth table.
-
-    Writes the coordinates to a 1bp-region BED and runs `tabix -R`, so the amount
-    read is bounded by the panel size rather than the genome. Yields the split
-    columns of each matching row (tabix output carries no header)."""
-    regions_file = tmp_dir / f'{depths_file.name}.regions.bed'
-    with regions_file.open('wt') as fh:
-        for chrom, pos in coord_keys:
-            fh.write(f'{chrom}\t{pos - 1}\t{pos}\n')
-    for line in execute(f'tabix -R {regions_file} {depths_file}', pipe=True):
-        yield line.split('\t')
-
-
-def load_autosomes_depths(depths_file, coord_keys, tmp_dir):
-    """(chrom, pos) -> depth_mean for the backbone coordinates only, fetched via
-    tabix. Producer schema (autosomes-depth): chrom, pos, depth_mean, n_samples."""
-    depths = dict()
-    for items in _fetch_depths(depths_file, coord_keys, tmp_dir):
-        depths[(items[0], int(items[1]))] = _to_float(items[2])
-    return depths
-
-
-def load_sex_depths(depths_file, coord_keys, tmp_dir):
-    """(chrom, pos) -> {'male', 'female'} for the backbone coordinates only, fetched
-    via tabix. Producer schema (sex-depth): chrom, pos, mean_male, n_male,
-    mean_female, n_female."""
-    depths = dict()
-    for items in _fetch_depths(depths_file, coord_keys, tmp_dir):
-        depths[(items[0], int(items[1]))] = {
-            'male': _to_float(items[2]),
-            'female': _to_float(items[4]),
-        }
-    return depths
-
-
-def depth_for(chrom, pos, sex, autosomes_depths, sex_depths):
-    """Select the depth for a site: contig class picks the table; sex picks the
-    sex-chromosome column. Missing key -> None (treated as below threshold)."""
+def depth_for(chrom, pos, sex, depth_provider):
+    """Select the depth for a site via the on-demand provider: contig class picks the
+    table; sex picks the sex-chromosome column. Missing site -> None (treated as
+    below threshold)."""
     pos = int(pos)
     if chrom in AUTOSOMES or chrom in MITO:
-        return autosomes_depths.get((chrom, pos))
+        return depth_provider.autosomes(chrom, pos)
     if chrom in SEX:
-        record = sex_depths.get((chrom, pos))
+        record = depth_provider.sex(chrom, pos)
         if record is None:
             return None
         return record['male'] if sex == 'male' else record['female']

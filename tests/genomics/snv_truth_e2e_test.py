@@ -300,3 +300,17 @@ def test_unindexed_input_fails(tmp_path):
     assert result.returncode != 0
     assert 'not indexed' in (result.stderr + result.stdout)
     assert not (out / 'truth.tsv.gz').exists()
+
+
+def test_unindexed_depth_table_fails(tmp_path):
+    # A depth table lacking its tabix index aborts fail-fast (before any output),
+    # since depth is validated up front even though it is fetched lazily.
+    fixture = tmp_path / 'fixture'
+    genome = _build_fixture(fixture)
+    (fixture / 'autosomes-depth.tsv.bgz.tbi').unlink()   # drop the tabix index
+
+    out = tmp_path / 'out'
+    result = _run_snv_truth(fixture, genome, out, [fixture / 'input.vcf.bgz'], check=False)
+    assert result.returncode != 0
+    assert 'not indexed' in (result.stderr + result.stdout)
+    assert not (out / 'truth.tsv.gz').exists()
