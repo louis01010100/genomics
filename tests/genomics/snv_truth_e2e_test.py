@@ -130,7 +130,7 @@ def _run(work: Path):
     env['PYTHONPATH'] = str(SRC)
     subprocess.run(
         [sys.executable, '-m', 'genomics', 'snv-truth',
-         '--coordinates-file', str(fixture / 'backbone.vcf'),
+         '--backbone-file', str(fixture / 'backbone.vcf'),
          '--samples-file', str(fixture / 'samples.tsv'),
          '--genders-file', str(fixture / 'genders.tsv'),
          '--autosomes-depths-file', str(fixture / 'autosomes-depth.tsv.bgz'),

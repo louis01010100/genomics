@@ -1,6 +1,6 @@
 """Backbone-driven exact-match SNV truth calling.
 
-`genomics snv-truth` consumes an `axiom backbone` output VCF as `--coordinates-file`
+`genomics snv-truth` consumes an `axiom backbone` output VCF as `--backbone-file`
 and builds a per-sample truth VCF (+ TSV) by exact `(chrom, pos, ref, ALT-set)`
 matching against a normalized single-sample VCF. Backbone records that share an `ID`
 form a SNP family: if one member matches the sample it is emitted with the sample's
@@ -62,7 +62,7 @@ def export_snv_truth(
     init_logging(output_dir / 'snv_truth.log')
 
     info = OrderedDict()
-    info['coordinates-file'] = coordinates_file
+    info['backbone-file'] = coordinates_file
     info['n_vcf_files'] = len(vcf_files)
     info['samples-file'] = samples_file
     info['genders-file'] = genders_file
