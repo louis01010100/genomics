@@ -345,7 +345,7 @@ def process_sample(job):
     combined = concat(
         job['pieces'], tmp_base / 'combined.vcf.bgz', tmp_base,
         preprocess=False, allow_overlaps=False).filepath
-    prepared = prepare_sample(combined, sample, genome_file, tmp_base)
+    prepared = prepare_sample(combined, genome_file, tmp_base)
     lookup, nonvariant = build_lookup(prepared)
 
     matched_lines, fill_lines = call_families(
@@ -413,17 +413,18 @@ def combine_tsv(samples, unit_out, output_file):
     return output_file
 
 
-def prepare_sample(vcf_file, sample, genome_file, tmp_base):
-    """Extract one sample, trim unused ALTs, left-align + parsimonious normalize
-    (no multiallelic split). Records with no called ALT (observed 0/0 / ./.) are
-    kept — with ALT='.' — so their genotype can be honored during filling."""
+def prepare_sample(vcf_file, genome_file, tmp_base):
+    """Trim unused ALTs, left-align + parsimonious normalize (no multiallelic split),
+    uppercase. Records with no called ALT (observed 0/0 / ./.) are kept — with
+    ALT='.' — so their genotype can be honored during filling.
+
+    The input is already single-sample, GT-only, and INFO-stripped (each piece comes
+    from `bcftools +split` after the lean extraction, then a same-sample concat), so
+    sample subsetting, FORMAT-keeping, and INFO-dropping are unnecessary here. This
+    relies on that extraction contract; if it changes, restore those steps."""
     vcf = (
         Vcf(vcf_file, tmp_base)
-        .subset_samples({sample})
-        .keep_format(fields=['GT'])
-        .drop_info()
-        .trim_alts()
-        .normalize(genome_file)
+        .trim_alts_normalize(genome_file)
         .uppercase()
         .index()
     )

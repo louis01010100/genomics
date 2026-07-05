@@ -613,6 +613,34 @@ class Vcf():
             self.delete()
         return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
 
+    def trim_alts_normalize(self, genome_file, delete_src=False):
+        """Trim unused ALT alleles then left-align/normalize in a single streamed
+        pass (`bcftools view -a | bcftools norm`), writing no intermediate trimmed
+        VCF. Output is identical to `.trim_alts().normalize(genome_file)`."""
+        input_filepath = self.filepath
+        output_file = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz',
+            '-norm.vcf.bgz',
+        )
+        log_filepath = self.tmp_dir / f'{output_file.name}.log'
+
+        cmd = (''
+               f'bcftools view --threads {self.n_threads} -a -O u {input_filepath}'
+               f' | bcftools norm'
+               f'      -f {genome_file}'
+               f'      -c s'
+               f'      -O z'
+               f'      -o {output_file}'
+               f'      --threads {self.n_threads}'
+               f'      -'
+               f' &> {log_filepath}'
+               '')
+
+        execute(cmd)
+        if delete_src:
+            self.delete()
+        return Vcf(output_file, self.tmp_dir, self.n_threads, new_tmp=False)
+
     def subset(self, expression, op_name, delete_src=False):
         input_filepath = self.filepath
         output_file = self.tmp_dir / self.filepath.name.replace(

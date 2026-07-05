@@ -43,6 +43,7 @@ from genomics.truth import (
     load_ploidy,
     _require_single_chrom,
     extract_and_split,
+    prepare_sample,
 )
 
 BACKBONE = (
@@ -389,3 +390,51 @@ def test_extract_and_split_strips_info(tmp_path):
             cols = r.split('\t')
             assert cols[7] == '.', f'INFO not stripped: {cols[7]}'
             assert cols[8] == 'GT', f'FORMAT not GT-only: {cols[8]}'
+
+
+@requires_tabix
+def test_prepare_sample_is_lean_single_pass(tmp_path):
+    # The combined input is already single-sample, GT-only, INFO-stripped (from lean
+    # extraction), so prepare_sample must not run subset/keep-format/drop-info passes,
+    # and trim+normalize must be one streamed pass (no intermediate trimmed VCF).
+    if shutil.which('samtools') is None:
+        pytest.skip('samtools not on PATH')
+
+    genome = tmp_path / 'genome.fa'
+    with genome.open('w') as fh:
+        fh.write('>chr1\n' + 'A' * 300 + '\n')
+    subprocess.run(['samtools', 'faidx', str(genome)], check=True)
+
+    # single-sample, GT-only, INFO='.'; ALT has an unused allele (C, trimmed) and a
+    # lowercase allele (g -> G, uppercased); GT uses only allele 1.
+    combined = tmp_path / 'combined.vcf'
+    combined.write_text(
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t100\t.\tA\tg,C\t.\t.\t.\tGT\t0/1\n'
+    )
+    subprocess.run(f'bgzip -f {combined}', shell=True, check=True)
+    combined_bgz = tmp_path / 'combined.vcf.bgz'
+    (tmp_path / 'combined.vcf.gz').rename(combined_bgz)
+
+    tmp_base = tmp_path / 'work'
+    tmp_base.mkdir()
+    prepared = prepare_sample(combined_bgz, genome, tmp_base)
+
+    # correctness: single sample, ALT trimmed to the used allele and uppercased
+    assert subprocess.run(['bcftools', 'query', '-l', str(prepared)],
+                          capture_output=True, text=True, check=True).stdout.split() == ['S1']
+    rows = subprocess.run(['bcftools', 'view', '-H', str(prepared)],
+                          capture_output=True, text=True, check=True).stdout.splitlines()
+    assert len(rows) == 1
+    cols = rows[0].split('\t')
+    assert cols[3] == 'A'                 # REF
+    assert cols[4] == 'G'                 # ALT: C trimmed, g uppercased
+    assert cols[9].split(':')[0] == '0/1'  # GT preserved
+
+    # lean: none of the removed/redundant passes ran (no intermediates written)
+    for marker in ('-samples', '-format', '-info', '-trim_alt'):
+        stray = list(tmp_base.rglob(f'*{marker}*.vcf.bgz'))
+        assert not stray, f'unexpected intermediate ({marker}): {stray}'
