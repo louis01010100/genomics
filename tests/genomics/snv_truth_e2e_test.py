@@ -11,7 +11,8 @@ Exercised through the real CLI:
   * no-match fill: ONE record per family member (FEM1 fills the 3- and 2-ALT families)
   * homref vs nocall by autosome depth, and nocall on a site missing from the table
   * chrM haploid fill genotype
-  * per-sample outputs: <sample>.truth.vcf.bgz (+.csi) and gzip <sample>.truth.tsv.gz
+  * per-sample VCF outputs: <sample>.truth.vcf.bgz (+.csi)
+  * one combined gzip TSV for all samples: truth.tsv.gz (sample_name-tagged rows)
 Sex-chromosome ploidy (haploid chrX/chrY, female-chrY nocall) is covered separately by
 the fixploidy unit test at real GRCh38 coordinates.
 """
@@ -154,16 +155,31 @@ def _read_tsv(path: Path):
     return header, [dict(zip(header, r)) for r in data]
 
 
+def _rows_for(outputs, sample):
+    _, rows = _read_tsv(outputs / 'truth.tsv.gz')
+    return [r for r in rows if r['sample_name'] == sample]
+
+
 def test_output_files_exist(outputs):
+    assert (outputs / 'truth.tsv.gz').exists()            # one combined tsv
     for s in ('MALE1', 'FEM1'):
         assert (outputs / f'{s}.truth.vcf.bgz').exists()
         assert (outputs / f'{s}.truth.vcf.bgz.csi').exists()
-        assert (outputs / f'{s}.truth.tsv.gz').exists()
+        assert not (outputs / f'{s}.truth.tsv.gz').exists()  # per-sample tsvs removed
 
 
 def test_tsv_columns(outputs):
-    header, _ = _read_tsv(outputs / 'MALE1.truth.tsv.gz')
-    assert header == ['chrom', 'pos', 'id', 'ref', 'alt', 'tgt']
+    header, _ = _read_tsv(outputs / 'truth.tsv.gz')
+    assert header == ['sample_name', 'chrom', 'pos', 'id', 'ref', 'alt', 'tgt']
+
+
+def test_combined_tsv_groups_samples(outputs):
+    _, rows = _read_tsv(outputs / 'truth.tsv.gz')
+    names = [r['sample_name'] for r in rows]
+    assert set(names) == {'MALE1', 'FEM1'}
+    # samples emitted in sorted order, grouped in contiguous blocks
+    assert names == sorted(names)
+    assert len(rows) == 6 + 11                            # MALE1 + FEM1 rows
 
 
 def test_no_legacy_artifacts(outputs):
@@ -174,7 +190,7 @@ def test_no_legacy_artifacts(outputs):
 
 
 def test_male_matched_members_and_fills(outputs):
-    _, rows = _read_tsv(outputs / 'MALE1.truth.tsv.gz')
+    rows = _rows_for(outputs, 'MALE1')
     by = {(r['id'], r['pos'], r['alt']): r for r in rows}
 
     # biallelic match: matched member kept with sample GT, siblings dropped
@@ -198,7 +214,7 @@ def test_male_matched_members_and_fills(outputs):
 
 
 def test_female_fill_one_record_per_member(outputs):
-    _, rows = _read_tsv(outputs / 'FEM1.truth.tsv.gz')
+    rows = _rows_for(outputs, 'FEM1')
 
     # no sample record -> every member of each multi-member family is emitted
     fam1 = [r for r in rows if r['id'] == 'AX-1,AX-2,AX-3']

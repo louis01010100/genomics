@@ -9,7 +9,6 @@ depth- and gender-aware homozygous-reference or no-call genotype.
 """
 import gzip
 import math
-import shutil
 from collections import OrderedDict
 from pathlib import Path
 
@@ -123,6 +122,9 @@ def export_snv_truth(
         for job in jobs:
             process_sample(job)
 
+    log_info('combine per-sample truth into one tsv')
+    combine_tsv(samples, tmp_dir, output_dir / 'truth.tsv.gz')
+
     log_info('done')
 
 
@@ -181,25 +183,35 @@ def process_sample(job):
     out_vcf = output_dir / f'{sample}.truth.vcf.bgz'
     vcf.move_to(out_vcf)
 
-    write_tsv(out_vcf, output_dir / f'{sample}.truth.tsv.gz', tmp_base)
+    write_body_tsv(out_vcf, tmp_base / 'body.tsv')
 
     return sample
 
 
-def write_tsv(vcf_file, output_file, tmp_dir):
-    """bcftools query -> gzip TSV with columns: chrom pos id ref alt tgt."""
-    tsv = tmp_dir / 'truth.tsv'
-    with tsv.open('wt') as fh:
-        fh.write('chrom\tpos\tid\tref\talt\ttgt\n')
+def write_body_tsv(vcf_file, output_file):
+    """bcftools query -> headerless TSV body: chrom pos id ref alt tgt. The header
+    and sample_name column are added once when per-sample bodies are combined."""
     cmd = (''
            f"bcftools query"
            f"      -f '%CHROM\\t%POS\\t%ID\\t%REF\\t%ALT\\t[%TGT]\\n'"
            f"      {vcf_file}"
-           f"      >> {tsv}"
+           f"      > {output_file}"
            '')
     execute(cmd)
-    with tsv.open('rb') as src, gzip.open(output_file, 'wb') as dst:
-        shutil.copyfileobj(src, dst)
+    return output_file
+
+
+def combine_tsv(samples, tmp_dir, output_file):
+    """Concatenate the per-sample TSV bodies into one gzip TSV, writing the header
+    once and prepending each row with its sample_name. Samples are emitted in sorted
+    order so the combined output is deterministic regardless of processing order."""
+    with gzip.open(output_file, 'wt') as out:
+        out.write('sample_name\tchrom\tpos\tid\tref\talt\ttgt\n')
+        for sample in sorted(samples):
+            body_file = tmp_dir / sample / 'body.tsv'
+            with body_file.open('rt') as fh:
+                for line in fh:
+                    out.write(f'{sample}\t{line}')
     return output_file
 
 
