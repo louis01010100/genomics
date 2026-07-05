@@ -122,13 +122,10 @@ def _build_fixture(d: Path):
     return genome
 
 
-def _run(work: Path):
-    fixture = work / 'fixture'
-    genome = _build_fixture(fixture)
-    out = work / 'out'
+def _run_snv_truth(fixture: Path, genome: Path, out: Path, vcf_args, n_threads=1, check=True):
     env = dict(os.environ)
     env['PYTHONPATH'] = str(SRC)
-    subprocess.run(
+    return subprocess.run(
         [sys.executable, '-m', 'genomics', 'snv-truth',
          '--backbone-file', str(fixture / 'backbone.vcf'),
          '--samples-file', str(fixture / 'samples.tsv'),
@@ -137,10 +134,30 @@ def _run(work: Path):
          '--sex-depths-file', str(fixture / 'sex-depth.tsv.bgz'),
          '--genome-file', str(genome),
          '--output-dir', str(out),
-         str(fixture / 'input.vcf.bgz')],
-        check=True, env=env, capture_output=True, text=True,
+         '--n-threads', str(n_threads)] + [str(v) for v in vcf_args],
+        check=check, env=env, capture_output=True, text=True,
     )
+
+
+def _run(work: Path):
+    fixture = work / 'fixture'
+    genome = _build_fixture(fixture)
+    out = work / 'out'
+    _run_snv_truth(fixture, genome, out, [fixture / 'input.vcf.bgz'])
     return out
+
+
+def _split_input_by_chrom(fixture: Path):
+    """Split the single multi-sample input into per-chromosome, indexed VCFs (each
+    still multi-sample) — a by-chromosome split of the same data."""
+    src = fixture / 'input.vcf.bgz'
+    paths = []
+    for chrom in ('chr1', 'chrM'):
+        p = fixture / f'{chrom}.vcf.bgz'
+        subprocess.run(f'bcftools view -r {chrom} -O z -o {p} {src}', shell=True, check=True)
+        subprocess.run(['bcftools', 'index', '-f', str(p)], check=True)
+        paths.append(p)
+    return paths
 
 
 @pytest.fixture(scope='module')
@@ -244,3 +261,42 @@ def test_truth_vcf_sorted_and_indexed(outputs):
     ).stdout.strip().split('\n')
     positions = [(c, int(p)) for c, p in (line.split('\t') for line in out)]
     assert positions == sorted(positions, key=lambda x: (x[0], x[1]))
+
+
+def test_by_chromosome_split_equivalence(tmp_path):
+    # A sample's calls split across per-chromosome VCFs must yield the same combined
+    # truth as the equivalent single multi-sample VCF (AC1). Also exercises the
+    # (sample x chrom) parallel path with n_threads > sample count (AC3).
+    fixture = tmp_path / 'fixture'
+    genome = _build_fixture(fixture)
+
+    single = tmp_path / 'single'
+    _run_snv_truth(fixture, genome, single, [fixture / 'input.vcf.bgz'], n_threads=1)
+
+    split_vcfs = _split_input_by_chrom(fixture)
+    split = tmp_path / 'split'
+    _run_snv_truth(fixture, genome, split, list(reversed(split_vcfs)), n_threads=8)
+
+    single_tsv = gzip.open(single / 'truth.tsv.gz', 'rt').read()
+    split_tsv = gzip.open(split / 'truth.tsv.gz', 'rt').read()
+    assert split_tsv == single_tsv
+
+    for sample in ('MALE1', 'FEM1'):
+        assert (split / f'{sample}.truth.vcf.bgz').exists()
+        assert (split / f'{sample}.truth.vcf.bgz.csi').exists()
+
+
+def test_unindexed_input_fails(tmp_path):
+    # An input lacking an index aborts with an actionable error, before any output
+    # is produced (AC4).
+    fixture = tmp_path / 'fixture'
+    genome = _build_fixture(fixture)
+
+    noidx = fixture / 'noidx.vcf.bgz'
+    shutil.copy(fixture / 'input.vcf.bgz', noidx)   # copy WITHOUT its .csi index
+
+    out = tmp_path / 'out'
+    result = _run_snv_truth(fixture, genome, out, [noidx], check=False)
+    assert result.returncode != 0
+    assert 'not indexed' in (result.stderr + result.stdout)
+    assert not (out / 'truth.tsv.gz').exists()
