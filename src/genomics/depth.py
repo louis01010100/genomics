@@ -98,19 +98,20 @@ def export_cram_depths(
                     write_idx += 1
 
     log_info('Compress and index')
-    bgzip_index(autosomes_file)
-    bgzip_index(sex_file)
+    bgzip_index(autosomes_file, n_threads)
+    bgzip_index(sex_file, n_threads)
 
     log_info('Done')
 
 
-def bgzip_index(tsv_file: Path) -> Path:
+def bgzip_index(tsv_file: Path, n_threads: int = 1) -> Path:
     """bgzip-compress a (chrom, pos) depth TSV and build its tabix index so
     downstream analysis can random-search by position instead of loading the whole
     table. Columns are 1=chrom, 2=pos (single position, so begin==end) with one
-    header line. Returns the .bgz path; the plain TSV is removed."""
+    header line. bgzip compresses with n_threads (-@); tabix indexing is inherently
+    single-threaded. Returns the .bgz path; the plain TSV is removed."""
     bgz_file = tsv_file.parent / f'{tsv_file.name}.bgz'
-    execute(f'bgzip -f -c {tsv_file} > {bgz_file}')
+    execute(f'bgzip -@ {n_threads} -f -c {tsv_file} > {bgz_file}')
     tsv_file.unlink()
     execute(f'tabix -f -s 1 -b 2 -e 2 -S 1 {bgz_file}')
     return bgz_file
