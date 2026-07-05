@@ -350,15 +350,19 @@ def test_require_single_chrom(tmp_path):
 
 @requires_tabix
 def test_extract_and_split_strips_info(tmp_path):
-    # INFO is discarded downstream, so pieces produced by extract_and_split must
-    # carry no INFO (avoids ~88x INFO write-amplification in bcftools +split).
+    # INFO and every non-GT FORMAT field are discarded downstream, so pieces from
+    # extract_and_split must carry INFO='.' and FORMAT='GT' only (avoids ~88x
+    # write-amplification in bcftools +split). Selecting >1 sample with INFO/AC
+    # present also guards against `view -s` recomputing AC/AN back into INFO.
     vcf_text = (
         '##fileformat=VCFv4.2\n'
         '##contig=<ID=chr1>\n'
         '##INFO=<ID=AC,Number=A,Type=Integer,Description="allele count">\n'
         '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="depth">\n'
+        '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="allelic depths">\n'
         '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\n'
-        'chr1\t100\t.\tA\tG\t.\t.\tAC=3\tGT\t0/1\t1/1\n'
+        'chr1\t100\t.\tA\tG\t.\t.\tAC=3\tGT:DP:AD\t0/1:30:15,15\t1/1:40:0,40\n'
     )
     plain = tmp_path / 'in.vcf'
     plain.write_text(vcf_text)
@@ -377,7 +381,11 @@ def test_extract_and_split_strips_info(tmp_path):
     assert chrom == 'chr1'
     assert set(pieces) == {'S1', 'S2'}
     for path in pieces.values():
-        info = subprocess.run(
-            ['bcftools', 'query', '-f', '%INFO\n', str(path)],
-            capture_output=True, text=True, check=True).stdout.split()
-        assert info and all(x == '.' for x in info), f'INFO not stripped: {info}'
+        rows = subprocess.run(
+            ['bcftools', 'view', '-H', str(path)],
+            capture_output=True, text=True, check=True).stdout.splitlines()
+        assert rows, f'no records in {path}'
+        for r in rows:
+            cols = r.split('\t')
+            assert cols[7] == '.', f'INFO not stripped: {cols[7]}'
+            assert cols[8] == 'GT', f'FORMAT not GT-only: {cols[8]}'

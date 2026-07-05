@@ -320,11 +320,12 @@ def extract_and_split(job):
     work.mkdir(parents=True, exist_ok=True)
     if not targets_present:
         return chrom, {}
-    # Drop INFO before splitting: bcftools +split copies INFO into every
-    # per-sample file (~88x write amplification), and the truth pipeline discards
-    # INFO downstream, so stripping it here is output-neutral and much cheaper.
-    subset = Vcf(job['path'], work).subset_samples(set(targets_present)).drop_info()
-    pieces = subset.split_by_samples()   # {sample: piece_path_str}
+    # One streamed pass: strip INFO + all non-GT FORMAT, then select the target
+    # samples, then split per sample. bcftools +split copies INFO/FORMAT into every
+    # per-sample file (~88x write amplification) and the truth pipeline discards
+    # both downstream, so stripping before selection keeps the read single-pass and
+    # is output-neutral.
+    pieces = Vcf(job['path'], work).strip_select_split(set(targets_present))
     return chrom, {sample: Path(path) for sample, path in pieces.items()}
 
 

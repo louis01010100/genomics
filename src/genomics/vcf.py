@@ -887,8 +887,12 @@ class Vcf():
         if delete_src:
             self.delete()
 
-        bag = dict()
+        return self._collect_pieces(output_dirpath)
 
+    def _collect_pieces(self, output_dirpath):
+        """Rename each `bcftools +split` output (`<sample>.vcf.gz` -> `.vcf.bgz`)
+        and return {sample: path}. Pieces are not indexed."""
+        bag = dict()
         for filepath in output_dirpath.glob('*.vcf.gz'):
             old_filepath = filepath
             filepath = old_filepath.with_suffix('.bgz')
@@ -899,6 +903,33 @@ class Vcf():
             bag[samplename] = str(vcf.filepath)
 
         return bag
+
+    def strip_select_split(self, samples):
+        """Stream this VCF through one pipeline that strips INFO and every FORMAT
+        field except GT, selects `samples`, and splits per sample -- reading the
+        input exactly once and writing no INFO/FORMAT-heavy intermediate.
+
+        Stripping happens BEFORE selection; `bcftools view -s` runs with
+        `--no-update` so it does not recompute INFO/AC,AN back into the records
+        (otherwise the pieces' INFO would be `AC=..;AN=..` instead of `.`).
+        Returns {sample: path}; pieces carry INFO=`.` and FORMAT=`GT` only."""
+        input_filepath = self.filepath
+        output_dirpath = self.tmp_dir / self.filepath.name.replace(
+            '.vcf.bgz', '-samples')
+        output_dirpath.mkdir(exist_ok=True)
+        log_filepath = output_dirpath / f'{input_filepath.name}.log'
+
+        samples_csv = ','.join(sorted(samples))
+        cmd = (''
+               f'bcftools annotate -x INFO,^FORMAT/GT {input_filepath}'
+               f' | bcftools view -s {samples_csv} --no-update'
+               f' | bcftools +split -O z -o {output_dirpath} -'
+               f' &> {log_filepath}'
+               '')
+
+        execute(cmd)
+
+        return self._collect_pieces(output_dirpath)
 
     def uppercase(self, delete_src=False):
         input_filepath = self.filepath
