@@ -351,19 +351,20 @@ def test_require_single_chrom(tmp_path):
 
 @requires_tabix
 def test_extract_and_split_strips_info(tmp_path):
-    # INFO and every non-GT FORMAT field are discarded downstream, so pieces from
-    # extract_and_split must carry INFO='.' and FORMAT='GT' only (avoids ~88x
-    # write-amplification in bcftools +split). Selecting >1 sample with INFO/AC
-    # present also guards against `view -s` recomputing AC/AN back into INFO.
+    # INFO, QUAL, FILTER, and every non-GT FORMAT field are discarded downstream, so
+    # pieces from extract_and_split must carry INFO/QUAL/FILTER='.' and FORMAT='GT'
+    # only (avoids ~88x write-amplification in bcftools +split). Selecting >1 sample
+    # with INFO/AC present also guards against `view -s` recomputing AC/AN into INFO.
     vcf_text = (
         '##fileformat=VCFv4.2\n'
         '##contig=<ID=chr1>\n'
+        '##FILTER=<ID=PASS,Description="passed">\n'
         '##INFO=<ID=AC,Number=A,Type=Integer,Description="allele count">\n'
         '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
         '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="depth">\n'
         '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="allelic depths">\n'
         '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\n'
-        'chr1\t100\t.\tA\tG\t.\t.\tAC=3\tGT:DP:AD\t0/1:30:15,15\t1/1:40:0,40\n'
+        'chr1\t100\t.\tA\tG\t50\tPASS\tAC=3\tGT:DP:AD\t0/1:30:15,15\t1/1:40:0,40\n'
     )
     plain = tmp_path / 'in.vcf'
     plain.write_text(vcf_text)
@@ -388,6 +389,8 @@ def test_extract_and_split_strips_info(tmp_path):
         assert rows, f'no records in {path}'
         for r in rows:
             cols = r.split('\t')
+            assert cols[5] == '.', f'QUAL not stripped: {cols[5]}'
+            assert cols[6] == '.', f'FILTER not stripped: {cols[6]}'
             assert cols[7] == '.', f'INFO not stripped: {cols[7]}'
             assert cols[8] == 'GT', f'FORMAT not GT-only: {cols[8]}'
 

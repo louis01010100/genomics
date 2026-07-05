@@ -933,14 +933,16 @@ class Vcf():
         return bag
 
     def strip_select_split(self, samples):
-        """Stream this VCF through one pipeline that strips INFO and every FORMAT
-        field except GT, selects `samples`, and splits per sample -- reading the
-        input exactly once and writing no INFO/FORMAT-heavy intermediate.
+        """Stream this VCF through one pipeline that strips INFO, QUAL, and FILTER
+        and every FORMAT field except GT, selects `samples`, and splits per sample
+        -- reading the input exactly once and writing no heavy intermediate. QUAL and
+        FILTER are unused downstream (build_lookup reads only ID/REF/ALT/GT; the truth
+        VCF's QUAL/FILTER come from the backbone), so dropping them is output-neutral.
 
         Stripping happens BEFORE selection; `bcftools view -s` runs with
         `--no-update` so it does not recompute INFO/AC,AN back into the records
         (otherwise the pieces' INFO would be `AC=..;AN=..` instead of `.`).
-        Returns {sample: path}; pieces carry INFO=`.` and FORMAT=`GT` only."""
+        Returns {sample: path}; pieces carry INFO/QUAL/FILTER=`.` and FORMAT=`GT`."""
         input_filepath = self.filepath
         output_dirpath = self.tmp_dir / self.filepath.name.replace(
             '.vcf.bgz', '-samples')
@@ -949,7 +951,7 @@ class Vcf():
 
         samples_csv = ','.join(sorted(samples))
         cmd = (''
-               f'bcftools annotate -x INFO,^FORMAT/GT {input_filepath}'
+               f'bcftools annotate -x INFO,QUAL,FILTER,^FORMAT/GT {input_filepath}'
                f' | bcftools view -s {samples_csv} --no-update'
                f' | bcftools +split -O z -o {output_dirpath} -'
                f' &> {log_filepath}'
