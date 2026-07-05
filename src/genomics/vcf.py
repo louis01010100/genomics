@@ -1109,10 +1109,14 @@ class Vcf():
 
     def sort(self, delete_src=False):
         input_filepath = self.filepath
-        output_file = self.tmp_dir / self.filepath.name.replace(
-            '.vcf.bgz',
-            '-sort.vcf.bgz',
-        )
+        name = self.filepath.name
+        if name.endswith('.vcf.bgz'):
+            out_name = name.replace('.vcf.bgz', '-sort.vcf.bgz')
+        elif name.endswith('.vcf'):
+            out_name = name[:-4] + '-sort.vcf.bgz'
+        else:
+            out_name = name + '-sort.vcf.bgz'
+        output_file = self.tmp_dir / out_name
         log_filepath = self.tmp_dir / f'{output_file.name}.log'
         tmp_dir = self.tmp_dir / 'tmp_sort'
 
@@ -1592,23 +1596,21 @@ def concat(
 
     tmp_dir = Path(tmp_dir)
     log_filepath = tmp_dir / f'{tmp_filename}.log'
-    tmp_filepath = tmp_dir / f'{tmp_filename}'
 
-    cmd = (''
-           f'bcftools concat'
-           f'      {"--allow-overlaps" if allow_overlaps else ""}'
-           f'      --file-list {vcfs_file}'
-           f'      -O z'
-           f'      -o {tmp_filepath}'
-           f'      --threads {n_threads}'
-           f'      &> {log_filepath}'
-           '')
+    sort_tmp = tmp_dir / 'tmp_sort'
+    sort_tmp.mkdir(parents=True, exist_ok=True)
+
+    cmd = (
+        f'bcftools concat'
+        f' {"--allow-overlaps" if allow_overlaps else ""}'
+        f' --file-list {vcfs_file}'
+        f' -O u'
+        f' --threads {n_threads}'
+        f' | bcftools sort -O z -o {output_file} --temp-dir {sort_tmp} -'
+        f' &> {log_filepath}'
+    )
 
     execute(cmd)
-    result = Vcf(tmp_filepath, tmp_dir).sort()
-
-    result.copy_to(output_file)
-
     result = Vcf(output_file, tmp_dir, new_tmp=False)
     result.index(force=True)
 

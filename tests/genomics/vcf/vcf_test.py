@@ -649,6 +649,99 @@ def test_concat_allow_overlaps_false_needs_no_index(tmp_path):
     assert '100' in rows and '200' in rows
 
 
+def test_concat_writes_no_intermediate(tmp_path):
+    a = _write_bgz(
+        'a.vcf',
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t100\t.\tA\tG\t.\t.\t.\tGT\t0/1\n',
+        tmp_path,
+    )
+    b = _write_bgz(
+        'b.vcf',
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr2>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr2\t200\t.\tC\tT\t.\t.\t.\tGT\t1/1\n',
+        tmp_path,
+    )
+
+    work = tmp_path / 'work'
+    out = tmp_path / 'out.vcf.bgz'
+    result = concat([a.filepath, b.filepath], out, work,
+                    preprocess=False, allow_overlaps=False)
+
+    assert not list(work.rglob('*-concat.vcf.bgz'))
+    assert not list(work.rglob('*-sort.vcf.bgz'))
+
+    import subprocess
+    rows = subprocess.run(
+        ['bcftools', 'query', '-f', '%CHROM\t%POS\n', str(result.filepath)],
+        capture_output=True, text=True, check=True).stdout.split()
+    assert 'chr1' in rows and 'chr2' in rows
+    assert '100' in rows and '200' in rows
+
+
+def test_sort_plain_vcf_outputs_bgz(tmp_path):
+    plain = tmp_path / 'unsorted.vcf'
+    plain.write_text(
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t200\t.\tA\tG\t.\t.\t.\tGT\t0/1\n'
+        'chr1\t100\t.\tC\tT\t.\t.\t.\tGT\t1/1\n'
+    )
+
+    res = Vcf(plain, tmp_path).sort()
+
+    assert str(res.filepath).endswith('-sort.vcf.bgz')
+    assert res.filepath.exists()
+
+    import subprocess
+    positions = subprocess.run(
+        ['bcftools', 'query', '-f', '%POS\n', str(res.filepath)],
+        capture_output=True, text=True, check=True).stdout.split()
+    assert positions == ['100', '200']
+
+
+def test_concat_preprocess_allow_overlaps(tmp_path):
+    a = tmp_path / 'a.vcf'
+    a.write_text(
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t100\t.\tA\tG\t.\t.\t.\tGT\t0/1\n'
+        'chr1\t300\t.\tA\tG\t.\t.\t.\tGT\t0/1\n'
+    )
+    b = tmp_path / 'b.vcf'
+    b.write_text(
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t200\t.\tC\tT\t.\t.\t.\tGT\t1/1\n'
+        'chr1\t400\t.\tC\tT\t.\t.\t.\tGT\t1/1\n'
+    )
+
+    out = tmp_path / 'out.vcf.bgz'
+    result = concat([a, b], out, tmp_path / 'work',
+                    preprocess=True, allow_overlaps=True)
+
+    assert result.filepath.exists()
+    assert (result.filepath.parent / f'{result.filepath.name}.csi').exists()
+
+    import subprocess
+    positions = subprocess.run(
+        ['bcftools', 'query', '-f', '%POS\n', str(result.filepath)],
+        capture_output=True, text=True, check=True).stdout.split()
+    assert positions == ['100', '200', '300', '400']
+
+
 def test_split_by_samples_pieces_are_not_indexed(tmp_path):
     src = _write_bgz(
         'multi.vcf',

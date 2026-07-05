@@ -375,7 +375,7 @@ def process_sample(job):
         for line in fixed_fill_lines:
             bfh.write(line + '\n')
 
-    vcf = Vcf(truth_txt, tmp_base).bgzip().sort().index()
+    vcf = Vcf(truth_txt, tmp_base).sort().index()
     out_vcf = job['output_dir'] / f'{sample}.truth.vcf.bgz'
     vcf.move_to(out_vcf)
 
@@ -414,20 +414,20 @@ def combine_tsv(samples, unit_out, output_file):
 
 
 def prepare_sample(vcf_file, genome_file, tmp_base):
-    """Trim unused ALTs, left-align + parsimonious normalize (no multiallelic split),
-    uppercase. Records with no called ALT (observed 0/0 / ./.) are kept — with
-    ALT='.' — so their genotype can be honored during filling.
+    """Trim unused ALTs, left-align + parsimonious normalize (no multiallelic split).
+    Records with no called ALT (observed 0/0 / ./.) are kept — with ALT='.' — so their
+    genotype can be honored during filling.
+
+    Preparation is trim+normalize only: no uppercasing and no indexing. The prepared
+    VCF's case and index are never used — match_key is case-insensitive, and the truth
+    VCF's REF/ALT come from the backbone, so a case-folding/indexing pass here would be
+    dead work.
 
     The input is already single-sample, GT-only, and INFO-stripped (each piece comes
     from `bcftools +split` after the lean extraction, then a same-sample concat), so
     sample subsetting, FORMAT-keeping, and INFO-dropping are unnecessary here. This
     relies on that extraction contract; if it changes, restore those steps."""
-    vcf = (
-        Vcf(vcf_file, tmp_base)
-        .trim_alts_normalize(genome_file)
-        .uppercase()
-        .index()
-    )
+    vcf = Vcf(vcf_file, tmp_base).trim_alts_normalize(genome_file)
     return vcf.filepath
 
 

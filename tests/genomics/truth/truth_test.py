@@ -409,7 +409,8 @@ def test_prepare_sample_is_lean_single_pass(tmp_path):
     subprocess.run(['samtools', 'faidx', str(genome)], check=True)
 
     # single-sample, GT-only, INFO='.'; ALT has an unused allele (C, trimmed) and a
-    # lowercase allele (g -> G, uppercased); GT uses only allele 1.
+    # lowercase allele (g, kept as-is now that prepare is trim+normalize only);
+    # GT uses only allele 1.
     combined = tmp_path / 'combined.vcf'
     combined.write_text(
         '##fileformat=VCFv4.2\n'
@@ -426,7 +427,9 @@ def test_prepare_sample_is_lean_single_pass(tmp_path):
     tmp_base.mkdir()
     prepared = prepare_sample(combined_bgz, genome, tmp_base)
 
-    # correctness: single sample, ALT trimmed to the used allele and uppercased
+    assert not Path(f'{prepared}.csi').exists(), 'prepared VCF should not be indexed'
+
+    # correctness: single sample, ALT trimmed to the used allele (case preserved)
     assert subprocess.run(['bcftools', 'query', '-l', str(prepared)],
                           capture_output=True, text=True, check=True).stdout.split() == ['S1']
     rows = subprocess.run(['bcftools', 'view', '-H', str(prepared)],
@@ -434,10 +437,10 @@ def test_prepare_sample_is_lean_single_pass(tmp_path):
     assert len(rows) == 1
     cols = rows[0].split('\t')
     assert cols[3] == 'A'                 # REF
-    assert cols[4] == 'G'                 # ALT: C trimmed, g uppercased
+    assert cols[4] == 'g'                 # ALT: C trimmed, g case preserved (no uppercase)
     assert cols[9].split(':')[0] == '0/1'  # GT preserved
 
     # lean: none of the removed/redundant passes ran (no intermediates written)
-    for marker in ('-samples', '-format', '-info', '-trim_alt'):
+    for marker in ('-samples', '-format', '-info', '-trim_alt', '-uppercase'):
         stray = list(tmp_base.rglob(f'*{marker}*.vcf.bgz'))
         assert not stray, f'unexpected intermediate ({marker}): {stray}'
