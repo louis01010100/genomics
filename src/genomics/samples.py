@@ -26,7 +26,7 @@ def export_samples(vcf_files, samples_file, output_dir, n_threads=1):
     source_samples = {}
     union = set()
     for vcf_file in vcf_files:
-        source_samples[vcf_file] = Vcf(vcf_file, tmp_dir).samples
+        source_samples[vcf_file] = Vcf(vcf_file, tmp_dir, new_tmp=False).samples
         union |= source_samples[vcf_file]
 
     present_samples = [sample for sample in samples if sample in union]
@@ -52,7 +52,10 @@ def export_samples(vcf_files, samples_file, output_dir, n_threads=1):
         vcf_file, present_here = task
         if not present_here:
             return {}
-        return Vcf(vcf_file, tmp_dir, n_threads).strip_select_split(present_here)
+        # new_tmp=False keeps the per-source working files under a readable
+        # tmp/<source>-samples/ dir instead of an opaque tmp/<md5>/ dir.
+        return Vcf(vcf_file, tmp_dir, n_threads,
+                   new_tmp=False).strip_select_split(present_here)
 
     if n_threads > 1 and len(tasks) > 1:
         with ProcessPool(n_threads) as pool:
