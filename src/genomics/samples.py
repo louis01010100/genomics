@@ -102,10 +102,16 @@ def _build_sample(sample, pieces, staging, tmp_dir):
 
 
 def _load_samples(samples_file: Path) -> list:
-    """De-duplicated target sample names, preserving first-seen order."""
+    """De-duplicated target sample names from a one-column file whose first line
+    is the header `sample_name`, preserving first-seen order."""
     seen = set()
     ordered = []
     with open(samples_file, 'rt') as fh:
+        header = fh.readline().strip()
+        if header != 'sample_name':
+            raise ValueError(
+                "samples-file must be a one-column file with a 'sample_name' "
+                f"header (got {header!r})")
         for line in fh:
             name = line.strip()
             if not name or name in seen:

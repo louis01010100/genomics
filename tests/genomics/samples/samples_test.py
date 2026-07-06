@@ -59,7 +59,7 @@ def _build_sources(root: Path):
 
 def _samples_file(root: Path, names):
     p = root / 'samples.txt'
-    p.write_text('\n'.join(names) + '\n')
+    p.write_text('sample_name\n' + '\n'.join(names) + '\n')
     return p
 
 
@@ -130,6 +130,18 @@ def test_warn_and_continue_on_absent(tmp_path, caplog):
     assert not (out / 'Z').exists()
     assert sorted(p.name for p in out.iterdir()) == ['A']
     assert 'Z' in caplog.text
+
+
+def test_samples_file_requires_sample_name_header(tmp_path):
+    sources = _build_sources(tmp_path)
+    # A file without the 'sample_name' header is rejected.
+    headerless = tmp_path / 'nohdr.txt'
+    headerless.write_text('A\nB\n')
+    out = tmp_path / 'out'
+
+    with pytest.raises(Exception):
+        export_samples(vcf_files=sources, samples_file=headerless,
+                       output_dir=out, n_threads=1)
 
 
 def test_error_when_all_absent(tmp_path):
