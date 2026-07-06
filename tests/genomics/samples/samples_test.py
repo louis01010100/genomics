@@ -41,6 +41,10 @@ chr2\t100\trs4\tT\tC\t30\tPASS\tAC=1\tGT:DP\t0/0:10\t0/1:12
 """
 
 
+def _vcf(out, s):
+    return out / s / f'{s}.vcf.bgz'
+
+
 def _bcftools(*args):
     return subprocess.run(['bcftools', *args], capture_output=True, text=True,
                           check=True).stdout
@@ -67,21 +71,23 @@ def test_export_samples_worked_example(tmp_path):
     export_samples(vcf_files=sources, samples_file=samples_file,
                    output_dir=out, n_threads=1)
 
-    # One output (+ index) per distinct sample; duplicate B collapsed.
-    bgz = sorted(p.name for p in out.glob('*.vcf.bgz'))
-    assert bgz == ['A.vcf.bgz', 'B.vcf.bgz', 'C.vcf.bgz']
+    # One per-sample directory per distinct sample; duplicate B collapsed.
+    # Top level contains ONLY the per-sample directories (no tmp/, no loose files).
+    assert sorted(p.name for p in out.iterdir()) == ['A', 'B', 'C']
     for s in ('A', 'B', 'C'):
-        assert (out / f'{s}.vcf.bgz').exists()
-        assert list(out.glob(f'{s}.vcf.bgz.csi')) or \
-            list(out.glob(f'{s}.vcf.bgz.tbi')), 'index missing'
+        d = out / s
+        assert d.is_dir()
+        assert (d / f'{s}.vcf.bgz').exists()
+        assert list(d.glob(f'{s}.vcf.bgz.csi')) or \
+            list(d.glob(f'{s}.vcf.bgz.tbi')), 'index missing'
 
     # Single sample column each.
-    assert _bcftools('query', '-l', str(out / 'B.vcf.bgz')).split() == ['B']
-    assert _bcftools('query', '-l', str(out / 'A.vcf.bgz')).split() == ['A']
+    assert _bcftools('query', '-l', str(_vcf(out, 'B'))).split() == ['B']
+    assert _bcftools('query', '-l', str(_vcf(out, 'A'))).split() == ['A']
 
     # B = concat across both sources, sorted by CHROM,POS.
     b_rows = _bcftools('query', '-f', '%CHROM\t%POS\t%REF\t%ALT[\t%GT]\n',
-                       str(out / 'B.vcf.bgz')).strip().split('\n')
+                       str(_vcf(out, 'B'))).strip().split('\n')
     assert b_rows == [
         'chr1\t100\tC\tT\t0/1',
         'chr1\t200\tG\tA\t0/1',
@@ -91,21 +97,21 @@ def test_export_samples_worked_example(tmp_path):
 
     # A only from source1; C only from source2.
     a_rows = _bcftools('query', '-f', '%CHROM\t%POS[\t%GT]\n',
-                       str(out / 'A.vcf.bgz')).strip().split('\n')
+                       str(_vcf(out, 'A'))).strip().split('\n')
     assert a_rows == ['chr1\t100\t0/0', 'chr1\t300\t0/1']
     c_rows = _bcftools('query', '-f', '%CHROM\t%POS[\t%GT]\n',
-                       str(out / 'C.vcf.bgz')).strip().split('\n')
+                       str(_vcf(out, 'C'))).strip().split('\n')
     assert c_rows == ['chr1\t200\t1/1', 'chr2\t100\t0/1']
 
     # GT-only: FORMAT column is exactly GT; QUAL/FILTER/INFO stripped to '.'.
-    full = _bcftools('view', '-H', str(out / 'B.vcf.bgz')).strip().split('\n')
+    full = _bcftools('view', '-H', str(_vcf(out, 'B'))).strip().split('\n')
     for line in full:
         f = line.split('\t')
         assert f[5] == '.', f'QUAL not stripped: {line}'
         assert f[6] == '.', f'FILTER not stripped: {line}'
         assert f[7] == '.', f'INFO not stripped: {line}'
         assert f[8] == 'GT', f'FORMAT not GT-only: {line}'
-    hdr = _bcftools('view', '-h', str(out / 'B.vcf.bgz'))
+    hdr = _bcftools('view', '-h', str(_vcf(out, 'B')))
     assert '##FORMAT=<ID=DP' not in hdr
 
 
@@ -119,7 +125,7 @@ def test_fail_fast_sample_absent_from_all_sources(tmp_path):
                        output_dir=out, n_threads=1)
 
     # No partial output published.
-    assert not list(out.glob('*.vcf.bgz')) if out.exists() else True
+    assert not list(out.glob('*/*.vcf.bgz')) if out.exists() else True
 
 
 def test_deterministic_across_threads(tmp_path):
@@ -134,6 +140,6 @@ def test_deterministic_across_threads(tmp_path):
                    output_dir=out2, n_threads=2)
 
     for s in ('A', 'B', 'C'):
-        r1 = _bcftools('view', '-H', str(out1 / f'{s}.vcf.bgz'))
-        r2 = _bcftools('view', '-H', str(out2 / f'{s}.vcf.bgz'))
+        r1 = _bcftools('view', '-H', str(_vcf(out1, s)))
+        r2 = _bcftools('view', '-H', str(_vcf(out2, s)))
         assert r1 == r2
