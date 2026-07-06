@@ -742,6 +742,31 @@ def test_concat_preprocess_allow_overlaps(tmp_path):
     assert positions == ['100', '200', '300', '400']
 
 
+def test_concat_preprocess_tmp_is_readable(tmp_path):
+    # concat(preprocess=True) must not create md5-named working dirs.
+    import re
+    a = tmp_path / 'a.vcf'
+    a.write_text(
+        '##fileformat=VCFv4.2\n##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t100\t.\tA\tG\t.\t.\t.\tGT\t0/1\n'
+    )
+    b = tmp_path / 'b.vcf'
+    b.write_text(
+        '##fileformat=VCFv4.2\n##contig=<ID=chr1>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        'chr1\t200\t.\tC\tT\t.\t.\t.\tGT\t1/1\n'
+    )
+    work = tmp_path / 'work'
+    concat([a, b], tmp_path / 'out.vcf.bgz', work, preprocess=True)
+
+    md5 = [p.name for p in work.rglob('*')
+           if p.is_dir() and re.fullmatch(r'[0-9a-f]{32}', p.name)]
+    assert md5 == [], f'md5-named tmp dirs found: {md5}'
+
+
 def test_split_by_samples_pieces_are_not_indexed(tmp_path):
     src = _write_bgz(
         'multi.vcf',

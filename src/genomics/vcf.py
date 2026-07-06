@@ -1579,9 +1579,12 @@ def concat(
     vcfs_file = tmp_dir / 'vcfs.tsv'
 
     with vcfs_file.open('wt') as fd:
-        for vcf_file in vcf_files:
+        for i, vcf_file in enumerate(vcf_files):
             if preprocess:
-                vcf_file = Vcf(vcf_file, tmp_dir) \
+                # Readable, unique per-piece working dir (part-0000, ...) instead
+                # of an opaque md5 dir; pieces may share a basename, so each gets
+                # its own enumerated subdir.
+                vcf_file = Vcf(vcf_file, tmp_dir / f'part-{i:04d}', new_tmp=False) \
                         .bgzip() \
                         .index(force=True) \
                         .filepath

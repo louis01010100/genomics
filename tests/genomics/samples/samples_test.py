@@ -43,7 +43,7 @@ chr2\t100\trs4\tT\tC\t30\tPASS\tAC=1\tGT:DP\t0/0:10\t0/1:12
 
 
 def _vcf(out, s):
-    return out / s / f'{s}.vcf.bgz'
+    return out / 'samples' / f'{s}.vcf.bgz'
 
 
 def _bcftools(*args):
@@ -72,15 +72,16 @@ def test_export_samples_worked_example(tmp_path):
     export_samples(vcf_files=sources, samples_file=samples_file,
                    output_dir=out, n_threads=1)
 
-    # One per-sample directory per distinct sample; duplicate B collapsed.
-    # Top level contains ONLY the per-sample directories (no tmp/, no loose files).
-    assert sorted(p.name for p in out.iterdir()) == ['A', 'B', 'C']
+    # Flat samples/ folder; duplicate B collapsed. Top level is only samples/
+    # (tmp/ removed on success).
+    assert sorted(p.name for p in out.iterdir()) == ['samples']
+    sdir = out / 'samples'
     for s in ('A', 'B', 'C'):
-        d = out / s
-        assert d.is_dir()
-        assert (d / f'{s}.vcf.bgz').exists()
-        assert list(d.glob(f'{s}.vcf.bgz.csi')) or \
-            list(d.glob(f'{s}.vcf.bgz.tbi')), 'index missing'
+        assert (sdir / f'{s}.vcf.bgz').exists()
+        assert list(sdir.glob(f'{s}.vcf.bgz.csi')) or \
+            list(sdir.glob(f'{s}.vcf.bgz.tbi')), 'index missing'
+    # samples/ holds only flat per-sample VCFs + indexes -- no subdirectories.
+    assert all(p.is_file() for p in sdir.iterdir())
 
     # Single sample column each.
     assert _bcftools('query', '-l', str(_vcf(out, 'B'))).split() == ['B']
@@ -126,9 +127,10 @@ def test_warn_and_continue_on_absent(tmp_path, caplog):
                        output_dir=out, n_threads=1)
 
     # Present sample A is produced; absent Z is skipped with a warning; success.
-    assert (out / 'A' / 'A.vcf.bgz').exists()
-    assert not (out / 'Z').exists()
-    assert sorted(p.name for p in out.iterdir()) == ['A']
+    assert (out / 'samples' / 'A.vcf.bgz').exists()
+    assert not (out / 'samples' / 'Z.vcf.bgz').exists()
+    assert sorted(p.name for p in out.iterdir()) == ['samples']
+    assert [p.name for p in (out / 'samples').glob('*.vcf.bgz')] == ['A.vcf.bgz']
     assert 'Z' in caplog.text
 
 
@@ -154,7 +156,7 @@ def test_error_when_all_absent(tmp_path):
                        output_dir=out, n_threads=1)
 
     # No output published.
-    assert not list(out.glob('*/*.vcf.bgz')) if out.exists() else True
+    assert not list(out.glob('samples/*.vcf.bgz')) if out.exists() else True
 
 
 def test_deterministic_across_threads(tmp_path):

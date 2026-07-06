@@ -82,14 +82,14 @@ def export_samples(vcf_files, samples_file, output_dir, n_threads=1):
         for sample in present_samples:
             _build_sample(sample, sample2pieces[sample], staging, tmp_dir)
 
-    # Stage 4: publish atomically into a per-sample subdirectory, then clean up.
+    # Stage 4: publish atomically into a flat samples/ subfolder, then clean up.
+    samples_dir = output_dir / 'samples'
+    samples_dir.mkdir(parents=True, exist_ok=True)
     for sample in present_samples:
-        sample_dir = output_dir / sample
-        sample_dir.mkdir(parents=True, exist_ok=True)
         for suffix in ('.vcf.bgz', '.vcf.bgz.csi', '.vcf.bgz.tbi'):
             piece = staging / f'{sample}{suffix}'
             if piece.exists():
-                shutil.move(str(piece), str(sample_dir / piece.name))
+                shutil.move(str(piece), str(samples_dir / piece.name))
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
