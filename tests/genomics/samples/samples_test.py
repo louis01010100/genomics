@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import logging
 import subprocess
 from pathlib import Path
 
@@ -115,16 +116,32 @@ def test_export_samples_worked_example(tmp_path):
     assert '##FORMAT=<ID=DP' not in hdr
 
 
-def test_fail_fast_sample_absent_from_all_sources(tmp_path):
+def test_warn_and_continue_on_absent(tmp_path, caplog):
     sources = _build_sources(tmp_path)
     samples_file = _samples_file(tmp_path, ['A', 'Z'])  # Z is in neither source
+    out = tmp_path / 'out'
+
+    with caplog.at_level(logging.WARNING):
+        export_samples(vcf_files=sources, samples_file=samples_file,
+                       output_dir=out, n_threads=1)
+
+    # Present sample A is produced; absent Z is skipped with a warning; success.
+    assert (out / 'A' / 'A.vcf.bgz').exists()
+    assert not (out / 'Z').exists()
+    assert sorted(p.name for p in out.iterdir()) == ['A']
+    assert 'Z' in caplog.text
+
+
+def test_error_when_all_absent(tmp_path):
+    sources = _build_sources(tmp_path)
+    samples_file = _samples_file(tmp_path, ['Y', 'Z'])  # both absent from all
     out = tmp_path / 'out'
 
     with pytest.raises(Exception):
         export_samples(vcf_files=sources, samples_file=samples_file,
                        output_dir=out, n_threads=1)
 
-    # No partial output published.
+    # No output published.
     assert not list(out.glob('*/*.vcf.bgz')) if out.exists() else True
 
 

@@ -1,3 +1,4 @@
+import logging
 import shutil
 from pathlib import Path
 
@@ -13,45 +14,73 @@ def export_samples(vcf_files, samples_file, output_dir, n_threads=1):
     genomics `samples` spec."""
     output_dir = Path(output_dir)
     samples = _load_samples(Path(samples_file))
-    sample_set = set(samples)
+    vcf_files = [Path(vcf_file) for vcf_file in vcf_files]
 
     tmp_dir = output_dir / 'tmp'
     staging = tmp_dir / 'staging'
     tmp_dir.mkdir(parents=True, exist_ok=True)
     staging.mkdir(parents=True, exist_ok=True)
 
-    # Stage 2: per source, strip -> select -> split as a single piped pass,
-    # restricted to the target samples actually present in that source.
-    sample2pieces = {sample: [] for sample in samples}
+    # Stage 1: up-front presence check -- union of the sources' header samples.
+    # Absent-from-all samples warn and are skipped; if none are present, error.
+    source_samples = {}
+    union = set()
     for vcf_file in vcf_files:
-        source = Vcf(Path(vcf_file), tmp_dir, n_threads)
-        present = sample_set & source.samples
-        if not present:
-            continue
-        for sample, piece in source.strip_select_split(present).items():
+        source_samples[vcf_file] = Vcf(vcf_file, tmp_dir).samples
+        union |= source_samples[vcf_file]
+
+    present_samples = [sample for sample in samples if sample in union]
+    absent = [sample for sample in samples if sample not in union]
+
+    if not present_samples:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise ValueError(
+            'all requested samples are absent from every source: '
+            f'{sorted(absent)}')
+    if absent:
+        logging.warning(
+            '%d sample(s) absent from all sources, skipped: %s',
+            len(absent), ', '.join(absent))
+
+    # Stage 2: per source, strip -> select -> split (one piped pass), run
+    # concurrently across sources -- each source is independent. Restricted to
+    # the present samples that source actually contains.
+    tasks = [(vcf_file, set(present_samples) & source_samples[vcf_file])
+             for vcf_file in vcf_files]
+
+    def _process_source(task):
+        vcf_file, present_here = task
+        if not present_here:
+            return {}
+        return Vcf(vcf_file, tmp_dir, n_threads).strip_select_split(present_here)
+
+    if n_threads > 1 and len(tasks) > 1:
+        with ProcessPool(n_threads) as pool:
+            per_source = pool.map(_process_source, tasks)
+    else:
+        per_source = [_process_source(task) for task in tasks]
+
+    # Collect pieces per sample in source order -- deterministic and independent
+    # of source completion order.
+    sample2pieces = {sample: [] for sample in present_samples}
+    for pieces in per_source:
+        for sample, piece in pieces.items():
             sample2pieces[sample].append(Path(piece))
 
-    # Stage 3: fail fast -- a requested sample absent from all sources.
-    missing = [sample for sample in samples if not sample2pieces[sample]]
-    if missing:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise ValueError(f'samples absent from all sources: {sorted(missing)}')
-
-    # Stage 4-5: per sample, concat (+ sort + bgzip + index) into staging.
-    if n_threads > 1 and len(samples) > 1:
+    # Stage 3: per sample, concat (+ sort + bgzip + index) into staging.
+    if n_threads > 1 and len(present_samples) > 1:
         with ProcessPool(n_threads) as pool:
             pool.map(
                 lambda sample: _build_sample(sample, sample2pieces[sample],
                                              staging, tmp_dir),
-                samples,
+                present_samples,
             )
     else:
-        for sample in samples:
+        for sample in present_samples:
             _build_sample(sample, sample2pieces[sample], staging, tmp_dir)
 
-    # Stage 6: publish atomically (nothing reaches output_dir until every
-    # sample built) into a per-sample subdirectory, then remove temporaries.
-    for sample in samples:
+    # Stage 4: publish atomically into a per-sample subdirectory, then clean up.
+    for sample in present_samples:
         sample_dir = output_dir / sample
         sample_dir.mkdir(parents=True, exist_ok=True)
         for suffix in ('.vcf.bgz', '.vcf.bgz.csi', '.vcf.bgz.tbi'):
