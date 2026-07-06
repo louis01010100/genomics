@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene, variants, genome
+from . import acmg, clinvar, dbsnp, vcf, depth, truth, gene, variants, genome, samples
 
 __VERSION__ = '0.7.0'
 
@@ -99,6 +99,13 @@ def main():
             assembly=args.assembly,
             n_threads=args.n_threads,
         )
+    elif args.subcommand == 'samples':
+        samples.export_samples(
+            vcf_files=_load_files(args.vcfs_file, args.vcf_files),
+            samples_file=Path(args.samples_file),
+            output_dir=Path(args.output_dir),
+            n_threads=args.n_threads,
+        )
     else:
         parser.print_help()
         sys.exit(1)
@@ -128,6 +135,7 @@ def config_parsers():
     _config_gvcf_depth_parser(parsers.add_parser('gvcf-depth'))
     _config_snv_truth_parser(parsers.add_parser('snv-truth'))
     _config_gene_parser(parsers.add_parser('export-gene'))
+    _config_samples_parser(parsers.add_parser('samples'))
 
     return parser
 
@@ -198,6 +206,13 @@ def _config_snv_truth_parser(parser):
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--min-depth', type=int, default=2)
     parser.add_argument('--assembly', choices=['hg38', 'hg19'], default='hg38')
+    parser.add_argument('--n-threads', type=int, default=1)
+    parser.add_argument('vcf_files', nargs='*')
+
+def _config_samples_parser(parser):
+    parser.add_argument('--samples-file', required=True)
+    parser.add_argument('--vcfs-file', required=False)
+    parser.add_argument('--output-dir', required=True)
     parser.add_argument('--n-threads', type=int, default=1)
     parser.add_argument('vcf_files', nargs='*')
 
