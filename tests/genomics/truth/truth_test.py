@@ -33,6 +33,7 @@ def _index_depths(tsv_file: Path, text: str) -> Path:
 
 from genomics.truth import (
     load_coordinates,
+    load_snv_family,
     group_families,
     DepthProvider,
     depth_for,
@@ -91,6 +92,52 @@ def test_group_families_by_id_first_seen_order(tmp_path):
     assert list(fams.keys()) == ['AX-1,AX-2,AX-3', 'AX-9']
     assert len(fams['AX-1,AX-2,AX-3']) == 4
     assert len(fams['AX-9']) == 1
+
+
+# --- snv-family TSV loader (id = fmid) ---
+
+SNV_FAMILY_TSV = (
+    'chrom\tpos\tref\talt\tfmid\tmsid\tasid\tpsid\n'
+    'chr1\t930165\tA\tC,G,T\tFM-1\tNA\tAffx-1,Affx-2,Affx-3\tAX-1,AX-2,AX-3\n'
+    'chr1\t930165\tA\tc\tFM-1\tNA\tAffx-1,Affx-2,Affx-3\tAX-1,AX-2,AX-3\n'   # lowercase alt
+    'chr1\t930165\tA\tG\tFM-1\tNA\tAffx-1,Affx-2,Affx-3\tAX-1,AX-2,AX-3\n'
+    'chr1\t930165\tA\tT\tFM-1\tNA\tAffx-1,Affx-2,Affx-3\tAX-1,AX-2,AX-3\n'
+    'chr1\t11080559\tAAAAAAC\tA\tFM-2\tNA\tAffx-9\tAX-9\n'
+)
+
+
+def test_load_snv_family_reads_gzip_tsv_id_from_fmid(tmp_path):
+    f = _write(tmp_path / 'sf.tsv.gz', SNV_FAMILY_TSV, True)
+    rows = load_snv_family(f)
+    assert len(rows) == 5
+    r = rows[0]
+    assert r['chrom'] == 'chr1'
+    assert r['pos'] == 930165 and isinstance(r['pos'], int)
+    assert r['id'] == 'FM-1'            # id sourced from the fmid column
+    assert r['ref'] == 'A' and r['alt'] == 'C,G,T'
+    assert rows[1]['alt'] == 'C'        # lowercase alt uppercased
+    # msid/asid/psid are read past, not part of the coordinate record
+    assert set(r) == {'chrom', 'pos', 'id', 'ref', 'alt'}
+
+
+def test_load_snv_family_selects_columns_by_name(tmp_path):
+    # reordered columns still parse (select by NAME, not position)
+    reordered = 'psid\tfmid\tchrom\tpos\tref\talt\nAX-9\tFM-7\tchr1\t500\tA\tG\n'
+    rows = load_snv_family(_write(tmp_path / 'sf.tsv', reordered, False))
+    assert rows == [{'chrom': 'chr1', 'pos': 500, 'id': 'FM-7', 'ref': 'A', 'alt': 'G'}]
+
+
+def test_load_snv_family_rejects_missing_column(tmp_path):
+    # a file lacking the fmid column (e.g. a legacy backbone VCF) fails fast
+    with pytest.raises(Exception):
+        load_snv_family(_write(tmp_path / 'bad.tsv', 'chrom\tpos\tref\talt\nchr1\t1\tA\tG\n', False))
+
+
+def test_group_families_by_fmid(tmp_path):
+    rows = load_snv_family(_write(tmp_path / 'sf.tsv.gz', SNV_FAMILY_TSV, True))
+    fams = group_families(rows)
+    assert list(fams.keys()) == ['FM-1', 'FM-2']
+    assert len(fams['FM-1']) == 4 and len(fams['FM-2']) == 1
 
 
 class _CountingProvider:

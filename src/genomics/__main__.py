@@ -87,7 +87,7 @@ def main():
     #     )
     elif args.subcommand == 'snv-truth':
         truth.export_snv_truth(
-            coordinates_file=Path(args.backbone_file),
+            snv_family_file=Path(args.snv_family_file),
             vcf_files=_load_files(args.vcfs_file, args.vcf_files),
             autosomes_depths_file=Path(args.autosomes_depths_file),
             sex_depths_file=Path(args.sex_depths_file),
@@ -196,7 +196,7 @@ def _config_gvcf_depth_parser(parser):
 
 
 def _config_snv_truth_parser(parser):
-    parser.add_argument('--backbone-file', required=True)
+    parser.add_argument('--snv-family-file', required=True)
     parser.add_argument('--vcfs-file', required=False)
     parser.add_argument('--samples-file', required=True)
     parser.add_argument('--genders-file', required=True)

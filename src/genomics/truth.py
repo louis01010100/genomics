@@ -1,11 +1,12 @@
-"""Backbone-driven exact-match SNV truth calling.
+"""SNV-family-driven exact-match SNV truth calling.
 
-`genomics snv-truth` consumes an `axiom backbone` output VCF as `--backbone-file`
+`genomics snv-truth` consumes an `axiom snv-family` output TSV as `--snv-family-file`
 and builds a per-sample truth VCF (+ TSV) by exact `(chrom, pos, ref, ALT-set)`
-matching against a normalized single-sample VCF. Backbone records that share an `ID`
-form a SNP family: if one member matches the sample it is emitted with the sample's
-genotype and its siblings are dropped; if none matches, every member is emitted with a
-depth- and gender-aware homozygous-reference or no-call genotype.
+matching against a normalized single-sample VCF. snv-family records that share a family
+id (`fmid`, `FM-<n>`) form a SNP family: if one member matches the sample it is emitted
+with the sample's genotype and its siblings are dropped; if none matches, every member is
+emitted with a depth- and gender-aware homozygous-reference or no-call genotype. The
+family id (`fmid`) is the truth output's `id`.
 
 Each input VCF (bgzip-compressed and indexed) must contain exactly one chromosome. Each
 chromosome is decoded once — the target samples present are extracted in a single pass
@@ -50,7 +51,7 @@ def load_ploidy(assembly):
     return (resources.files('genomics') / 'resources' / f'ploidy-{assembly}.txt').read_text()
 
 def export_snv_truth(
-    coordinates_file: Path,
+    snv_family_file: Path,
     vcf_files: list,
     autosomes_depths_file: Path,
     sex_depths_file: Path,
@@ -67,7 +68,7 @@ def export_snv_truth(
     init_logging(output_dir / 'snv_truth.log')
 
     info = OrderedDict()
-    info['backbone-file'] = coordinates_file
+    info['snv-family-file'] = snv_family_file
     info['n_vcf_files'] = len(vcf_files)
     info['samples-file'] = samples_file
     info['genders-file'] = genders_file
@@ -83,8 +84,8 @@ def export_snv_truth(
     tmp_dir = output_dir / 'tmp'
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    log_info('load backbone coordinates')
-    coordinates = load_coordinates(coordinates_file)
+    log_info('load snv-family coordinates')
+    coordinates = load_snv_family(snv_family_file)
     families = group_families(coordinates)
 
     log_info('load samples and genders')
@@ -543,6 +544,35 @@ def load_coordinates(coordinates_file):
                 'id': items[2],
                 'ref': items[3].upper(),
                 'alt': items[4].upper(),
+            })
+    return rows
+
+
+def load_snv_family(snv_family_file):
+    """Read the (gzip) snv-family TSV into coordinate records, with each record's `id`
+    set to its family id (`fmid`). The TSV has a header row and carries
+    `chrom, pos, ref, alt, fmid, msid, asid, psid`; the needed columns are selected by
+    NAME (robust to added/reordered columns) and `msid/asid/psid` are read past — they
+    are not needed for truth calling. Grouping by `id` then groups by `fmid`."""
+    opener = gzip.open if is_gzip(snv_family_file) else open
+    with opener(snv_family_file, 'rt') as fh:
+        header = fh.readline().rstrip('\n').split('\t')
+        i_chrom = header.index('chrom')
+        i_pos = header.index('pos')
+        i_ref = header.index('ref')
+        i_alt = header.index('alt')
+        i_fmid = header.index('fmid')
+        rows = list()
+        for line in fh:
+            if not line.strip():
+                continue
+            items = line.rstrip('\n').split('\t')
+            rows.append({
+                'chrom': items[i_chrom],
+                'pos': int(items[i_pos]),
+                'id': items[i_fmid],
+                'ref': items[i_ref].upper(),
+                'alt': items[i_alt].upper(),
             })
     return rows
 
