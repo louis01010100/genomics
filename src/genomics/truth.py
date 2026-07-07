@@ -381,11 +381,11 @@ def process_sample(job):
     out_vcf = samples_dir / f'{sample}.truth.vcf.bgz'
     vcf.move_to(out_vcf)
 
-    # Per-sample gzipped TSV: header + the query body (chrom pos id ref alt tgt).
+    # Per-sample gzipped TSV: header + the query body (chrom pos fmid ref alt tgt).
     body_file = tmp_base / 'body.tsv'
     write_body_tsv(out_vcf, body_file)
     with gzip.open(samples_dir / f'{sample}.tsv.gz', 'wt') as out, body_file.open('rt') as fh:
-        out.write('chrom\tpos\tid\tref\talt\ttgt\n')
+        out.write('chrom\tpos\tfmid\tref\talt\ttgt\n')
         for line in fh:
             out.write(line)
 

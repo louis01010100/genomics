@@ -196,7 +196,7 @@ def test_output_files_exist(outputs):
 
 def test_tsv_columns(outputs):
     header, _ = _read_tsv(outputs / 'samples' / 'MALE1.tsv.gz')
-    assert header == ['chrom', 'pos', 'id', 'ref', 'alt', 'tgt']
+    assert header == ['chrom', 'pos', 'fmid', 'ref', 'alt', 'tgt']
 
 
 def test_per_sample_tsv_row_counts(outputs):
@@ -215,15 +215,15 @@ def test_no_legacy_artifacts(outputs):
 
 def test_male_matched_members_and_fills(outputs):
     rows = _rows_for(outputs, 'MALE1')
-    by = {(r['id'], r['pos'], r['alt']): r for r in rows}
+    by = {(r['fmid'], r['pos'], r['alt']): r for r in rows}
 
     # biallelic match: matched member kept with sample GT, siblings dropped
-    fam1 = [r for r in rows if r['id'] == 'FM-1']
+    fam1 = [r for r in rows if r['fmid'] == 'FM-1']
     assert len(fam1) == 1
     assert fam1[0]['alt'] == 'C' and fam1[0]['tgt'] == 'A/C'
 
     # multiallelic ALT-set match
-    fam2 = [r for r in rows if r['id'] == 'FM-5']
+    fam2 = [r for r in rows if r['fmid'] == 'FM-5']
     assert len(fam2) == 1
     assert set(fam2[0]['alt'].split(',')) == {'G', 'T'} and fam2[0]['tgt'] == 'G/T'
 
@@ -241,16 +241,16 @@ def test_female_fill_one_record_per_member(outputs):
     rows = _rows_for(outputs, 'FEM1')
 
     # no sample record -> every member of each multi-member family is emitted
-    fam1 = [r for r in rows if r['id'] == 'FM-1']
+    fam1 = [r for r in rows if r['fmid'] == 'FM-1']
     assert len(fam1) == 4
     assert all(r['tgt'] == 'A/A' for r in fam1)          # chr1:100 depth 25 -> homref
     assert {r['alt'] for r in fam1} == {'C,G,T', 'C', 'G', 'T'}
 
-    fam2 = [r for r in rows if r['id'] == 'FM-5']
+    fam2 = [r for r in rows if r['fmid'] == 'FM-5']
     assert len(fam2) == 3
     assert all(r['tgt'] == 'A/A' for r in fam2)
 
-    by = {r['id']: r for r in rows}
+    by = {r['fmid']: r for r in rows}
     # observed ./. at chr1:150 is honored as nocall, overriding the depth homref
     assert by['FM-2']['tgt'] == './.'
     assert by['FM-3']['tgt'] == './.'
