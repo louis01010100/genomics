@@ -175,6 +175,10 @@ class _CountingProvider:
 
 @pytest.fixture
 def depth_provider(tmp_path):
+    # The provider now reads pre-loaded maps (built once per run over the snv-family
+    # positions), not per-site tabix. Build the maps over the positions these tests
+    # query — present positions carry values, absent ones (999s) stay out of the map.
+    from genomics.truth import load_depth_map, write_depth_targets
     a = _index_depths(
         tmp_path / 'autosomes-depth.tsv',
         'chrom\tpos\tdepth_mean\tn_samples\n'
@@ -187,19 +191,24 @@ def depth_provider(tmp_path):
         'chrX\t100\t5.0\t2\t11.0\t2\n'
         'chrY\t200\t8.0\t2\t\t0\n'
     )
-    return DepthProvider(a, s)
+    family_positions = frozenset({
+        ('chr1', 100), ('chrM', 5), ('chr1', 999),
+        ('chrX', 100), ('chrY', 200), ('chrX', 999),
+    })
+    targets = write_depth_targets(family_positions, tmp_path / 'depth.targets.tsv')
+    autosomes = load_depth_map(a, targets, is_sex=False)
+    sex = load_depth_map(s, targets, is_sex=True)
+    return DepthProvider(autosomes, sex)
 
 
 @requires_tabix
-def test_depth_provider_autosomes_memoized(depth_provider):
+def test_depth_provider_autosomes_lookup(depth_provider):
     assert depth_provider.autosomes('chr1', 100) == pytest.approx(12.5)
     assert depth_provider.autosomes('chrM', 5) == pytest.approx(900.0)
     assert depth_provider.autosomes('chr1', 999) is None   # missing -> None
-    # one tabix query per distinct position; repeats served from cache
-    assert depth_provider.n_queries == 3
-    depth_provider.autosomes('chr1', 100)
-    depth_provider.autosomes('chr1', 999)
-    assert depth_provider.n_queries == 3
+    # repeated lookups are stable in-memory hits (no subprocess, trivially memoized)
+    assert depth_provider.autosomes('chr1', 100) == pytest.approx(12.5)
+    assert depth_provider.autosomes('chr1', 999) is None
 
 
 @requires_tabix
@@ -222,6 +231,57 @@ def test_depth_for_dispatch_by_contig_and_gender(depth_provider):
     assert depth_for('chrY', 200, 'female', depth_provider) is None   # blank female
     assert depth_for('chr1', 999, 'male', depth_provider) is None     # missing
     assert depth_for('chrX', 999, 'female', depth_provider) is None
+
+
+@requires_tabix
+def test_load_depth_map_equals_per_site_query(tmp_path):
+    """The pre-loaded depth map must equal, at every family position, exactly what a
+    single-position tabix query returns — present -> the row value, absent -> None."""
+    from genomics.truth import load_depth_map, write_depth_targets
+    a = _index_depths(
+        tmp_path / 'autosomes-depth.tsv',
+        'chrom\tpos\tdepth_mean\tn_samples\n'
+        'chr1\t100\t12.5\t4\n'
+        'chr2\t50\t7.0\t4\n'
+        'chr2\t60\t0.0\t4\n'
+    )
+    # chr3:77 is a family position ABSENT from the table -> must map to None
+    family_positions = frozenset({('chr1', 100), ('chr2', 50), ('chr2', 60), ('chr3', 77)})
+    targets = write_depth_targets(family_positions, tmp_path / 'targets.tsv')
+    m = load_depth_map(a, targets, is_sex=False)
+
+    for chrom, pos in family_positions:
+        out = subprocess.run(
+            f'tabix {a} {chrom}:{pos}-{pos}', shell=True,
+            capture_output=True, text=True).stdout.strip()
+        expected = float(out.split('\t')[2]) if out else None
+        got = m.get((chrom, pos))
+        if expected is None:
+            assert got is None
+        else:
+            assert got == pytest.approx(expected)
+    # only family positions present in the table are keys; absent ones are not
+    assert set(m) == {('chr1', 100), ('chr2', 50), ('chr2', 60)}
+
+
+def test_depth_provider_does_no_subprocess(monkeypatch):
+    """The map-backed provider must resolve depths from memory with ZERO subprocess —
+    no per-site tabix. Monkeypatch execute() to blow up if anything shells out."""
+    from genomics import truth
+    provider = truth.DepthProvider(
+        autosomes_depths={('chr1', 100): 12.5},
+        sex_depths={('chrX', 100): {'male': 5.0, 'female': 11.0}},
+    )
+
+    def _boom(*args, **kwargs):
+        raise AssertionError('depth lookup spawned a subprocess')
+
+    monkeypatch.setattr(truth, 'execute', _boom)
+    assert provider.autosomes('chr1', 100) == pytest.approx(12.5)
+    assert provider.autosomes('chr1', 999) is None
+    assert provider.sex('chrX', 100)['female'] == pytest.approx(11.0)
+    assert truth.depth_for('chr1', 100, 'male', provider) == pytest.approx(12.5)
+    assert truth.depth_for('chrX', 100, 'female', provider) == pytest.approx(11.0)
 
 
 def test_call_families_no_depth_query_when_matched_or_observed():

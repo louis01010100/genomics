@@ -15,6 +15,7 @@ one combined `truth.tsv.gz`.
 """
 import gzip
 import math
+import pickle
 from collections import OrderedDict
 from importlib import resources
 from pathlib import Path
@@ -36,6 +37,24 @@ MITO = {'chrM', 'chrMT'}
 SEX = {'chrX', 'chrY'}
 
 PLOIDY_ASSEMBLIES = ('hg38', 'hg19')
+
+# The snv-family depths are pre-loaded once per run and pickled to a file; each worker
+# loads that file at most once and caches it here, so the (large, whole-genome) depth
+# tables are read exactly once and the ~family-sized maps are never pickled per job — only
+# the small file path travels in the job. Robust across fork/spawn worker start methods.
+_DEPTHS_CACHE = {}   # depths_file path -> (autosomes_depths, sex_depths)
+
+
+def _shared_depths(depths_file):
+    """Return the once-per-run pre-loaded depth maps, loading the pickled file at most once
+    per worker process and caching it (via the live module, so the cache persists across a
+    worker's samples regardless of how the pool serializes `process_sample`)."""
+    import genomics.truth as _self
+    key = str(depths_file)
+    if key not in _self._DEPTHS_CACHE:
+        with open(key, 'rb') as fh:
+            _self._DEPTHS_CACHE[key] = pickle.load(fh)
+    return _self._DEPTHS_CACHE[key]
 
 
 def load_ploidy(assembly):
@@ -119,6 +138,21 @@ def export_snv_truth(
         for member in members
     )
 
+    # Pre-load the depths for the snv-family positions ONCE — the tables are panel-level
+    # and sample-independent, so a single streaming pass per table replaces the per-site
+    # tabix queries that would otherwise run tens of thousands of times per sample. Publish
+    # the maps to a module global BEFORE the pool is created so forked workers inherit them
+    # read-only (copy-on-write); they are never carried in the per-job payload.
+    log_info('pre-load snv-family depths (once, shared across workers)')
+    targets_file = write_depth_targets(family_positions, tmp_dir / 'depth.targets.tsv')
+    depths = (
+        load_depth_map(autosomes_depths_file, targets_file, is_sex=False),
+        load_depth_map(sex_depths_file, targets_file, is_sex=True),
+    )
+    depths_file = tmp_dir / 'depths.pkl'
+    with open(depths_file, 'wb') as fh:
+        pickle.dump(depths, fh)
+
     # Each input is already a single-sample, whole-genome VCF (e.g. `genomics samples`
     # output), so process each one directly into its truth, in parallel across samples.
     log_info('build per-sample truth (parallel over samples)')
@@ -130,8 +164,7 @@ def export_snv_truth(
             'families': families,
             'family_positions': family_positions,
             'genome_file': genome_file,
-            'autosomes_depths_file': autosomes_depths_file,
-            'sex_depths_file': sex_depths_file,
+            'depths_file': depths_file,
             'min_depth': min_depth,
             'ploidy_file': ploidy_file,
             'header_file': headers[sample],
@@ -219,43 +252,58 @@ def _require_indexed_depth(depths_file):
 
 
 class DepthProvider:
-    """Per-unit, memoized, on-demand depth lookup. A site's depth is fetched from the
-    chromosome-appropriate tabix-indexed table only when a genotype decision needs it
-    (unmatched family member with no observed 0/0 / ./.), and cached by (chrom, pos)
-    so the same position is never queried twice. Process-local; never shared across
-    parallel units. `n_queries` counts the tabix region queries issued (for tests)."""
+    """Read-only depth lookup over pre-loaded maps. The depths for the snv-family
+    positions are read once per run (see `load_depth_map`) into `(chrom, pos)`-keyed
+    maps that are the same for every sample, so a lookup is an in-memory dict hit with
+    NO per-site subprocess. A position absent from a map resolves to None (treated as
+    below threshold), identical to a single-position tabix query that finds no row."""
 
-    def __init__(self, autosomes_depths_file, sex_depths_file):
-        self.autosomes_depths_file = autosomes_depths_file
-        self.sex_depths_file = sex_depths_file
-        self._autosomes = {}   # (chrom, pos) -> float | None
-        self._sex = {}         # (chrom, pos) -> {'male', 'female'} | None
-        self.n_queries = 0
+    def __init__(self, autosomes_depths, sex_depths):
+        self._autosomes = autosomes_depths   # (chrom, pos) -> float | None
+        self._sex = sex_depths               # (chrom, pos) -> {'male', 'female'} | None
 
     def autosomes(self, chrom, pos):
         """depth_mean for (chrom, pos), or None if the site is absent."""
-        key = (chrom, pos)
-        if key not in self._autosomes:
-            row = self._query(self.autosomes_depths_file, chrom, pos)
-            self._autosomes[key] = _to_float(row[2]) if row else None
-        return self._autosomes[key]
+        return self._autosomes.get((chrom, pos))
 
     def sex(self, chrom, pos):
         """{'male', 'female'} means for (chrom, pos), or None if the site is absent."""
-        key = (chrom, pos)
-        if key not in self._sex:
-            row = self._query(self.sex_depths_file, chrom, pos)
-            self._sex[key] = (
-                {'male': _to_float(row[2]), 'female': _to_float(row[4])} if row else None)
-        return self._sex[key]
+        return self._sex.get((chrom, pos))
 
-    def _query(self, depths_file, chrom, pos):
-        """One single-position tabix region query; returns the split row or None."""
-        self.n_queries += 1
-        for line in execute(f'tabix {depths_file} {chrom}:{pos}-{pos}', pipe=True):
-            if line.strip():
-                return line.split('\t')
-        return None
+
+def write_depth_targets(family_positions, targets_file):
+    """Write the snv-family positions as a sorted `chrom<TAB>pos` file used to filter
+    the depth tables in a single streaming pass."""
+    with open(targets_file, 'wt') as fh:
+        for chrom, pos in sorted(family_positions):
+            fh.write(f'{chrom}\t{pos}\n')
+    return targets_file
+
+def load_depth_map(depths_file, targets_file, is_sex):
+    """Read the depths for exactly the family positions from one depth table in a single
+    streaming pass, returning a `(chrom, pos)` -> value map. `is_sex` selects the row
+    shape: autosomes -> `depth_mean` (col 3) as float|None; sex -> `{'male','female'}`
+    (cols 3 and 5) as float|None.
+
+    The whole (large, whole-genome) table is decompressed once and filtered in C by an
+    `awk` hash join against the family positions, so only the ~family-sized survivor set
+    is parsed here — never the full table. Parsing matches the previous per-site query
+    exactly (same `_to_float(col)` on the same columns), so the map value at every
+    position equals what a single-position `tabix` query returned."""
+    cmd = (
+        f"bgzip -dc {depths_file} | "
+        f"awk -F'\\t' 'FNR==NR{{k[$1 FS $2]; next}} ($1 FS $2) in k' {targets_file} -")
+    depths = dict()
+    for line in execute(cmd, pipe=True):
+        if not line.strip():
+            continue
+        items = line.split('\t')
+        key = (items[0], int(items[1]))
+        if is_sex:
+            depths[key] = {'male': _to_float(items[2]), 'female': _to_float(items[4])}
+        else:
+            depths[key] = _to_float(items[2])
+    return depths
 
 
 def build_sample_header(sample, genome_file, out_file):
@@ -298,7 +346,7 @@ def process_sample(job):
         lookup=lookup,
         nonvariant=nonvariant,
         gender=job['gender'],
-        depth_provider=DepthProvider(job['autosomes_depths_file'], job['sex_depths_file']),
+        depth_provider=DepthProvider(*_shared_depths(job['depths_file'])),
         min_depth=job['min_depth'],
     )
 
