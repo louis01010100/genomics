@@ -31,6 +31,22 @@ def _index_depths(tsv_file: Path, text: str) -> Path:
     )
     return bgz_file
 
+
+def _bgz_vcf(path: Path, records: str) -> Path:
+    """Write a single-sample GT-only VCF (standard header + the given record lines,
+    which must be coordinate-sorted) and BGZF-compress it to `path`. build_lookup
+    range-reads this with bcftools, so it must be bgzip (not plain gzip)."""
+    plain = path.with_suffix('')   # drop the .bgz suffix
+    plain.write_text(
+        '##fileformat=VCFv4.2\n'
+        '##contig=<ID=chr1,length=1000000>\n'
+        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
+        + records
+    )
+    subprocess.run(f'bgzip -f -c {plain} > {path}', shell=True, check=True)
+    return path
+
 from genomics.truth import (
     load_coordinates,
     load_snv_family,
@@ -260,25 +276,65 @@ def test_fill_depth_is_per_member_position():
     assert gt['500'] == './.'
 
 
+@requires_tabix
 def test_build_lookup_splits_variant_and_nonvariant(tmp_path):
     """build_lookup returns the exact-match variant lookup plus a non-variant lookup
-    (chrom,pos) -> homref|nocall built from the retained ALT='.' records."""
+    (chrom,pos) -> homref|nocall built from the retained ALT='.' records, reading only
+    the requested family positions from the prepared VCF."""
     from genomics.truth import build_lookup
-    vcf = tmp_path / 'prepared.vcf.bgz'
-    with gzip.open(vcf, 'wt') as fh:
-        fh.write(
-            '##fileformat=VCFv4.2\n'
-            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
-            'chr1\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\n'    # variant
-            'chr1\t200\t.\tA\t.\t.\t.\t.\tGT\t0/0\n'    # observed homref
-            'chr1\t300\t.\tA\t.\t.\t.\t.\tGT\t./.\n'    # observed nocall
-        )
-    lookup, nonvariant = build_lookup(vcf)
+    vcf = _bgz_vcf(
+        tmp_path / 'prepared.vcf.bgz',
+        'chr1\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\n'    # variant
+        'chr1\t200\t.\tA\t.\t.\t.\t.\tGT\t0/0\n'    # observed homref
+        'chr1\t300\t.\tA\t.\t.\t.\t.\tGT\t./.\n',   # observed nocall
+    )
+    family_positions = frozenset({('chr1', 100), ('chr1', 200), ('chr1', 300)})
+    lookup, nonvariant = build_lookup(vcf, family_positions)
     assert lookup[match_key('chr1', 100, 'A', 'C')] == '0/1'
     # non-variant records do not pollute the variant lookup
     assert match_key('chr1', 200, 'A', '.') not in lookup
     assert nonvariant[('chr1', 200)] == 'homref'
     assert nonvariant[('chr1', 300)] == 'nocall'
+
+
+@requires_tabix
+def test_build_lookup_is_family_scoped_and_equivalent(tmp_path):
+    """The family-scoped build holds ONLY family-position keys, its dict size is bounded
+    by the family (not the record count), and its values equal a whole-genome parse
+    restricted to the family positions. A non-family record that merely SPANS a family
+    position (span-overlap of a range read) must not create a dict entry."""
+    from genomics.truth import build_lookup
+    records = []
+    # 500 non-family filler variants at chr1:1000..1499
+    for p in range(1000, 1500):
+        records.append((p, f'chr1\t{p}\t.\tA\tG\t.\t.\t.\tGT\t0/1\n'))
+    # the three family positions: one variant, one observed homref, one observed nocall
+    records.append((100, 'chr1\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\n'))
+    records.append((200, 'chr1\t200\t.\tA\t.\t.\t.\t.\tGT\t0/0\n'))
+    records.append((300, 'chr1\t300\t.\tA\t.\t.\t.\t.\tGT\t./.\n'))
+    # a non-family deletion at POS 298 spanning family position 300
+    records.append((298, 'chr1\t298\t.\tATT\tA\t.\t.\t.\tGT\t0/1\n'))
+    body = ''.join(line for _, line in sorted(records, key=lambda r: r[0]))
+    vcf = _bgz_vcf(tmp_path / 'prepared.vcf.bgz', body)
+    family_positions = frozenset({('chr1', 100), ('chr1', 200), ('chr1', 300)})
+
+    lookup, nonvariant = build_lookup(vcf, family_positions)
+
+    # I1: both dicts hold ONLY keys at family positions
+    assert all((chrom, pos) in family_positions for (chrom, pos, _ref, _alt) in lookup)
+    assert set(nonvariant) <= family_positions
+    # memory/scale: bounded by the family (3), not the record count (503)
+    assert len(lookup) + len(nonvariant) == 3
+    # equivalence vs a whole-genome parse restricted to the family positions
+    assert lookup[match_key('chr1', 100, 'A', 'C')] == '0/1'
+    assert nonvariant[('chr1', 200)] == 'homref'
+    assert nonvariant[('chr1', 300)] == 'nocall'
+    # a non-family filler position is absent from both dicts
+    assert match_key('chr1', 1000, 'A', 'G') not in lookup
+    assert ('chr1', 1000) not in nonvariant
+    # the POS-298 deletion spanning 300 must NOT introduce a non-family key
+    assert not any(pos == 298 for (_chrom, pos, _ref, _alt) in lookup)
+    assert ('chr1', 298) not in nonvariant
 
 
 def test_call_families_honors_observed_calls():

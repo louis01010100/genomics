@@ -110,6 +110,15 @@ def export_snv_truth(
         sample_dir.mkdir(parents=True, exist_ok=True)
         headers[sample] = build_sample_header(sample, genome_file, sample_dir / 'header.vcf')
 
+    # The set of (chrom, pos) matching ever consults — every snv-family member position.
+    # Derived once and shared across workers; each per-sample lookup is scoped to it so it
+    # is bounded by the snv-family, not the genome.
+    family_positions = frozenset(
+        (member['chrom'], member['pos'])
+        for members in families.values()
+        for member in members
+    )
+
     # Each input is already a single-sample, whole-genome VCF (e.g. `genomics samples`
     # output), so process each one directly into its truth, in parallel across samples.
     log_info('build per-sample truth (parallel over samples)')
@@ -119,6 +128,7 @@ def export_snv_truth(
             'vcf': sample2vcf[sample],
             'gender': sample2gender[sample],
             'families': families,
+            'family_positions': family_positions,
             'genome_file': genome_file,
             'autosomes_depths_file': autosomes_depths_file,
             'sex_depths_file': sex_depths_file,
@@ -281,7 +291,7 @@ def process_sample(job):
     tmp_base.mkdir(parents=True, exist_ok=True)
 
     prepared = prepare_sample(job['vcf'], genome_file, tmp_base)
-    lookup, nonvariant = build_lookup(prepared)
+    lookup, nonvariant = build_lookup(prepared, job['family_positions'])
 
     matched_lines, fill_lines = call_families(
         families=job['families'],
@@ -366,24 +376,50 @@ def prepare_sample(vcf_file, genome_file, tmp_base):
     return vcf.filepath
 
 
-def build_lookup(prepared_vcf):
-    """From the single-sample VCF: the exact-match variant lookup
-    (chrom, pos, ref, ALT-set) -> GT, plus a non-variant lookup (chrom, pos) ->
-    'homref'|'nocall' built from the retained ALT='.' records (observed 0/0 / ./.)."""
+def build_lookup(prepared_vcf, family_positions):
+    """From the single-sample VCF, restricted to the snv-family positions: the exact-match
+    variant lookup (chrom, pos, ref, ALT-set) -> GT, plus a non-variant lookup
+    (chrom, pos) -> 'homref'|'nocall' from the retained ALT='.' records (observed 0/0 / ./.).
+
+    Only the family positions are retained — a single streaming pass (`bcftools view -T`)
+    filters the prepared VCF in C, and only records whose own POS is a family position are
+    kept — so both dicts are bounded by the snv-family, not the genome. This is byte-identical,
+    for every key matching can consult, to a whole-genome build: `call_families` only ever
+    queries the dicts at snv-family member (chrom, pos), so every dropped key is one matching
+    never reads.
+
+    A streaming `-T` filter is used rather than an indexed `-R` range read: the family spans
+    ~10^5-10^6 scattered positions, for which one sequential pass is far faster than that many
+    random index seeks, and it needs no index (so `prepare_sample` stays index-free). The
+    prepared VCF is read exactly once, so an index would never be amortized.
+
+    `family_positions` is a set of (chrom, pos) covering every snv-family member."""
+    prepared_vcf = Path(prepared_vcf)
+
+    # Materialize the family positions as a sorted targets file (chrom, 1-based pos) for the
+    # streaming `-T` filter (no index required).
+    targets_file = prepared_vcf.parent / 'family.targets.tsv'
+    with targets_file.open('wt') as fh:
+        for chrom, pos in sorted(family_positions):
+            fh.write(f'{chrom}\t{pos}\n')
+
     lookup = dict()
     nonvariant = dict()
-    with gzip.open(prepared_vcf, 'rt') as fh:
-        for line in fh:
-            if line.startswith('#'):
-                continue
-            items = line.rstrip('\n').split('\t')
-            chrom, pos, _id, ref, alt = items[0], items[1], items[2], items[3], items[4]
-            gt = items[9].split(':')[0]
-            if alt == '.':
-                alleles = gt.replace('|', '/').split('/')
-                nonvariant[(chrom, int(pos))] = 'nocall' if '.' in alleles else 'homref'
-            else:
-                lookup[match_key(chrom, pos, ref, alt)] = gt
+    for line in execute(f'bcftools view -H -T {targets_file} {prepared_vcf}', pipe=True):
+        if not line.strip():
+            continue
+        items = line.rstrip('\n').split('\t')
+        chrom, pos, _id, ref, alt = items[0], items[1], items[2], items[3], items[4]
+        # Select on the record's own POS: a record merely spanning a family position
+        # (e.g. an indel returned by span-overlap) is not a family site.
+        if (chrom, int(pos)) not in family_positions:
+            continue
+        gt = items[9].split(':')[0]
+        if alt == '.':
+            alleles = gt.replace('|', '/').split('/')
+            nonvariant[(chrom, int(pos))] = 'nocall' if '.' in alleles else 'homref'
+        else:
+            lookup[match_key(chrom, pos, ref, alt)] = gt
     return lookup, nonvariant
 
 
