@@ -12,8 +12,8 @@ Exercised through the real CLI:
   * no-match fill: ONE record per family member (FEM1 fills the 3- and 2-ALT families)
   * homref vs nocall by autosome depth, and nocall on a site missing from the table
   * chrM haploid fill genotype
-  * per-sample VCF outputs: <sample>.truth.vcf.bgz (+.csi)
-  * one combined gzip TSV for all samples: truth.tsv.gz (sample_name-tagged rows)
+  * per-sample VCF outputs: samples/<sample>.truth.vcf.bgz (+.csi)
+  * per-sample gzip TSV: samples/<sample>.tsv.gz (header chrom pos id ref alt tgt)
 Sex-chromosome ploidy (haploid chrX/chrY, female-chrY nocall) is covered separately by
 the fixploidy unit test at real GRCh38 coordinates.
 """
@@ -180,30 +180,30 @@ def _read_tsv(path: Path):
 
 
 def _rows_for(outputs, sample):
-    _, rows = _read_tsv(outputs / 'truth.tsv.gz')
-    return [r for r in rows if r['sample_name'] == sample]
+    # per-sample gzipped TSV under samples/; no sample_name column (filename carries it)
+    _, rows = _read_tsv(outputs / 'samples' / f'{sample}.tsv.gz')
+    return rows
 
 
 def test_output_files_exist(outputs):
-    assert (outputs / 'truth.tsv.gz').exists()            # one combined tsv
+    assert not (outputs / 'truth.tsv.gz').exists()        # no combined tsv
+    samples = outputs / 'samples'
     for s in ('MALE1', 'FEM1'):
-        assert (outputs / f'{s}.truth.vcf.bgz').exists()
-        assert (outputs / f'{s}.truth.vcf.bgz.csi').exists()
-        assert not (outputs / f'{s}.truth.tsv.gz').exists()  # per-sample tsvs removed
+        assert (samples / f'{s}.truth.vcf.bgz').exists()
+        assert (samples / f'{s}.truth.vcf.bgz.csi').exists()
+        assert (samples / f'{s}.tsv.gz').exists()         # per-sample gzipped tsv
 
 
 def test_tsv_columns(outputs):
-    header, _ = _read_tsv(outputs / 'truth.tsv.gz')
-    assert header == ['sample_name', 'chrom', 'pos', 'id', 'ref', 'alt', 'tgt']
+    header, _ = _read_tsv(outputs / 'samples' / 'MALE1.tsv.gz')
+    assert header == ['chrom', 'pos', 'id', 'ref', 'alt', 'tgt']
 
 
-def test_combined_tsv_groups_samples(outputs):
-    _, rows = _read_tsv(outputs / 'truth.tsv.gz')
-    names = [r['sample_name'] for r in rows]
-    assert set(names) == {'MALE1', 'FEM1'}
-    # samples emitted in sorted order, grouped in contiguous blocks
-    assert names == sorted(names)
-    assert len(rows) == 6 + 11                            # MALE1 + FEM1 rows
+def test_per_sample_tsv_row_counts(outputs):
+    _, male = _read_tsv(outputs / 'samples' / 'MALE1.tsv.gz')
+    _, fem = _read_tsv(outputs / 'samples' / 'FEM1.tsv.gz')
+    assert len(male) == 6
+    assert len(fem) == 11
 
 
 def test_no_legacy_artifacts(outputs):
@@ -263,7 +263,8 @@ def test_female_fill_one_record_per_member(outputs):
 def test_truth_vcf_sorted_and_indexed(outputs):
     # index is usable and the VCF is coordinate-sorted
     out = subprocess.run(
-        ['bcftools', 'query', '-f', '%CHROM\t%POS\n', str(outputs / 'MALE1.truth.vcf.bgz')],
+        ['bcftools', 'query', '-f', '%CHROM\t%POS\n',
+         str(outputs / 'samples' / 'MALE1.truth.vcf.bgz')],
         check=True, capture_output=True, text=True,
     ).stdout.strip().split('\n')
     positions = [(c, int(p)) for c, p in (line.split('\t') for line in out)]
@@ -282,10 +283,11 @@ def test_determinism_input_order_and_threads(tmp_path):
     b = tmp_path / 'b'
     _run_snv_truth(fixture, genome, b, list(reversed(split_vcfs)), n_threads=8)
 
-    assert gzip.open(a / 'truth.tsv.gz', 'rt').read() == gzip.open(b / 'truth.tsv.gz', 'rt').read()
     for sample in ('MALE1', 'FEM1'):
-        assert (b / f'{sample}.truth.vcf.bgz').exists()
-        assert (b / f'{sample}.truth.vcf.bgz.csi').exists()
+        assert (gzip.open(a / 'samples' / f'{sample}.tsv.gz', 'rt').read()
+                == gzip.open(b / 'samples' / f'{sample}.tsv.gz', 'rt').read())
+        assert (b / 'samples' / f'{sample}.truth.vcf.bgz').exists()
+        assert (b / 'samples' / f'{sample}.truth.vcf.bgz.csi').exists()
 
 
 def test_backbone_file_flag_removed(tmp_path):
@@ -315,7 +317,7 @@ def test_multisample_input_fails(tmp_path):
     result = _run_snv_truth(fixture, genome, out, [fixture / 'input.vcf.bgz'], check=False)
     assert result.returncode != 0
     assert 'exactly one sample' in (result.stderr + result.stdout)
-    assert not (out / 'truth.tsv.gz').exists()
+    assert not (out / 'samples').exists()
 
 
 def test_unindexed_input_fails(tmp_path):
@@ -331,7 +333,7 @@ def test_unindexed_input_fails(tmp_path):
     result = _run_snv_truth(fixture, genome, out, [noidx, split_vcfs[1]], check=False)
     assert result.returncode != 0
     assert 'not indexed' in (result.stderr + result.stdout)
-    assert not (out / 'truth.tsv.gz').exists()
+    assert not (out / 'samples').exists()
 
 
 def test_unindexed_depth_table_fails(tmp_path):
@@ -345,4 +347,4 @@ def test_unindexed_depth_table_fails(tmp_path):
     result = _run_snv_truth(fixture, genome, out, _per_sample_vcfs(fixture), check=False)
     assert result.returncode != 0
     assert 'not indexed' in (result.stderr + result.stdout)
-    assert not (out / 'truth.tsv.gz').exists()
+    assert not (out / 'samples').exists()

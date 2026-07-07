@@ -11,7 +11,8 @@ family id (`fmid`) is the truth output's `id`.
 Each input VCF (bgzip-compressed and indexed) is a single-sample, whole-genome VCF
 (e.g. the output of `genomics samples`); its sole sample column names the sample. Each
 per-sample VCF is processed in parallel across samples into that sample's truth VCF and
-one combined `truth.tsv.gz`.
+gzipped TSV, written together under `<output-dir>/samples/` (`<sample>.truth.vcf.bgz`,
+its `.csi`, and `<sample>.tsv.gz`).
 """
 import gzip
 import math
@@ -155,6 +156,9 @@ def export_snv_truth(
 
     # Each input is already a single-sample, whole-genome VCF (e.g. `genomics samples`
     # output), so process each one directly into its truth, in parallel across samples.
+    # Per-sample outputs (truth VCF + gzipped TSV) are written together under samples/.
+    (output_dir / 'samples').mkdir(parents=True, exist_ok=True)
+
     log_info('build per-sample truth (parallel over samples)')
     process_jobs = [
         {
@@ -173,18 +177,13 @@ def export_snv_truth(
         }
         for sample in samples
     ]
-    unit_out = {}
     if n_threads > 1:
         with ProcessPool(n_threads) as pool:
-            for sample, body_path in pool.uimap(process_sample, process_jobs):
-                unit_out[sample] = Path(body_path)
+            for _sample in pool.uimap(process_sample, process_jobs):
+                pass
     else:
         for job in process_jobs:
-            sample, body_path = process_sample(job)
-            unit_out[sample] = Path(body_path)
-
-    log_info('combine truth into one tsv')
-    combine_tsv(samples, unit_out, output_dir / 'truth.tsv.gz')
+            process_sample(job)
 
     log_info('done')
 
@@ -377,14 +376,20 @@ def process_sample(job):
         for line in fixed_fill_lines:
             bfh.write(line + '\n')
 
+    samples_dir = job['output_dir'] / 'samples'
     vcf = Vcf(truth_txt, tmp_base).sort().index()
-    out_vcf = job['output_dir'] / f'{sample}.truth.vcf.bgz'
+    out_vcf = samples_dir / f'{sample}.truth.vcf.bgz'
     vcf.move_to(out_vcf)
 
+    # Per-sample gzipped TSV: header + the query body (chrom pos id ref alt tgt).
     body_file = tmp_base / 'body.tsv'
     write_body_tsv(out_vcf, body_file)
+    with gzip.open(samples_dir / f'{sample}.tsv.gz', 'wt') as out, body_file.open('rt') as fh:
+        out.write('chrom\tpos\tid\tref\talt\ttgt\n')
+        for line in fh:
+            out.write(line)
 
-    return sample, str(body_file)
+    return sample
 
 
 def write_body_tsv(vcf_file, output_file):
@@ -397,21 +402,6 @@ def write_body_tsv(vcf_file, output_file):
            f"      > {output_file}"
            '')
     execute(cmd)
-    return output_file
-
-
-def combine_tsv(samples, unit_out, output_file):
-    """Concatenate the per-sample TSV bodies into one gzip TSV, writing the header
-    once and prepending each row with its sample_name. Samples are emitted in sorted
-    order; rows within a sample are already contig+position sorted (the per-sample
-    truth VCF is sorted), so the combined output is deterministic."""
-    with gzip.open(output_file, 'wt') as out:
-        out.write('sample_name\tchrom\tpos\tid\tref\talt\ttgt\n')
-        for sample in sorted(samples):
-            body_file = unit_out[sample]
-            with body_file.open('rt') as fh:
-                for line in fh:
-                    out.write(f'{sample}\t{line}')
     return output_file
 
 
