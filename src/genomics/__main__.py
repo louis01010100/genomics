@@ -91,7 +91,6 @@ def main():
             vcf_files=_load_files(args.vcfs_file, args.vcf_files),
             autosomes_depths_file=Path(args.autosomes_depths_file),
             sex_depths_file=Path(args.sex_depths_file),
-            samples_file=Path(args.samples_file),
             genders_file=Path(args.genders_file),
             genome_file=Path(args.genome_file),
             output_dir=Path(args.output_dir),
@@ -198,7 +197,6 @@ def _config_gvcf_depth_parser(parser):
 def _config_snv_truth_parser(parser):
     parser.add_argument('--snv-family-file', required=True)
     parser.add_argument('--vcfs-file', required=False)
-    parser.add_argument('--samples-file', required=True)
     parser.add_argument('--genders-file', required=True)
     parser.add_argument('--autosomes-depths-file', required=True)
     parser.add_argument('--sex-depths-file', required=True)

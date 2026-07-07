@@ -42,8 +42,7 @@ from genomics.truth import (
     is_homref,
     fixploidy_lines,
     load_ploidy,
-    _require_single_chrom,
-    extract_and_split,
+    _require_single_sample,
     prepare_sample,
 )
 
@@ -376,70 +375,26 @@ def test_fixploidy_hg19_par_vs_nonpar(tmp_path):
 
 @requires_tabix
 @pytest.mark.skipif(shutil.which('bcftools') is None, reason='bcftools not on PATH')
-def test_require_single_chrom(tmp_path):
-    """An input VCF must contain exactly one chromosome; multi-contig -> error."""
-    def build(name, contigs):
-        header = '##fileformat=VCFv4.2\n'
-        for c in contigs:
-            header += f'##contig=<ID={c},length=1000000>\n'
-        header += '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n'
-        body = ''.join(f'{c}\t100\t.\tA\tC\t.\t.\t.\tGT\t0/1\n' for c in contigs)
+def test_require_single_sample(tmp_path):
+    """Each input VCF must contain exactly one sample; multi-sample -> error."""
+    def build(name, samples):
+        header = (
+            '##fileformat=VCFv4.2\n'
+            '##contig=<ID=chr1,length=1000000>\n'
+            '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t'
+            + '\t'.join(samples) + '\n')
+        gts = '\t'.join('0/1' for _ in samples)
         plain = tmp_path / f'{name}.vcf'
-        plain.write_text(header + body)
+        plain.write_text(header + f'chr1\t100\t.\tA\tC\t.\t.\t.\tGT\t{gts}\n')
         bgz = tmp_path / f'{name}.vcf.bgz'
         subprocess.run(f'bgzip -c {plain} > {bgz}', shell=True, check=True)
         subprocess.run(['bcftools', 'index', '-f', str(bgz)], check=True)
         return bgz
 
-    assert _require_single_chrom(build('one', ['chr1'])) == 'chr1'
+    assert _require_single_sample(build('one', ['S1'])) == 'S1'
     with pytest.raises(ValueError):
-        _require_single_chrom(build('two', ['chr1', 'chr2']))
-
-
-@requires_tabix
-def test_extract_and_split_strips_info(tmp_path):
-    # INFO, QUAL, FILTER, and every non-GT FORMAT field are discarded downstream, so
-    # pieces from extract_and_split must carry INFO/QUAL/FILTER='.' and FORMAT='GT'
-    # only (avoids ~88x write-amplification in bcftools +split). Selecting >1 sample
-    # with INFO/AC present also guards against `view -s` recomputing AC/AN into INFO.
-    vcf_text = (
-        '##fileformat=VCFv4.2\n'
-        '##contig=<ID=chr1>\n'
-        '##FILTER=<ID=PASS,Description="passed">\n'
-        '##INFO=<ID=AC,Number=A,Type=Integer,Description="allele count">\n'
-        '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
-        '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="depth">\n'
-        '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="allelic depths">\n'
-        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\n'
-        'chr1\t100\t.\tA\tG\t50\tPASS\tAC=3\tGT:DP:AD\t0/1:30:15,15\t1/1:40:0,40\n'
-    )
-    plain = tmp_path / 'in.vcf'
-    plain.write_text(vcf_text)
-    subprocess.run(f'bgzip -f {plain}', shell=True, check=True)
-    bgz = tmp_path / 'in.vcf.bgz'
-    (tmp_path / 'in.vcf.gz').rename(bgz)
-    subprocess.run(['bcftools', 'index', '-f', str(bgz)], check=True)
-
-    chrom, pieces = extract_and_split({
-        'path': bgz,
-        'chrom': 'chr1',
-        'targets_present': ['S1', 'S2'],
-        'tmp_dir': tmp_path / 'work',
-    })
-
-    assert chrom == 'chr1'
-    assert set(pieces) == {'S1', 'S2'}
-    for path in pieces.values():
-        rows = subprocess.run(
-            ['bcftools', 'view', '-H', str(path)],
-            capture_output=True, text=True, check=True).stdout.splitlines()
-        assert rows, f'no records in {path}'
-        for r in rows:
-            cols = r.split('\t')
-            assert cols[5] == '.', f'QUAL not stripped: {cols[5]}'
-            assert cols[6] == '.', f'FILTER not stripped: {cols[6]}'
-            assert cols[7] == '.', f'INFO not stripped: {cols[7]}'
-            assert cols[8] == 'GT', f'FORMAT not GT-only: {cols[8]}'
+        _require_single_sample(build('two', ['S1', 'S2']))
 
 
 @requires_tabix

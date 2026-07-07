@@ -132,7 +132,6 @@ def _run_snv_truth(fixture: Path, genome: Path, out: Path, vcf_args, n_threads=1
     return subprocess.run(
         [sys.executable, '-m', 'genomics', 'snv-truth',
          '--snv-family-file', str(fixture / 'snv-family.tsv.gz'),
-         '--samples-file', str(fixture / 'samples.tsv'),
          '--genders-file', str(fixture / 'genders.tsv'),
          '--autosomes-depths-file', str(fixture / 'autosomes-depth.tsv.bgz'),
          '--sex-depths-file', str(fixture / 'sex-depth.tsv.bgz'),
@@ -147,19 +146,22 @@ def _run(work: Path):
     fixture = work / 'fixture'
     genome = _build_fixture(fixture)
     out = work / 'out'
-    # inputs must be one chromosome per file
-    _run_snv_truth(fixture, genome, out, _split_input_by_chrom(fixture))
+    # inputs are per-sample, whole-genome VCFs (as `genomics samples` emits)
+    _run_snv_truth(fixture, genome, out, _per_sample_vcfs(fixture))
     return out
 
 
-def _split_input_by_chrom(fixture: Path):
-    """Split the single multi-sample input into per-chromosome, indexed VCFs (each
-    still multi-sample) — a by-chromosome split of the same data."""
+def _per_sample_vcfs(fixture: Path):
+    """Split the multi-sample input into per-sample, whole-genome, indexed VCFs the way
+    `genomics samples` does: `bcftools view -s <sample> --no-update` keeps every ALT so
+    the truth pipeline's own per-sample trim/normalize still runs."""
     src = fixture / 'input.vcf.bgz'
     paths = []
-    for chrom in ('chr1', 'chrM'):
-        p = fixture / f'{chrom}.vcf.bgz'
-        subprocess.run(f'bcftools view -r {chrom} -O z -o {p} {src}', shell=True, check=True)
+    for sample in ('MALE1', 'FEM1'):
+        p = fixture / f'{sample}.vcf.bgz'
+        subprocess.run(
+            f'bcftools view -s {sample} --no-update -O z -o {p} {src}',
+            shell=True, check=True)
         subprocess.run(['bcftools', 'index', '-f', str(p)], check=True)
         paths.append(p)
     return paths
@@ -269,11 +271,11 @@ def test_truth_vcf_sorted_and_indexed(outputs):
 
 
 def test_determinism_input_order_and_threads(tmp_path):
-    # Same per-chromosome inputs in different order and thread counts -> byte-identical
-    # output (AC5). n_threads > sample count also exercises per-sample parallelism (AC4).
+    # Same per-sample inputs in different order and thread counts -> byte-identical
+    # output. n_threads > sample count also exercises per-sample parallelism.
     fixture = tmp_path / 'fixture'
     genome = _build_fixture(fixture)
-    split_vcfs = _split_input_by_chrom(fixture)
+    split_vcfs = _per_sample_vcfs(fixture)
 
     a = tmp_path / 'a'
     _run_snv_truth(fixture, genome, a, split_vcfs, n_threads=1)
@@ -286,18 +288,6 @@ def test_determinism_input_order_and_threads(tmp_path):
         assert (b / f'{sample}.truth.vcf.bgz.csi').exists()
 
 
-def test_extract_once_per_input(tmp_path):
-    # Each input (chromosome) is extracted exactly once: one extraction dir per input
-    # file, not one per (sample, chromosome) (AC1).
-    fixture = tmp_path / 'fixture'
-    genome = _build_fixture(fixture)
-    split_vcfs = _split_input_by_chrom(fixture)   # two inputs: chr1, chrM
-    out = tmp_path / 'out'
-    _run_snv_truth(fixture, genome, out, split_vcfs)
-    chrom_dirs = sorted(p.name for p in (out / 'tmp' / 'extract').iterdir() if p.is_dir())
-    assert chrom_dirs == ['chr1', 'chrM']         # one per input, not 4 (per sample x chrom)
-
-
 def test_backbone_file_flag_removed(tmp_path):
     # the old --backbone-file option is gone; the CLI rejects it
     fixture = tmp_path / 'fixture'
@@ -305,7 +295,6 @@ def test_backbone_file_flag_removed(tmp_path):
     result = subprocess.run(
         [sys.executable, '-m', 'genomics', 'snv-truth',
          '--backbone-file', str(fixture / 'snv-family.tsv.gz'),
-         '--samples-file', str(fixture / 'samples.tsv'),
          '--genders-file', str(fixture / 'genders.tsv'),
          '--autosomes-depths-file', str(fixture / 'autosomes-depth.tsv.bgz'),
          '--sex-depths-file', str(fixture / 'sex-depth.tsv.bgz'),
@@ -318,14 +307,14 @@ def test_backbone_file_flag_removed(tmp_path):
     assert '--snv-family-file' in result.stderr
 
 
-def test_multichromosome_input_fails(tmp_path):
-    # An input spanning more than one chromosome is rejected up front, no output (AC2).
+def test_multisample_input_fails(tmp_path):
+    # An input holding more than one sample is rejected up front, no output.
     fixture = tmp_path / 'fixture'
-    genome = _build_fixture(fixture)   # builds the indexed multi-chrom input.vcf.bgz
+    genome = _build_fixture(fixture)   # input.vcf.bgz has two samples (MALE1, FEM1)
     out = tmp_path / 'out'
     result = _run_snv_truth(fixture, genome, out, [fixture / 'input.vcf.bgz'], check=False)
     assert result.returncode != 0
-    assert 'exactly one chromosome' in (result.stderr + result.stdout)
+    assert 'exactly one sample' in (result.stderr + result.stdout)
     assert not (out / 'truth.tsv.gz').exists()
 
 
@@ -333,7 +322,7 @@ def test_unindexed_input_fails(tmp_path):
     # An input lacking an index aborts with an actionable error, before any output.
     fixture = tmp_path / 'fixture'
     genome = _build_fixture(fixture)
-    split_vcfs = _split_input_by_chrom(fixture)
+    split_vcfs = _per_sample_vcfs(fixture)
 
     noidx = fixture / 'noidx.vcf.bgz'
     shutil.copy(split_vcfs[0], noidx)   # copy a per-chrom input WITHOUT its index
@@ -353,7 +342,7 @@ def test_unindexed_depth_table_fails(tmp_path):
     (fixture / 'autosomes-depth.tsv.bgz.tbi').unlink()   # drop the tabix index
 
     out = tmp_path / 'out'
-    result = _run_snv_truth(fixture, genome, out, _split_input_by_chrom(fixture), check=False)
+    result = _run_snv_truth(fixture, genome, out, _per_sample_vcfs(fixture), check=False)
     assert result.returncode != 0
     assert 'not indexed' in (result.stderr + result.stdout)
     assert not (out / 'truth.tsv.gz').exists()
