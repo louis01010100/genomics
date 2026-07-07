@@ -264,6 +264,26 @@ def test_load_depth_map_equals_per_site_query(tmp_path):
     assert set(m) == {('chr1', 100), ('chr2', 50), ('chr2', 60)}
 
 
+def test_write_depth_targets_emits_bed(tmp_path):
+    """The regions file must be BED (chrom, 0-based start, 1-based end = single-base
+    interval per family position), sorted — the format `tabix -R` consumes."""
+    from genomics.truth import write_depth_targets
+    out = write_depth_targets(
+        frozenset({('chr1', 100), ('chr1', 5), ('chr2', 50)}), tmp_path / 'regions.bed')
+    lines = out.read_text().splitlines()
+    assert lines == ['chr1\t4\t5', 'chr1\t99\t100', 'chr2\t49\t50']
+
+
+def test_load_depth_map_uses_tabix_index_not_awk():
+    """The depth fetch must use a tabix index range read (fetch only the family sites),
+    not an awk whole-table scan."""
+    import inspect
+    from genomics.truth import load_depth_map
+    src = inspect.getsource(load_depth_map)
+    assert 'awk' not in src
+    assert 'tabix -R' in src
+
+
 def test_depth_provider_does_no_subprocess(monkeypatch):
     """The map-backed provider must resolve depths from memory with ZERO subprocess —
     no per-site tabix. Monkeypatch execute() to blow up if anything shells out."""

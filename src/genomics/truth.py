@@ -271,34 +271,43 @@ class DepthProvider:
         return self._sex.get((chrom, pos))
 
 
-def write_depth_targets(family_positions, targets_file):
-    """Write the snv-family positions as a sorted `chrom<TAB>pos` file used to filter
-    the depth tables in a single streaming pass."""
-    with open(targets_file, 'wt') as fh:
+def write_depth_targets(family_positions, regions_file):
+    """Write the snv-family positions as a sorted BED regions file — one single-base
+    interval per position (`chrom`, 0-based start `pos-1`, 1-based end `pos`) — the format
+    `tabix -R` consumes to fetch only those sites from a depth table."""
+    with open(regions_file, 'wt') as fh:
         for chrom, pos in sorted(family_positions):
-            fh.write(f'{chrom}\t{pos}\n')
-    return targets_file
+            fh.write(f'{chrom}\t{pos - 1}\t{pos}\n')
+    return regions_file
 
-def load_depth_map(depths_file, targets_file, is_sex):
-    """Read the depths for exactly the family positions from one depth table in a single
-    streaming pass, returning a `(chrom, pos)` -> value map. `is_sex` selects the row
+def load_depth_map(depths_file, regions_file, is_sex):
+    """Read the depths for exactly the family positions from one depth table via a tabix
+    index range read, returning a `(chrom, pos)` -> value map. `is_sex` selects the row
     shape: autosomes -> `depth_mean` (col 3) as float|None; sex -> `{'male','female'}`
     (cols 3 and 5) as float|None.
 
-    The whole (large, whole-genome) table is decompressed once and filtered in C by an
-    `awk` hash join against the family positions, so only the ~family-sized survivor set
-    is parsed here — never the full table. Parsing matches the previous per-site query
-    exactly (same `_to_float(col)` on the same columns), so the map value at every
-    position equals what a single-position `tabix` query returned."""
-    cmd = (
-        f"bgzip -dc {depths_file} | "
-        f"awk -F'\\t' 'FNR==NR{{k[$1 FS $2]; next}} ($1 FS $2) in k' {targets_file} -")
+    `tabix -R <regions_file>` uses the depth table's index to fetch only the blocks holding
+    the snv-family sites — the whole table is never scanned. Depth rows are single positions,
+    so the single-base regions return exactly the rows at family positions; a POS-membership
+    guard (against the regions' 1-based ends) drops any header/overlap row. Parsing matches
+    the previous per-site query exactly (same `_to_float(col)` on the same columns), so the
+    map value at every position equals what a single-position `tabix` query returned."""
+    family = set()
+    with open(regions_file, 'rt') as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            chrom, _start, end = line.rstrip('\n').split('\t')
+            family.add((chrom, int(end)))
+
     depths = dict()
-    for line in execute(cmd, pipe=True):
+    for line in execute(f'tabix -R {regions_file} {depths_file}', pipe=True):
         if not line.strip():
             continue
         items = line.split('\t')
         key = (items[0], int(items[1]))
+        if key not in family:
+            continue
         if is_sex:
             depths[key] = {'male': _to_float(items[2]), 'female': _to_float(items[4])}
         else:
