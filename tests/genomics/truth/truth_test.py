@@ -155,6 +155,21 @@ def test_group_families_by_fmid(tmp_path):
     assert len(fams['FM-1']) == 4 and len(fams['FM-2']) == 1
 
 
+def test_group_families_dedupes_members_by_match_key(tmp_path):
+    # the exploded (one-row-per-probeset) snv-family TSV repeats a coordinate across
+    # probesets; group_families must collapse them to one member per distinct match_key
+    # (chrom,pos,ref,ALT-set), keeping first-seen order.
+    rows = [
+        {'id': 'FM-1', 'chrom': 'chr1', 'pos': 100, 'ref': 'A', 'alt': 'C'},
+        {'id': 'FM-1', 'chrom': 'chr1', 'pos': 100, 'ref': 'A', 'alt': 'C'},  # dup coord (2nd probeset)
+        {'id': 'FM-1', 'chrom': 'chr1', 'pos': 100, 'ref': 'A', 'alt': 'c'},  # same alt, lowercase
+        {'id': 'FM-1', 'chrom': 'chr1', 'pos': 100, 'ref': 'A', 'alt': 'G'},  # distinct alt-set
+    ]
+    fams = group_families(rows)
+    assert len(fams['FM-1']) == 2                       # {C} and {G}; the duplicate Cs collapse
+    assert [m['alt'] for m in fams['FM-1']] == ['C', 'G']  # first-seen order preserved
+
+
 class _CountingProvider:
     """Duck-typed depth provider for pure call_families logic tests: serves depths
     from in-memory dicts and counts how many times it is consulted."""

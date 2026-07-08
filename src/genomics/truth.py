@@ -595,10 +595,23 @@ def load_snv_family(snv_family_file):
 
 
 def group_families(coordinates):
-    """Group coordinate records into SNP families by the exact ID string."""
+    """Group coordinate records into SNP families by the exact ID string.
+
+    Within a family, members are de-duplicated by `match_key` (chrom, pos, ref,
+    ALT-set), keeping first-seen order: the exploded one-row-per-probeset snv-family
+    TSV repeats a coordinate across its probesets, so without this collapse a matched
+    or filled site would emit one duplicate truth record per probeset. A no-op on the
+    one-coordinate-per-row form (each member already has a distinct match_key)."""
     families = OrderedDict()
+    seen = dict()   # family id -> set of match_keys already kept
     for row in coordinates:
-        families.setdefault(row['id'], []).append(row)
+        fam_id = row['id']
+        key = match_key(row['chrom'], row['pos'], row['ref'], row['alt'])
+        keys = seen.setdefault(fam_id, set())
+        if key in keys:
+            continue
+        keys.add(key)
+        families.setdefault(fam_id, []).append(row)
     return families
 
 
