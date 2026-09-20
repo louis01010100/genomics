@@ -80,12 +80,22 @@ def init_logging(log_file: Path):
     h1 = logging.FileHandler(log_file, "w")
     h1.setLevel(logging.DEBUG)
 
-    logging.basicConfig(
-        level=logging.DEBUG,
-        handlers=[h0, h1],
-        format="[%(levelname)s] %(asctime)s\t%(message)s",
+    logging.addLevelName(logging.WARNING, "WARN")
+    logging.addLevelName(logging.CRITICAL, "FATAL")
+    formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)-5s\t%(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        if getattr(handler, "genomics_handler", False):
+            root.removeHandler(handler)
+            handler.close()
+    for handler in (h0, h1):
+        handler.setFormatter(formatter)
+        handler.genomics_handler = True
+        root.addHandler(handler)
+    root.setLevel(logging.DEBUG)
 
 
 def log_info(message: str):

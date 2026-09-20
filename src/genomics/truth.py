@@ -18,7 +18,9 @@ import gzip
 import math
 import pickle
 from collections import OrderedDict
+from datetime import datetime
 from importlib import resources
+from importlib.metadata import version as _get_version
 from pathlib import Path
 
 from pathos.multiprocessing import ProcessPool
@@ -28,6 +30,7 @@ from .utils import (
     load_dict,
     init_logging,
     log_start,
+    log_stop,
     log_info,
     execute,
 )
@@ -81,8 +84,10 @@ def export_snv_truth(
     assembly: str = 'hg38',
     prod: bool = True,
 ):
+    start = datetime.now()
     output_dir.mkdir(parents=True, exist_ok=True)
-    init_logging(output_dir / 'snv_truth.log')
+    init_logging(output_dir / 'snv-truth.log')
+    banner = f'genomics snv-truth {_get_version("genomics")}'
 
     info = OrderedDict()
     info['snv-family-file'] = snv_family_file
@@ -95,7 +100,7 @@ def export_snv_truth(
     info['min-depth'] = min_depth
     info['assembly'] = assembly
     info['n-threads'] = n_threads
-    log_start(banner='SNV Truth Creation', info=info)
+    log_start(banner=banner, info=info)
 
     tmp_dir = output_dir / 'tmp'
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -186,6 +191,7 @@ def export_snv_truth(
             process_sample(job)
 
     log_info('done')
+    log_stop(banner, start, datetime.now())
 
 
 def _index_path(vcf_file):

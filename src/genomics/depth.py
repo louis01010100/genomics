@@ -1,13 +1,15 @@
 import shutil
 import numpy as np
 import pandas as pd
+from datetime import datetime
+from importlib.metadata import version as _get_version
 from pathlib import Path
 from subprocess import PIPE, Popen
 from collections import OrderedDict
 from pathos.multiprocessing import ProcessPool
 import multiprocess.context as ctx
 
-from .utils import load_dict, init_logging, log_start, log_info, execute
+from .utils import load_dict, init_logging, log_start, log_stop, log_info, execute
 
 
 ctx._force_start_method('spawn')
@@ -26,13 +28,15 @@ def export_cram_depths(
     n_threads: int,
     prod: bool = False,
 ):
+    start = datetime.now()
 
     if prod:
         shutil.rmtree(output_dir, ignore_errors=True)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    init_logging(output_dir / 'depth.log')
+    init_logging(output_dir / 'cram-depth.log')
+    banner = f'genomics cram-depth {_get_version("genomics")}'
 
     info = OrderedDict()
     info['crams-file'] = crams_file
@@ -41,7 +45,7 @@ def export_cram_depths(
     info['output-dir'] = output_dir
     info['n-threads'] = n_threads
 
-    log_start('CRAM-based Whole-Contig Read Depth', info)
+    log_start(banner=banner, info=info)
 
     sample2cram = load_dict(crams_file)
     sample2gender = load_dict(genders_file)
@@ -102,6 +106,7 @@ def export_cram_depths(
     bgzip_index(sex_file, n_threads)
 
     log_info('Done')
+    log_stop(banner, start, datetime.now())
 
 
 def bgzip_index(tsv_file: Path, n_threads: int = 1) -> Path:

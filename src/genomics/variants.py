@@ -1,7 +1,12 @@
+from collections import OrderedDict
+from datetime import datetime
+from importlib.metadata import version as _get_version
+from pathlib import Path
 from .genome import Genome
 import logging
 from .variant import Variant, sync
 from .vcf import fetch_variants
+from .utils import init_logging, log_start, log_stop
 import polars as pl
 from pathos.multiprocessing import ProcessPool
 
@@ -175,6 +180,19 @@ def _process(batch):
 # data1_file must contains the VCF 4-tuple
 # dat2_file must be an indexed VCF file with the ID column populated
 def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_size):
+    start = datetime.now()
+    log_dir = Path(output_file).parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    init_logging(log_dir / 'varmatch.log')
+    banner = f'genomics varmatch {_get_version("genomics")}'
+    log_start(banner=banner, info=OrderedDict([
+        ('data1-file', data1_file),
+        ('data2-file', data2_file),
+        ('genome-file', genome_file),
+        ('output-file', output_file),
+        ('n-threads', n_threads),
+        ('batch-size', batch_size),
+    ]))
 
     bag = []
 
@@ -193,12 +211,11 @@ def varmatch(data1_file, data2_file, genome_file, output_file, n_threads, batch_
             for results in pool.uimap(_process, _batches(records, data2_file, genome_file, batch_size)):
                 bag.extend(results)
                 n_done += len(results)
-                print(f'progress: {(n_done / n_total) * 100:.2f}%',
-                      end='\r',
-                      flush=True)
+                logging.info(f'progress: {(n_done / n_total) * 100:.2f}%')
 
     result =  pl.from_dicts(bag, infer_schema_length=None)
     result.write_csv(output_file, include_header = True, separator = '\t')
+    log_stop(banner, start, datetime.now())
 
 
 def concat_snv(snv: list):

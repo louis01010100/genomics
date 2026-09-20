@@ -83,7 +83,7 @@ def test_output_is_thread_invariant(tmp_path):
 def test_only_expected_files(outputs):
     assert sorted(p.name for p in outputs.iterdir()) == [
         'autosomes-depth.tsv.bgz', 'autosomes-depth.tsv.bgz.tbi',
-        'depth.log',
+        'cram-depth.log',
         'sex-depth.tsv.bgz', 'sex-depth.tsv.bgz.tbi',
     ]
     # no per-sample per-position depth artifacts left behind

@@ -1,4 +1,7 @@
+from collections import OrderedDict
 from datetime import datetime
+from importlib.metadata import version as _get_version
+import logging
 import polars as pl
 import json
 import pgzip
@@ -10,7 +13,7 @@ from .variant import Variant, sync, get_max_region
 import gzip
 from ncls import NCLS
 from pathos.multiprocessing import ProcessPool
-from .utils import chroms
+from .utils import chroms, init_logging, log_start, log_stop
 
 from .vcf import Vcf
 
@@ -129,8 +132,18 @@ def create_db(
     output_dir: Path,
     n_threads: int,
 ):
+    start = datetime.now()
 
     output_dir.mkdir(exist_ok = True)
+
+    init_logging(output_dir / 'dbsnp-createdb.log')
+    banner = f'genomics dbsnp-createdb {_get_version("genomics")}'
+    log_start(banner=banner, info=OrderedDict([
+        ('dbsnp-vcf-file', dbsnp_vcf_file),
+        ('genome-file', genome_file),
+        ('output-dir', output_dir),
+        ('n-threads', n_threads),
+    ]))
 
     # # 64 threads, 25 min
     _chop(dbsnp_vcf_file, output_dir, n_threads)
@@ -140,6 +153,8 @@ def create_db(
 
     _create_idxs(output_dir, n_threads)
 
+    log_stop(banner, start, datetime.now())
+
 
 def normalize(
     dbsnp_vcf_file: Path,
@@ -148,11 +163,22 @@ def normalize(
     genome_index_file: Path,
     n_threads: int,
 ):
+    start = datetime.now()
     if output_dir.exists():
         shutil.rmtree(output_dir)
 
     tmp_dir = output_dir / 'tmp'
     tmp_dir.mkdir(parents=True)
+
+    init_logging(output_dir / 'dbsnp-normalize.log')
+    banner = f'genomics dbsnp-normalize {_get_version("genomics")}'
+    log_start(banner=banner, info=OrderedDict([
+        ('dbsnp-vcf-file', dbsnp_vcf_file),
+        ('genome-file', genome_file),
+        ('genome-index-file', genome_index_file),
+        ('output-dir', output_dir),
+        ('n-threads', n_threads),
+    ]))
 
     vcf = Vcf(dbsnp_vcf_file, tmp_dir, n_threads)
 
@@ -169,6 +195,8 @@ def normalize(
         .drop_info() \
         .normalize(genome_file) \
         .move_to(output_dir / 'dbsnp.vcf.bgz')
+
+    log_stop(banner, start, datetime.now())
 
 def _create_idxs(output_dir, n_threads):
 
@@ -218,7 +246,7 @@ def _create_idxs(output_dir, n_threads):
 
     with ProcessPool(n_threads) as pool:
         for result in pool.uimap(process, jobs(output_dir)):
-            print(result)
+            logging.info(result)
 
 
 def _create_db(
@@ -314,7 +342,7 @@ def _create_db(
 
     with ProcessPool(n_threads) as pool:
         for result in pool.uimap(process, jobs(output_dir, genome_file)):
-            print(result)
+            logging.info(result)
 
 
 
@@ -430,6 +458,16 @@ def _chop(dbsnp_vcf_file, tmp_dir, n_threads, blocksize = PGZIP_BLOCK_SIZE):
 
 
 def merged2map(input_json_file, output_tsv_file, n_threads, batch_size=100000):
+    start = datetime.now()
+    log_dir = Path(output_tsv_file).parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    init_logging(log_dir / 'dbsnp-merged2map.log')
+    banner = f'genomics dbsnp-merged2map {_get_version("genomics")}'
+    log_start(banner=banner, info=OrderedDict([
+        ('input-json-file', input_json_file),
+        ('output-tsv-file', output_tsv_file),
+        ('n-threads', n_threads),
+    ]))
 
     def jobs(input_json_file):
         bag = list()
@@ -485,6 +523,8 @@ def merged2map(input_json_file, output_tsv_file, n_threads, batch_size=100000):
 
     with gzip.open(output_tsv_file, 'wt') as fh:
         fh.write(data.write_csv(include_header = True, separator = '\t'))
+
+    log_stop(banner, start, datetime.now())
 
 
 

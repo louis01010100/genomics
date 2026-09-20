@@ -1,6 +1,11 @@
+from collections import OrderedDict
+from datetime import datetime
+from importlib.metadata import version as _get_version
 from pathlib import Path
 
 import polars as pl
+
+from .utils import init_logging, log_start, log_stop
 
 
 GFF3_COLUMNS = [
@@ -37,7 +42,18 @@ GFF3_COLUMNS = [
 ZERO_BASED=True
 
 def export(genes_file: Path, gene_names_file: Path, output_file: Path):
+    start = datetime.now()
+    log_dir = output_file.parent if output_file else Path.cwd()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    init_logging(log_dir / 'export-gene.log')
+    banner = f'genomics export-gene {_get_version("genomics")}'
+    log_start(banner=banner, info=OrderedDict([
+        ('genes-file', genes_file),
+        ('gene-names-file', gene_names_file),
+        ('output-file', output_file),
+    ]))
     export_gencode_gene(genes_file, gene_names_file, output_file)
+    log_stop(banner, start, datetime.now())
 
 
 def export_gencode_gene(genes_file: Path, gene_names_file: Path, output_file):

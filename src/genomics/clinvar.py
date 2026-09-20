@@ -1,8 +1,12 @@
 import shutil
+from collections import OrderedDict
+from datetime import datetime
+from importlib.metadata import version as _get_version
 from pathlib import Path
 
 import polars as pl
 
+from .utils import init_logging, log_start, log_stop
 from .vcf import Vcf, concat
 
 
@@ -13,9 +17,20 @@ def process(
     genome_index_file: Path,
     output_dir: Path,
 ):
+    start = datetime.now()
 
     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True)
+
+    init_logging(output_dir / 'clinvar.log')
+    banner = f'genomics clinvar {_get_version("genomics")}'
+    log_start(banner=banner, info=OrderedDict([
+        ('clinvar-vcf-file', clinvar_vcf_file),
+        ('clinvar-papu-vcf-file', clinvar_papu_vcf_file),
+        ('genome-file', genome_file),
+        ('genome-index-file', genome_index_file),
+        ('output-dir', output_dir),
+    ]))
 
     tmp_dir = output_dir / 'tmp'
     tmp_dir.mkdir(parents=True)
@@ -69,6 +84,8 @@ def process(
         has_header=True,
         separator='\t',
     )
+
+    log_stop(banner, start, datetime.now())
 
 
 def target_chroms():

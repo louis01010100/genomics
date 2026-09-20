@@ -74,7 +74,7 @@ def test_export_samples_worked_example(tmp_path):
 
     # Flat samples/ folder; duplicate B collapsed. Top level is only samples/
     # (tmp/ removed on success).
-    assert sorted(p.name for p in out.iterdir()) == ['samples']
+    assert sorted(p.name for p in out.iterdir()) == ['samples', 'samples.log']
     sdir = out / 'samples'
     for s in ('A', 'B', 'C'):
         assert (sdir / f'{s}.vcf.bgz').exists()
@@ -129,7 +129,7 @@ def test_warn_and_continue_on_absent(tmp_path, caplog):
     # Present sample A is produced; absent Z is skipped with a warning; success.
     assert (out / 'samples' / 'A.vcf.bgz').exists()
     assert not (out / 'samples' / 'Z.vcf.bgz').exists()
-    assert sorted(p.name for p in out.iterdir()) == ['samples']
+    assert sorted(p.name for p in out.iterdir()) == ['samples', 'samples.log']
     assert [p.name for p in (out / 'samples').glob('*.vcf.bgz')] == ['A.vcf.bgz']
     assert 'Z' in caplog.text
 

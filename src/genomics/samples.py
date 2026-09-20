@@ -1,9 +1,13 @@
 import logging
 import shutil
+from collections import OrderedDict
+from datetime import datetime
+from importlib.metadata import version as _get_version
 from pathlib import Path
 
 from pathos.multiprocessing import ProcessPool
 
+from .utils import init_logging, log_start, log_stop
 from .vcf import Vcf, concat
 
 
@@ -12,6 +16,7 @@ def export_samples(vcf_files, samples_file, output_dir, n_threads=1):
     target sample under `output_dir`. Each per-sample VCF concatenates that
     sample's records across every source VCF that contains it. See the
     genomics `samples` spec."""
+    start = datetime.now()
     output_dir = Path(output_dir)
     samples = _load_samples(Path(samples_file))
     vcf_files = [Path(vcf_file) for vcf_file in vcf_files]
@@ -20,6 +25,15 @@ def export_samples(vcf_files, samples_file, output_dir, n_threads=1):
     staging = tmp_dir / 'staging'
     tmp_dir.mkdir(parents=True, exist_ok=True)
     staging.mkdir(parents=True, exist_ok=True)
+
+    init_logging(output_dir / 'samples.log')
+    banner = f'genomics samples {_get_version("genomics")}'
+    log_start(banner=banner, info=OrderedDict([
+        ('samples-file', samples_file),
+        ('n_vcf_files', len(vcf_files)),
+        ('output-dir', output_dir),
+        ('n-threads', n_threads),
+    ]))
 
     # Stage 1: up-front presence check -- union of the sources' header samples.
     # Absent-from-all samples warn and are skipped; if none are present, error.
@@ -92,6 +106,8 @@ def export_samples(vcf_files, samples_file, output_dir, n_threads=1):
                 shutil.move(str(piece), str(samples_dir / piece.name))
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    log_stop(banner, start, datetime.now())
 
 
 def _build_sample(sample, pieces, staging, tmp_dir):
